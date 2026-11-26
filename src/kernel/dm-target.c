@@ -84,6 +84,27 @@ extern int swapz_mm_broker_owner_finish_close(swapz_u64, swapz_u64);
 #define SWAPZ_ROUND094_GENERATION_PAGES 16U
 #define SWAPZ_ROUND094_BROKER_SLOTS 8U
 #endif
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* The staging manifest must select and verify the actual R096 retry
+ * postimages before defining the retry marker. It is not an activation bit.
+ */
+#if !defined(SWAPZ_ROUND094_TARGET_OWNER_TEST) || \
+    !defined(SWAPZ_SHARED_STORAGE_DECODER_TEST) || \
+    !defined(SWAPZ_ROUND096_OWNER_RETRY_TEST)
+#error "R097 gated target requires actual shared storage and staged owner retry"
+#endif
+#include "zswap-original-storage-shared-decoder.h"
+#endif
+#if defined(SWAPZ_ROUND097_TARGET_OBSERVATION_TEST)
+#if !defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+#error "R097 observation requires the guarded gated target"
+#endif
+/* Frozen proposed built-in RCU wrapper ABI. No recorder ownership here. */
+struct swapz_observation_record;
+extern bool swapz_trial_observation_active(void);
+extern u64 swapz_trial_observation_mint(void);
+extern bool swapz_trial_observation_append(const struct swapz_observation_record *);
+#endif
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -989,6 +1010,14 @@ struct swapz_dm {
 	bool original_owner_closing;
 	/* Serialized lifecycle: only a completed ordinary target drain sets this. */
 	bool original_target_drained;
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	/* Only the serialized lifecycle owns this allocation. Its embedded
+	 * storage is the sole reserve/commit/relocate authority.
+	 */
+	struct swapz_shared_storage_decoder *original_gated_storage;
+	bool original_epoch_consumed;
+	bool original_retry_transferred;
+#endif
 	int original_setup_error;
 	int original_teardown_error;
 #endif
@@ -11428,6 +11457,39 @@ static __maybe_unused int swapz_round091_read_original(struct swapz_authority *a
 	return swapz_round096_read_original_pinned(authority, storage, bridge,
 		logical, compressed, scratch, verified, output, NULL);
 }
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* One ordered owner, one authoritative pin and four disjoint pages.
+ * Never refresh the captured epoch for an old pin or consult ordinary cache.
+ */
+static int swapz_round097_read_original_pinned(struct swapz_dm *ctx,
+		swapz_u32 logical, swapz_u8 *compressed, swapz_u8 *output,
+		swapz_u64 *retained_pin)
+{
+	struct swapz_shared_storage_decoder *storage = ctx->original_gated_storage;
+	swapz_u64 pin, epoch;
+	int error, release_error;
+
+	lockdep_assert_held(&ctx->ordered_owner);
+	*retained_pin = 0;
+	if (!storage || !ctx->original_storage_ready ||
+	    ctx->original_storage != &storage->storage ||
+	    storage->storage.authority != &ctx->authority)
+		return -EOPNOTSUPP;
+	epoch = storage->epoch;
+	error = swapz_shared_original_pin(&ctx->authority, logical, &pin);
+	if (error)
+		return error;
+	error = swapz_shared_storage_decoder_read(storage, epoch, pin, compressed,
+		ctx->original_decode_scratch, ctx->original_decode_verified,
+		output, SWAPZ_BLOCK_BYTES);
+	if (!error) {
+		*retained_pin = pin;
+		return 0;
+	}
+	release_error = swapz_shared_original_put(&ctx->authority, pin);
+	return release_error ? release_error : error;
+}
+#endif
 /* ROUND091_TYPED_READ_END */
 #endif
 
@@ -11446,10 +11508,15 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 	 * or consult ordinary caches. Decode using the frozen pinned lease.
 	 */
 	if (map->state & SWAPZ_MAP_ORIGINAL) {
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+		error = swapz_round097_read_original_pinned(ctx, logical,
+			ctx->read_compressed, ctx->read_page, &original_pin);
+#else
 		error = swapz_round096_read_original_pinned(&ctx->authority,
 			ctx->original_storage, ctx->original_decoder_bridge, logical,
 			ctx->read_compressed, ctx->original_decode_scratch,
 			ctx->original_decode_verified, ctx->read_page, &original_pin);
+#endif
 		if (error)
 			return error;
 	} else
@@ -12679,6 +12746,48 @@ unlock:
 	return error;
 }
 
+/* ROUND097_SCOPE_BEGIN */
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* The ordered owner pins storage; queue_lock pins the published cap and
+ * excludes route withdrawal before reading lifecycle identity. The
+ * global policy still refuses; this is additional bounded entry readiness,
+ * not a source credential or a runtime authorization.
+ */
+static bool swapz_round097_scope_ready(struct swapz_dm *ctx)
+{
+	unsigned long flags;
+	bool ready;
+
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	ready = ctx->accepting && ctx->original_cap.broker &&
+	       ctx->original_trial && ctx->original_storage_ready &&
+	       ctx->original_gated_storage && ctx->original_epoch_consumed &&
+	       ctx->original_storage == &ctx->original_gated_storage->storage &&
+	       ctx->original_owner_session && ctx->original_owner_epoch &&
+	       !ctx->original_owner_closing &&
+	       ctx->original_cap.session == ctx->original_owner_session &&
+	       ctx->original_cap.epoch == ctx->original_owner_epoch &&
+	       ctx->original_gated_storage->epoch == ctx->original_owner_session;
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	return ready;
+}
+#endif
+#if defined(SWAPZ_ROUND097_TARGET_OBSERVATION_TEST)
+/* Frozen carrier exposes no run-local operation/origin/clone token. Do not
+ * manufacture correlations from addresses or slot IDs. An active observation
+ * of a retained candidate without lineage must invalidate the capture. NULL
+ * is explicitly rejected with sticky INVALID loss by the selected adapter.
+ * This has no effect on product completion or authorization.
+ */
+static void swapz_round097_observe_missing_lineage(void)
+{
+	if (swapz_trial_observation_active())
+		(void)swapz_trial_observation_append(NULL);
+}
+#endif
+/* ROUND097_SCOPE_END */
+
 /* Actual ordered owner after normal preparation synchronization and dequeue.
  * The optional candidate never owns another BIO or a producer lane.
  */
@@ -12696,20 +12805,33 @@ static bool swapz_round091_process_candidate(struct swapz_dm *ctx,
 	if (!entry->original_candidate.broker)
 		return false;
 	lockdep_assert_held(&ctx->ordered_owner);
+#if defined(SWAPZ_ROUND097_TARGET_OBSERVATION_TEST)
+	swapz_round097_observe_missing_lineage();
+#endif
 	/* Only the source-extracted rootless fixture supplies true; the sole
 	 * native caller supplies the hard-false live gate. Even that modeled
 	 * entry must have a complete bounded owner/storage incarnation.
 	 */
-#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	if (!swapz_round097_scope_ready(ctx) || !key->logical_page ||
+	    key->logical_page > SWAPZ_ROUND094_GENERATION_PAGES)
+		permit_claim = false;
+#elif defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
 	if (!ctx->original_trial || !ctx->original_storage_ready ||
 	    !ctx->original_bridge_ready || !ctx->original_owner_session ||
 	    !ctx->original_owner_epoch || ctx->original_owner_closing)
 		permit_claim = false;
 #endif
 	if (!permit_claim ||
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	    !ctx->original_storage ||
+	    ctx->original_storage->authority != &ctx->authority ||
+	    ctx->original_storage->ops.context != ctx->original_gated_storage ||
+#else
 	    !ctx->original_storage || !ctx->original_decoder_bridge ||
 	    ctx->original_storage->authority != &ctx->authority ||
 	    ctx->original_storage->ops.context != ctx->original_decoder_bridge ||
+#endif
 	    ctx->gc_recovery.active || ctx->authority.gc_allocation ||
 	    smp_load_acquire(&ctx->failed) ||
 	    !key->dm_generation || key->dm_generation > U32_MAX ||
@@ -14801,6 +14923,22 @@ static void swapz_round090_publish_target(struct swapz_dm *ctx)
 
 #if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
 /* ROUND094_OWNER_CLOSE_BEGIN */
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* Lifecycle only after unpublish/grace and work joins. This is target debt,
+ * not broker debt. The permanent owner may still hold independent tickets.
+ */
+static bool swapz_round097_target_debt_free(const struct swapz_dm *ctx)
+{
+	return !ctx->original_listed && !ctx->original_route.registration_epoch &&
+	       !ctx->original_snapshot_epoch && !ctx->original_storage &&
+	       !ctx->original_gated_storage && !ctx->original_decoder_bridge &&
+	       !ctx->original_decode_scratch && !ctx->original_decode_verified &&
+	       !ctx->original_storage_ready && !ctx->original_bridge_ready &&
+	       !ctx->original_retired_cap.broker && !ctx->original_cap.broker &&
+	       !ctx->original_release_ref.broker &&
+	       !atomic_read(&ctx->original_release_busy);
+}
+#endif
 /* No target spinlock or ordered_owner held. On EBUSY the built-in owner
  * stays closed with its arrays intact; retain only the identity for retry.
  */
@@ -14809,6 +14947,11 @@ static int swapz_round094_close_owner(struct swapz_dm *ctx,
 {
 	int error;
 
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	if (cap->broker && (cap->session != ctx->original_owner_session ||
+			   cap->epoch != ctx->original_owner_epoch))
+		return -ESTALE;
+#endif
 	if (!ctx->original_owner_session)
 		return 0;
 	if (!ctx->original_owner_closing) {
@@ -14834,6 +14977,32 @@ static int swapz_round094_close_owner(struct swapz_dm *ctx,
 	}
 	return error;
 }
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* Only this exact call to the selected R096 built-in finish can transfer
+ * remaining independent debt. begin_close and cap put already succeeded.
+ * The staged finish arms retry before inspecting entrant or ticket debt;
+ * any other errno (including ESTALE) retains identity and fails closed.
+ */
+static int swapz_round097_finish_owner(struct swapz_dm *ctx)
+{
+	int error;
+
+	if (!ctx->original_owner_session)
+		return 0;
+	if (!ctx->original_owner_closing || !ctx->original_owner_epoch ||
+	    !swapz_round097_target_debt_free(ctx))
+		return -EBUSY;
+	error = swapz_round094_close_owner(ctx, &ctx->original_retired_cap, true);
+	if (error == -EBUSY && ctx->original_target_drained) {
+		ctx->original_retry_transferred = true;
+		ctx->original_owner_session = 0;
+		ctx->original_owner_epoch = 0;
+		ctx->original_owner_closing = false;
+		return 0; /* permanent built-in work owns this exact closed session */
+	}
+	return error;
+}
+#endif
 /* ROUND094_OWNER_CLOSE_END */
 #endif
 
@@ -14992,6 +15161,29 @@ static int swapz_round094_install_owner(struct swapz_dm *ctx,
 	return error;
 }
 
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* Module-lifetime gate. Never reinitialize on target resume. All entry is
+ * through a retained target under ordered_owner, joined before close; the
+ * built-in broker serializes the sole active binding across targets.
+ */
+static struct swapz_original_decoder_shared_gate swapz_round097_decoder_gate;
+
+static int swapz_round097_reserve_epoch(void *opaque, swapz_u64 *epoch)
+{
+	struct swapz_dm *ctx = opaque;
+	const struct swapz_ticket_cap *cap = &ctx->original_retired_cap;
+
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!epoch || ctx->original_epoch_consumed || !cap->broker ||
+	    !cap->session || cap->session != cap->epoch ||
+	    cap->session != ctx->original_owner_session ||
+	    cap->epoch != ctx->original_owner_epoch || ctx->original_owner_closing)
+		return -ESTALE;
+	ctx->original_epoch_consumed = true;
+	*epoch = cap->session;
+	return 0;
+}
+#endif
 /* All decoder/storage calls serialized by ordered_owner. Close before
  * freeing any callback storage; errors retain the still-owned allocations.
  */
@@ -15000,6 +15192,30 @@ static int swapz_round094_close_storage(struct swapz_dm *ctx)
 	int error;
 
 	lockdep_assert_held(&ctx->ordered_owner);
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	if (ctx->original_gated_storage) {
+		struct swapz_shared_storage_decoder *storage = ctx->original_gated_storage;
+
+		if (ctx->original_storage_ready) {
+			error = swapz_shared_storage_decoder_close(storage);
+			if (error)
+				return error;
+		} else if (swapz_round097_decoder_gate.owner == &storage->provider ||
+			   ctx->authority.original == &storage->storage.owner) {
+			/* Failed init/close can retain a quarantined provider. */
+			return -EUCLEAN;
+		}
+		ctx->original_storage_ready = false;
+		ctx->original_storage = NULL;
+		ctx->original_gated_storage = NULL;
+		vfree(storage);
+	}
+	vfree(ctx->original_decode_verified);
+	vfree(ctx->original_decode_scratch);
+	ctx->original_decode_verified = NULL;
+	ctx->original_decode_scratch = NULL;
+	return 0;
+#else
 	if (ctx->original_storage_ready) {
 		error = swapz_shared_storage_close(ctx->original_storage);
 		if (error)
@@ -15021,10 +15237,43 @@ static int swapz_round094_close_storage(struct swapz_dm *ctx)
 	ctx->original_storage = NULL;
 	ctx->original_decoder_bridge = NULL;
 	return 0;
+#endif
 }
 
 static int swapz_round094_open_storage(struct swapz_dm *ctx)
 {
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	const struct swapz_shared_storage_decoder_ops ops = {
+		.context = ctx,
+		.write = swapz_round090_storage_write,
+		.read = swapz_round090_storage_read,
+		.flush = swapz_round090_storage_flush,
+		.reserve_epoch = swapz_round097_reserve_epoch,
+		.gate = &swapz_round097_decoder_gate,
+		.session = ctx->original_owner_session,
+		.broker_epoch = ctx->original_owner_epoch,
+	};
+	int error;
+
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (ctx->original_storage || ctx->original_gated_storage ||
+	    ctx->original_decoder_bridge || !ctx->original_retired_cap.broker ||
+	    ctx->original_epoch_consumed)
+		return -EBUSY;
+	ctx->original_gated_storage = vzalloc(sizeof(*ctx->original_gated_storage));
+	ctx->original_decode_scratch = vzalloc(SWAPZ_BLOCK_BYTES);
+	ctx->original_decode_verified = vzalloc(SWAPZ_BLOCK_BYTES);
+	if (!ctx->original_gated_storage || !ctx->original_decode_scratch ||
+	    !ctx->original_decode_verified)
+		return -ENOMEM;
+	error = swapz_shared_storage_decoder_init(ctx->original_gated_storage,
+			&ctx->authority, &ops);
+	if (!error) {
+		ctx->original_storage = &ctx->original_gated_storage->storage;
+		ctx->original_storage_ready = true;
+	}
+	return error;
+#else
 	struct swapz_original_storage_ops lower = {
 		.context = ctx,
 		.write = swapz_round090_storage_write,
@@ -15054,6 +15303,7 @@ static int swapz_round094_open_storage(struct swapz_dm *ctx)
 	if (!error)
 		ctx->original_storage_ready = true;
 	return error;
+#endif
 }
 
 static int swapz_round094_setup(struct swapz_dm *ctx)
@@ -15066,6 +15316,53 @@ static int swapz_round094_setup(struct swapz_dm *ctx)
 	if (ctx->original_cap.broker)
 		return -EALREADY;
 	/* Refuse reuse of an unsuccessfully closed storage/decoder lifetime. */
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	if (ctx->original_gated_storage || ctx->original_storage ||
+	    ctx->original_decoder_bridge)
+		return -EBUSY;
+	/* No new provider is bound until the exact old owner has finished.
+	 * On an autonomous transfer the saved identity is already zero;
+	 * owner_open independently refuses while the old work/debt persists.
+	 */
+	error = swapz_round097_finish_owner(ctx);
+	if (error)
+		return error;
+	error = swapz_mm_broker_owner_open(SWAPZ_ROUND094_BROKER_SLOTS,
+			SWAPZ_MAX_COMPRESSED,
+			(u64)SWAPZ_ROUND094_BROKER_SLOTS * SWAPZ_MAX_COMPRESSED, &cap);
+	if (error)
+		return error;
+	ctx->original_owner_session = cap.session;
+	ctx->original_owner_epoch = cap.epoch;
+	ctx->original_epoch_consumed = false;
+	ctx->original_retry_transferred = false;
+	ctx->original_retired_cap = cap;
+	cap = (struct swapz_ticket_cap){};
+	mutex_lock(&ctx->ordered_owner);
+	error = swapz_round094_open_storage(ctx);
+	mutex_unlock(&ctx->ordered_owner);
+	if (!error)
+		error = swapz_round094_install_owner(ctx, &ctx->original_retired_cap);
+	if (!error) {
+		mutex_lock(&ctx->ordered_owner);
+		swapz_round094_publish_generations(ctx);
+		mutex_unlock(&ctx->ordered_owner);
+		return 0;
+	}
+	/* No route was published by setup_work on error. Fence exact cap,
+	 * retain any uncertain storage lifetime, finish only after clean close.
+	 */
+	cleanup_error = swapz_round094_close_owner(ctx, &ctx->original_retired_cap, false);
+	if (!cleanup_error) {
+		mutex_lock(&ctx->ordered_owner);
+		cleanup_error = swapz_round094_close_storage(ctx);
+		mutex_unlock(&ctx->ordered_owner);
+	}
+	if (!cleanup_error)
+		cleanup_error = swapz_round097_finish_owner(ctx);
+	ctx->original_teardown_error = cleanup_error;
+	return error;
+#else
 	if (ctx->original_storage || ctx->original_decoder_bridge)
 		return -EBUSY;
 	/* Retry a closed built-in owner only after its external refs drain. */
@@ -15106,7 +15403,54 @@ cleanup_storage:
 	if (cleanup_error)
 		ctx->original_teardown_error = cleanup_error;
 	return error;
+#endif
 }
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+/* Final dtr only, never suspend: mappings must survive suspend/resume.
+ * After all ordinary work is joined, retire at most eight typed records
+ * in RAM. No lower discard, no extra BIO, no physical mutation.
+ */
+static int swapz_round097_retire_target_records(struct swapz_dm *ctx)
+{
+	struct swapz_shared_storage_decoder *storage = ctx->original_gated_storage;
+	unsigned int index;
+	int error;
+
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!storage)
+		return 0;
+	if (!ctx->original_target_drained || !ctx->original_storage_ready ||
+	    ctx->authority.original != &storage->storage.owner ||
+	    storage->storage.pending_decoder)
+		return -EBUSY;
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index) {
+		const struct swapz_shared_original_record *record =
+			&storage->storage.owner.records[index];
+
+		if (record->pins || storage->storage.owner.pins[index].id)
+			return -EBUSY;
+		if (!record->decoder)
+			continue;
+		if (!record->is_current)
+			return -EUCLEAN;
+		error = swapz_prevalidate_discard_range(&ctx->authority,
+				record->spec.logical_page, 1U);
+		if (error)
+			return error;
+	}
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index) {
+		const struct swapz_shared_original_record *record =
+			&storage->storage.owner.records[index];
+
+		if (!record->decoder)
+			continue;
+		error = swapz_discard_page(&ctx->authority, record->spec.logical_page);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+#endif
 /* ROUND094_SETUP_END */
 
 static void swapz_round094_setup_work(struct work_struct *work)
@@ -15136,7 +15480,11 @@ static void swapz_round094_teardown_work(struct work_struct *work)
 	storage_error = swapz_round094_close_storage(ctx);
 	mutex_unlock(&ctx->ordered_owner);
 	if (!error && !storage_error)
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+		error = swapz_round097_finish_owner(ctx);
+#else
 		error = swapz_round094_close_owner(ctx, &ctx->original_retired_cap, true);
+#endif
 	ctx->original_teardown_error = storage_error ? storage_error : error;
 }
 #endif
@@ -15963,6 +16311,16 @@ static void swapz_free(struct swapz_dm *ctx)
 static bool swapz_round096_target_can_free(const struct swapz_dm *ctx,
 		bool independent_retry)
 {
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	/* Real retry transfer clears the identity; a caller flag cannot
+	 * substitute for it. Historical extraction below stays unchanged.
+	 */
+	(void)independent_retry;
+	return (!ctx->original_trial || ctx->original_target_drained) &&
+	       swapz_round097_target_debt_free(ctx) &&
+	       !ctx->original_owner_session && !ctx->original_owner_epoch &&
+	       !ctx->original_owner_closing;
+#else
 	if ((ctx->original_trial && !ctx->original_target_drained) ||
 	    ctx->original_listed || ctx->original_route.registration_epoch ||
 	    ctx->original_snapshot_epoch || ctx->original_storage ||
@@ -15978,6 +16336,7 @@ static bool swapz_round096_target_can_free(const struct swapz_dm *ctx,
 	return independent_retry && ctx->original_owner_session &&
 	       ctx->original_owner_epoch && ctx->original_owner_closing &&
 	       ctx->original_teardown_error == -EBUSY;
+#endif
 }
 /* ROUND096_TARGET_RELEASE_END */
 #endif
@@ -15989,6 +16348,21 @@ static void swapz_dtr(struct dm_target *ti)
 	if (!ctx)
 		return;
 	swapz_drain(ti);
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	if (ctx->original_gated_storage && ctx->original_target_drained &&
+	    !atomic_read(&ctx->original_release_busy)) {
+		int error;
+
+		mutex_lock(&ctx->ordered_owner);
+		error = swapz_round097_retire_target_records(ctx);
+		mutex_unlock(&ctx->ordered_owner);
+		if (!error) {
+			queue_work(system_unbound_wq, &ctx->original_teardown_work);
+			flush_work(&ctx->original_teardown_work);
+		} else
+			ctx->original_teardown_error = error;
+	}
+#endif
 #if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
 	/* The hard-disabled claim cannot publish a typed record. If close
 	 * nevertheless fails, retain any still-owned optional allocations and
@@ -17791,6 +18165,11 @@ static int __init swapz_dm_init(void)
 	error = swapz_predictor_init();
 	if (error)
 		return error;
+#if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
+	error = swapz_original_decoder_shared_gate_init(&swapz_round097_decoder_gate);
+	if (error)
+		return error;
+#endif
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 	error = swapz_mm_register_provider(&swapz_round090_provider);
 	if (error)

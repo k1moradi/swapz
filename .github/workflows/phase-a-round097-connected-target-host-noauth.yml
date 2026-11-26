@@ -1,0 +1,74 @@
+name: Round097 actual gated target and autonomous owner retry HOST ONLY NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round097-connected-target-host-noauth.yml'
+      - 'tests/tools/round097-connected-target-verify.py'
+      - 'tests/runtime/native/fixtures/round097-connected-target.c'
+permissions:
+  contents: read
+jobs:
+  composed-target-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: original-linux
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            mm/zswap.c
+            crypto/lzo.c
+            crypto/lz4.c
+            include/linux/lzo.h
+            include/linux/lz4.h
+            lib/lzo/lzo1x_compress.c
+            lib/lzo/lzo1x_compress_safe.c
+            lib/lzo/lzo1x_decompress_safe.c
+            lib/lzo/lzodefs.h
+            lib/lz4/lz4_compress.c
+            lib/lz4/lz4_decompress.c
+            lib/lz4/lz4defs.h
+      - name: Exact source and complete historical standards prefix
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 2
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          prior="$(mktemp)"
+          trap 'rm -f "$prior"' EXIT
+          git show "$SWAPZ_PUSH_BEFORE_SHA:docs/testing_standards.md" > "$prior"
+          bytes="$(wc -c < "$prior")"
+          test "$(git hash-object "$prior")" = "$(git rev-parse "$SWAPZ_PUSH_BEFORE_SHA:docs/testing_standards.md")"
+          test "$(wc -c < docs/testing_standards.md)" -gt "$bytes"
+          cmp -n "$bytes" "$prior" docs/testing_standards.md
+      - name: Actual source-linked owner target storage decoder composition
+        working-directory: swapz
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round097-connected-target-verify.py --linux-root ../original-linux --evidence-dir "$RUNNER_TEMP/round097-agent3"
+      - name: Retain private first cause and actual counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round097-agent3-composed-target
+          path: ${{ runner.temp }}/round097-agent3
+          if-no-files-found: warn
+          retention-days: 14
