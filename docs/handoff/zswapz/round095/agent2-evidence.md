@@ -200,3 +200,29 @@ or new error attribution. Dedicated Agent2 result unchanged:
 PASS_HOST_RECORDER_AND_OFFLINE_EXPORT_ONLY / NO_GO_LIVE. AUTH0, Phase A
 BLOCKED; compressed handoff, forced RAW and import OFF. Native producer
 and physical admission remain unestablished; no new lane or peer dependency.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "73e11ed4b50fb34a02e1c5cb9c0821a050d85619",
+  "run": 45798553476,
+  "job": 139835434200,
+  "conclusion": "PASS_CHANGED_HOST_RECORDER_RESERVATION_ONLY",
+  "artifact": 15104939406,
+  "sha256": "9d9be4817c68c85b1d10e1969b02d2a1be9202a8e33b92351286478a8b21b3b9",
+  "checks_each": 1027438,
+  "scenarios_each": 14,
+  "full_capacity_records_each": 98304,
+  "all_recorded_each": 99328,
+  "attempted_each": 114688,
+  "expected_overflow_each": 13312,
+  "owner_bytes": 72,
+  "wire_bytes": 296,
+  "cas_attempts": 64,
+  "exact_census": {
+    "success": 10
+  },
+  "scope": "No unexpected loss in tested schedules; intentional overflow remains; earlier Clang 50% loss preserved. Native adapter/actual causality/entry fence absent."
+}
+```

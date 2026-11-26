@@ -42,3 +42,42 @@ Measured per compiler/scenario: wrapper 15296B, embedded legacy storage 14912B, 
 ## Post-terminal exact-source reconciliation
 
 All 11 automatic workflows associated with exact A5 source `34ef333e5054f6428776dcfab63baa6309c1d4ac` are terminal: **10 success, 1 failure, 0 pending**. The earlier partial census is retained above. The only failed [legacy R094 provider run 45770729983](https://github.com/k1moradi/swapz/actions/runs/45770729983) has zero jobs; source inspection identifies an unquoted YAML colon in its job-level if expression (blob bbd1dae6823bee1be6c4571eeb1d04c65feaf6fd); no job-level compiler failure exists. Agent7's [correction 68479945](https://github.com/k1moradi/swapz/commit/68479945f382bfcce2f882b484cbdd6bb48cd414) uses a folded expression; exact correction runs [45771115565](https://github.com/k1moradi/swapz/actions/runs/45771115565) and [45771115671](https://github.com/k1moradi/swapz/actions/runs/45771115671) terminal skipped. Historical failure retained; no retroactive all-green claim. The focused A5 qualification remains SUCCESS; downloaded artifact 15093569167 independently rechecked in this continuation: 2226 bytes, SHA256 69c4205f1885f79384e5ed43a3fbfc4f5c5b3b98e10bdafed87dca892f8193dd, ZIP CRC PASS, results.json exact source/parent and compiler/layout results match; total 58050 checks. No additional tests executed. No new frozen A5 assignment found. Evidence-only change; no source or standards edits, duplicate CI, or same-round peer implementation consumed. All previous limitations and AUTH0/Phase A BLOCKED/live gates OFF remain in force.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "34ef333e5054f6428776dcfab63baa6309c1d4ac",
+  "run": 45770731713,
+  "job": 139742467480,
+  "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_STORAGE_HOST_ONLY",
+  "artifact": 15093569167,
+  "sha256": "69c4205f1885f79384e5ed43a3fbfc4f5c5b3b98e10bdafed87dca892f8193dd",
+  "checks_per_compiler": {
+    "lz4": 12464,
+    "lzo1x": 16561
+  },
+  "lower_reads_per_scenario": 9,
+  "lifecycle_get_put_per_scenario": [
+    2,
+    2
+  ],
+  "transient_get_put_per_scenario": [
+    6,
+    6
+  ],
+  "storage_bytes": 15296,
+  "legacy_bytes": 14912,
+  "overhead_bytes": 384,
+  "provider_bytes": 312,
+  "sidecar_bytes": 1112,
+  "handle_bytes": 24,
+  "map_bytes": 20,
+  "exact_census": {
+    "success": 10,
+    "failure": 1
+  },
+  "historical_failure_run": 45770729983,
+  "scope": "Actual frozen R094 shared decoder joined to storage, modeled RAM lower/epoch; eight-record authority; no new mutation count; no full pre/post-GC compressed image equality; strengthened R095 gate not yet joined."
+}
+```

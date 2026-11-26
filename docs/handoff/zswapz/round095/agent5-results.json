@@ -324,5 +324,39 @@
     "correction_runs_conclusion": "skipped",
     "historical_failure_retained": true
   },
-  "supersedes_terminal_evidence_commit": "1eda391009b9813f1e556517ec962ca1604f1ef8"
+  "supersedes_terminal_evidence_commit": "1eda391009b9813f1e556517ec962ca1604f1ef8",
+  "agent1_terminal_reconciliation": {
+    "source": "34ef333e5054f6428776dcfab63baa6309c1d4ac",
+    "run": 45770731713,
+    "job": 139742467480,
+    "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_STORAGE_HOST_ONLY",
+    "artifact": 15093569167,
+    "sha256": "69c4205f1885f79384e5ed43a3fbfc4f5c5b3b98e10bdafed87dca892f8193dd",
+    "checks_per_compiler": {
+      "lz4": 12464,
+      "lzo1x": 16561
+    },
+    "lower_reads_per_scenario": 9,
+    "lifecycle_get_put_per_scenario": [
+      2,
+      2
+    ],
+    "transient_get_put_per_scenario": [
+      6,
+      6
+    ],
+    "storage_bytes": 15296,
+    "legacy_bytes": 14912,
+    "overhead_bytes": 384,
+    "provider_bytes": 312,
+    "sidecar_bytes": 1112,
+    "handle_bytes": 24,
+    "map_bytes": 20,
+    "exact_census": {
+      "success": 10,
+      "failure": 1
+    },
+    "historical_failure_run": 45770729983,
+    "scope": "Actual frozen R094 shared decoder joined to storage, modeled RAM lower/epoch; eight-record authority; no new mutation count; no full pre/post-GC compressed image equality; strengthened R095 gate not yet joined."
+  }
 }

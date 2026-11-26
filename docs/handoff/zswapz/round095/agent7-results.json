@@ -170,5 +170,25 @@
   "vm": false,
   "module_loaded": false,
   "physical": false,
-  "manual_ci_dispatches": 0
+  "manual_ci_dispatches": 0,
+  "agent1_terminal_reconciliation": {
+    "source": "21e8533bfdbdc8e09ee86e2a8e8c63f0a36a7cdd",
+    "run": 45770634552,
+    "job": 139742145865,
+    "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_LIFETIME_HOST_ONLY",
+    "artifact": 15093757410,
+    "sha256": "b6281fc8eb17be9345af38a853c2537152a9ebe3eb2efa617d43111037ba719f",
+    "checks_each": 81,
+    "mutants_each": 5,
+    "owner_bytes": 312,
+    "gate_bytes": 88,
+    "handle_bytes": 24,
+    "exact_census": {
+      "success": 10,
+      "failure": 1
+    },
+    "historical_failure_run": 45770632922,
+    "artifact_round_field": "094 (historical label; source pins, R095 fixture, job and verdict establish actual R095 lane)",
+    "scope": "Actual gate and provider source-linked; external fresh broker capability/storage pin trust, no native reload or storage gate join yet."
+  }
 }

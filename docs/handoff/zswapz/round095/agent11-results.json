@@ -121,5 +121,21 @@
     "queued": 5,
     "in_progress": 2
   },
-  "evidence_initial_commit": "f6f5b1c233bf3c1e13470401fd9cedf6a1b0d409"
+  "evidence_initial_commit": "f6f5b1c233bf3c1e13470401fd9cedf6a1b0d409",
+  "agent1_terminal_reconciliation": {
+    "source": "62171f7502ab4d2dcc2e762abb534206bbcff7d6",
+    "run": 45798829320,
+    "job": 139836382630,
+    "conclusion": "PASS_HOST_BOUNDARY_ONLY",
+    "artifact": 15105438172,
+    "sha256": "49f18128969d30ef08e851e053a068516ffdb2007cfec98908dc6929885d26a7",
+    "checks_each": 24,
+    "mutants_each": 2,
+    "exact_census": {
+      "success": 10
+    },
+    "qualified_patch": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+    "postimage": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+    "scope": "Actual R095 unconditional capture-off overlay after R092 MM postimage. Both store and preerase guard removal mutants killed per compiler. Native carrier EBUSY and close identity retry unresolved. Do not stack alternative observation-fence patch."
+  }
 }

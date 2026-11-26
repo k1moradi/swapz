@@ -30,3 +30,24 @@ Complete actual-parent testing standards blob 662bf821b4e1b68fb16dc2d22c7a83988d
 **PASS_HOST_BOUNDARY_ONLY**, superseding the queued snapshot above. Exact source 62171f7502ab4d2dcc2e762abb534206bbcff7d6, [run 45798829320 / job 139836382630](https://github.com/k1moradi/swapz/actions/runs/45798829320/job/139836382630) terminal success. All nine job steps success including exact source/policy/complete-prefix, pinned Linux staging, actual source-linked host compilation and artifact upload. The raw log prints `gcc PASS_HOST_ONLY R095 A11 checks=24` and `clang PASS_HOST_ONLY R095 A11 checks=24`. Each compiler also completed two guard-removal semantic mutants (disabled_store, disabled_eviction); exact exit 77 and witness required by the successful verifier, not merely a compiler error or crash. The baseline counts are directly in the log; mutant counts are established by verifier success and its fixed inventory, not independently read from the archive. All pinned full-file MM/broker pre/postimages and new actual git-apply postimage passed; strict warnings, ASan/UBSan and baseline leak checks passed in this host lane. No first focused error.
 
 [Artifact 15105438172](https://github.com/k1moradi/swapz/actions/runs/45798829320/artifacts/15105438172), 2,559 bytes, SHA256 49f18128969d30ef08e851e053a068516ffdb2007cfec98908dc6929885d26a7, exact source head verified from metadata and upload log; archive not independently extracted. CI independently verified complete standards prefix 1,854,889 -> 1,856,114 bytes, parent SHA256 3017af065be40b6f733ec3d78436a648b9dc6bc83be24041257ad816acf9bf27. Broader exact-source census at terminal inspection: 3 success, 5 queued, 2 in progress. No whole-main green claim; no CI rerun. Prior native failure retained; A10 sole combined native lane. No native event stream, actual DM/RCU/module unload proof, physical or activation proof. REPORT_READY for the bounded A11 host lane only. AUTH=0, Phase A BLOCKED; compressed handoff, forced RAW and import OFF.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "62171f7502ab4d2dcc2e762abb534206bbcff7d6",
+  "run": 45798829320,
+  "job": 139836382630,
+  "conclusion": "PASS_HOST_BOUNDARY_ONLY",
+  "artifact": 15105438172,
+  "sha256": "49f18128969d30ef08e851e053a068516ffdb2007cfec98908dc6929885d26a7",
+  "checks_each": 24,
+  "mutants_each": 2,
+  "exact_census": {
+    "success": 10
+  },
+  "qualified_patch": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+  "postimage": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+  "scope": "Actual R095 unconditional capture-off overlay after R092 MM postimage. Both store and preerase guard removal mutants killed per compiler. Native carrier EBUSY and close identity retry unresolved. Do not stack alternative observation-fence patch."
+}
+```

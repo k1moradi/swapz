@@ -219,5 +219,26 @@
   "tested_commit": "4b15bdf4f841195ed240243a81ed13eaad7cf396",
   "first_error": null,
   "source_mapped_authenticated": false,
-  "actual_physical_io": false
+  "actual_physical_io": false,
+  "agent1_terminal_reconciliation": {
+    "source": "4b15bdf4f841195ed240243a81ed13eaad7cf396",
+    "run": 45785010481,
+    "job": 139789467324,
+    "conclusion": "PASS_COMPOSED_HOST_ONLY",
+    "artifact": 15100256797,
+    "sha256": "c637d8cfdf0685f7df800aa1bc1d8ccc1e735902b45d3d43449cc08f172f2d32",
+    "checks_each": 673,
+    "claims_each": 5,
+    "claimed_errors_each": 3,
+    "typed_reads_each": 2,
+    "modeled_fallbacks_each": 6,
+    "modeled_preparations_each": 6,
+    "reopens_each": 11,
+    "mutants_each": 4,
+    "inventory": 54,
+    "exact_census": {
+      "success": 30
+    },
+    "scope": "Actual extracted target/owner/broker/storage and original codecs. Host Linux/DM/RCU/lower/upper completion modeled; actual sole native caller hard false; no final busy-owner retry proof."
+  }
 }

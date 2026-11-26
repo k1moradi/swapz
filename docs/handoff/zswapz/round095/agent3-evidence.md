@@ -33,3 +33,29 @@ The corrected [source 4b15bdf4f841195ed240243a81ed13eaad7cf396](https://github.c
 Downloaded [artifact 15100256797](https://github.com/k1moradi/swapz/actions/runs/45785010481/artifacts/15100256797) independently; 793 bytes, ZIP CRC/integrity PASS, SHA-256 `c637d8cfdf0685f7df800aa1bc1d8ccc1e735902b45d3d43449cc08f172f2d32` matches Actions metadata and job log. Contained results.json binds tested source, frozen inventory 54, extracted fragment SHA-256 `43657e523b486a983980cd269ccc6a321b650821c050a176e1b420b2fc4fbf78`. GCC C2x and Clang C23 each executed 673 semantic checks, five claims (three terminal claimed errors), two typed reads, six modeled fallback and preparation markers, eleven reopens, four semantic mutants rejected (not sanitizer crashes). Both use ASan/UBSan; fixture strict warnings include -Wconversion/-Wshadow/-Werror. Mutants: live permission, registration incarnation, prepared owner, pending-release checks. Corrected first error: none; preserve original failed compile and source-contract history above. No new CI run, no new fixture or native retry.
 
 Host-only result: actual frozen broker/owner, extracted target, storage/authority and original decoder linked; modeled Linux primitives, RAM lower, BIO identity, ordinary dispatch and completion. The six preparation markers are not measured native prep CPU or actual lower service. External-reference final destructor quarantine/reclamation remains unqualified. No native BIO provenance, actual device durability, physical scope or live admission evidence; Agent10 alone owns native integrated compile-link. AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF. The evidence-only update changes neither implementation nor testing_standards.md. No same-round peer engineering inputs.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "4b15bdf4f841195ed240243a81ed13eaad7cf396",
+  "run": 45785010481,
+  "job": 139789467324,
+  "conclusion": "PASS_COMPOSED_HOST_ONLY",
+  "artifact": 15100256797,
+  "sha256": "c637d8cfdf0685f7df800aa1bc1d8ccc1e735902b45d3d43449cc08f172f2d32",
+  "checks_each": 673,
+  "claims_each": 5,
+  "claimed_errors_each": 3,
+  "typed_reads_each": 2,
+  "modeled_fallbacks_each": 6,
+  "modeled_preparations_each": 6,
+  "reopens_each": 11,
+  "mutants_each": 4,
+  "inventory": 54,
+  "exact_census": {
+    "success": 30
+  },
+  "scope": "Actual extracted target/owner/broker/storage and original codecs. Host Linux/DM/RCU/lower/upper completion modeled; actual sole native caller hard false; no final busy-owner retry proof."
+}
+```

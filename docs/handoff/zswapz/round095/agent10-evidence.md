@@ -24,3 +24,32 @@ PASS_FULL_FROZEN_NATIVE_KERNEL_MODULE_COMPILE_LINK_ONLY. No R095 peer source con
 
 ## Post-terminal exact-source reconciliation
 All 10 automatic workflows for exact source 771340dc5f568bf853c433636a36024f5ea75794 now terminal SUCCESS (10 success, 0 failure/cancelled/pending); no whole-main or newer-peer source verdict. Runs: [45770431257](https://github.com/k1moradi/swapz/actions/runs/45770431257), [45770431210](https://github.com/k1moradi/swapz/actions/runs/45770431210), [45770431239](https://github.com/k1moradi/swapz/actions/runs/45770431239), [45770431243](https://github.com/k1moradi/swapz/actions/runs/45770431243), [45770431229](https://github.com/k1moradi/swapz/actions/runs/45770431229), [45770431181](https://github.com/k1moradi/swapz/actions/runs/45770431181), [45770431262](https://github.com/k1moradi/swapz/actions/runs/45770431262), [45770431324](https://github.com/k1moradi/swapz/actions/runs/45770431324), [45770431310](https://github.com/k1moradi/swapz/actions/runs/45770431310), [45770431238](https://github.com/k1moradi/swapz/actions/runs/45770431238). Retained artifact15093474500 independently rechecked again, archive SHA256/CRC and all eight retained file hashes match terminal report; actual nm/readelf on extracted vmlinux and dm-swapz.ko reconfirm 9604/200 global definitions, zero missing required definitions, zero strong unresolved kernel symbols, 101 module imports all present in actual 3803-row symvers, all 15 GPL boundary exports, five forbidden internals absent, each new owner API exactly one kernel definition and actual module import. Stage manifest raw/scratch/module input identities match terminal results. No new build or accepted corpus replay; native runtime remains NOT_RUN; AUTH0 Phase A BLOCKED all activation OFF. No source or standards change.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "771340dc5f568bf853c433636a36024f5ea75794",
+  "run": 45770431310,
+  "job": 139741479810,
+  "conclusion": "PASS_FULL_FROZEN_NATIVE_KERNEL_MODULE_COMPILE_LINK_ONLY",
+  "artifact": 15093474500,
+  "sha256": "03c054965e0c2313be5991f345eaccee51b97d25a3f6e6ac87667b05841bfe7a",
+  "artifact_bytes": 3051339,
+  "archive_entries": 48,
+  "steps": 38,
+  "actual_boundary_exports": 15,
+  "module_imports": 101,
+  "new_owner_imports": 3,
+  "forbidden_exports": 0,
+  "kernel_bytes": 12558720,
+  "kernel_sha256": "e64d286366ceed259d3437787a2cc88e8a4693723f661d893d2606200c60f30d",
+  "module_bytes": 428648,
+  "module_sha256": "3db74181d77f1a05bce912b49ac6bad248bb27c3f162374ead693de20ffe5b15",
+  "exact_census": {
+    "success": 10
+  },
+  "frozen_product": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+  "scope": "Actual R092/R094 raw overlays, full vmlinux, actual modpost and final ko. Target calls bounded bridge, zero direct shared/value API references. No R095 later changes, bootable image proof, runtime, physical admission; intermediate objects not retained."
+}
+```

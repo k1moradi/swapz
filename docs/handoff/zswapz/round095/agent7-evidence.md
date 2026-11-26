@@ -7,3 +7,28 @@ Actual admitted count uses infallible atomic release after final unlocked page c
 
 ## Reporting defects and correction
 Historical R094 workflow [run45770632922](https://github.com/k1moradi/swapz/actions/runs/45770632922) failure with zero jobs; unquoted colon in legacy exact-message YAML skip condition identified by source inspection, no job diagnostic available. Raw R095 focused results contain inherited round=094 label; verified actual R095 source/fixture/verifier hashes, run head and named pass sentinels, raw JSON retained unmodified under ci.raw_results. Corrected future metadata label and folded YAML exclusions in [correction 68479945f382bfcce2f882b484cbdd6bb48cd414](https://github.com/k1moradi/swapz/commit/68479945f382bfcce2f882b484cbdd6bb48cd414) sole parent 85139fdd0ca87541cef2cdd24f8bf0c0e1546301, nonforce expected-head verified, C/H unchanged. Complete parent standards 1847695B +770B =1848465B exact prefix/readback. Corrected [R095 run45771115565](https://github.com/k1moradi/swapz/actions/runs/45771115565) and [R094 run45771115671](https://github.com/k1moradi/swapz/actions/runs/45771115671) terminal skipped, confirming syntax and no replay of accepted corpora. Exact source host PASS remains; historical workflow failure retained. Peer advances reconciled unpublished correction against fresh parent, no overwrites. No all-current-main-green claim. AUTH0 Phase A BLOCKED compressed handoff/forced RAW/import OFF. No branch/PR/force/manual duplicate CI/VM/load/physical mutation.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "21e8533bfdbdc8e09ee86e2a8e8c63f0a36a7cdd",
+  "run": 45770634552,
+  "job": 139742145865,
+  "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_LIFETIME_HOST_ONLY",
+  "artifact": 15093757410,
+  "sha256": "b6281fc8eb17be9345af38a853c2537152a9ebe3eb2efa617d43111037ba719f",
+  "checks_each": 81,
+  "mutants_each": 5,
+  "owner_bytes": 312,
+  "gate_bytes": 88,
+  "handle_bytes": 24,
+  "exact_census": {
+    "success": 10,
+    "failure": 1
+  },
+  "historical_failure_run": 45770632922,
+  "artifact_round_field": "094 (historical label; source pins, R095 fixture, job and verdict establish actual R095 lane)",
+  "scope": "Actual gate and provider source-linked; external fresh broker capability/storage pin trust, no native reload or storage gate join yet."
+}
+```
