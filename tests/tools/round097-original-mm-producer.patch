@@ -1,0 +1,259 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -217,0 +218,1 @@
++	u64 original_scope; /* valid only with nonzero cookie; no hash/cache */
+@@ -980,0 +982,27 @@
++/* No current runtime scope or publication mechanism. The hard-off gate
++ * below also protects ordinary store and eviction from speculative work.
++ */
++static const struct swapz_mm_trial_scope swapz_mm_scope;
++
++static bool swapz_mm_scope_matches(const struct swapz_mm_trial_scope *scope,
++	struct block_device *bdev, sector_t sector, u64 area, u32 type,
++	u8 codec, u32 length, const struct swapz_mm_route *route)
++{
++	return scope && scope->identity && scope->bdev && bdev == scope->bdev &&
++	       scope->broker && scope->session && scope->table_epoch &&
++	       scope->target_epoch && area && area == scope->area_epoch &&
++	       type == scope->swap_type && scope->first_sector &&
++	       !(scope->first_sector & 7) && scope->sector_count >= 8 &&
++	       scope->sector_count <= (sector_t)-1 - scope->first_sector &&
++	       !(scope->sector_count & 7) && sector >= scope->first_sector &&
++	       !(sector & 7) && sector - scope->first_sector <= scope->sector_count - 8 &&
++	       length && length <= 3568 &&
++	       (codec == SWAPZ_TICKET_LZ4 || codec == SWAPZ_TICKET_LZO1X) &&
++	       route && route->broker == scope->broker &&
++	       route->target_session == scope->session &&
++	       route->table_epoch == scope->table_epoch &&
++	       route->target_epoch == scope->target_epoch &&
++	       route->logical_page == sector / 8 && route->dm_generation &&
++	       route->dm_generation <= U32_MAX && route->logical_page <= U32_MAX;
++}
++
+@@ -982,1 +1010,1 @@
+-			      u8 codec, u32 length)
++			      u8 codec, u32 length, u64 area, u32 type)
+@@ -986,0 +1015,1 @@
++	struct swapz_mm_route route = {};
+@@ -993,1 +1022,5 @@
+-			eligible = provider->eligible(bdev, sector, codec, length);
++			/* Value-only route snapshot under the original RCU/module
++			 * borrow. No cap, ticket, hash or copy at store time. */
++			eligible = provider->lookup(bdev, sector, codec, length, &route) &&
++				swapz_mm_scope_matches(&swapz_mm_scope, bdev, sector,
++					area, type, codec, length, &route);
+@@ -1003,1 +1036,2 @@
+-			      struct swapz_ticket_cap *cap, struct module **owner_out)
++			      struct swapz_ticket_cap *cap, struct module **owner_out,
++			      u64 area, u32 type)
+@@ -1015,2 +1049,2 @@
+-			    route->broker && route->target_session && route->table_epoch &&
+-			    route->target_epoch && route->dm_generation)
++			    swapz_mm_scope_matches(&swapz_mm_scope, si->bdev, sector,
++					area, type, codec, length, route))
+@@ -1070,1 +1104,1 @@
+-	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length))
++	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length, area, swp_type(slot)))
+@@ -1072,0 +1107,2 @@
++	if (entry->original_cookie)
++		entry->original_scope = swapz_mm_scope.identity;
+@@ -1077,0 +1114,92 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++static void swapz_mm_observation_capture(struct swapz_mm_carrier *carrier,
++	const struct swapz_ticket_key *key)
++{
++	struct swapz_observation_record *record = &carrier->observation;
++	u64 operation;
++
++	if (!swapz_trial_observation_active())
++		return;
++	operation = swapz_trial_observation_mint();
++	if (!operation)
++		return;
++	*record = (struct swapz_observation_record){
++		.operation = operation, .operation_kind = SWAPZ_OBS_TYPED_WRITE,
++		.event = SWAPZ_OBS_CAPTURE, .slot = key->slot_offset,
++		.area_epoch = key->area_epoch, .store = key->store_sequence,
++		.logical = (u32)key->logical_page, .generation = (u32)key->dm_generation,
++		.swap_type = key->swap_type, .compressed_length = key->length,
++		.decoded_length = key->decoded_length, .codec = key->codec,
++		.tag = key->representation, .version = key->version,
++		.dictionary = key->dictionary
++	};
++	sha256(carrier->scratch, key->length, record->compressed_sha256);
++	memcpy(record->page_sha256, key->sha256, sizeof(record->page_sha256));
++	if (!swapz_trial_observation_append(record)) {
++		record->operation = 0;
++		return;
++	}
++	/* Actual native decompression was completed before preerase.
++	 * This is an observed earlier prerequisite, not a timestamp claim. */
++	{
++		struct swapz_observation_record preparation = *record;
++
++		preparation.event = SWAPZ_OBS_PREPARATION;
++		preparation.flags = 1;
++		swapz_trial_observation_append(&preparation);
++	}
++}
++
++void swapz_mm_observation_bind(struct swapz_mm_carrier *carrier)
++{
++	struct swapz_observation_record *record;
++
++	if (!carrier || !swapz_trial_observation_active())
++		return;
++	record = &carrier->observation;
++	if (!record->operation || record->original)
++		return;
++	record->original = swapz_trial_observation_mint();
++	if (!record->original)
++		return;
++	record->event = SWAPZ_OBS_BIND;
++	swapz_trial_observation_append(record);
++}
++
++void swapz_mm_observation_endio(const struct swapz_mm_carrier *carrier, u32 status)
++{
++	struct swapz_observation_record record;
++
++	if (!carrier || !swapz_trial_observation_active() ||
++	    !carrier->observation.operation || !carrier->observation.original)
++		return;
++	record = carrier->observation;
++	record.event = SWAPZ_OBS_UPPER_ENDIO;
++	record.status = status;
++	swapz_trial_observation_append(&record);
++}
++
++static void swapz_mm_observation_release(struct swapz_mm_carrier *carrier)
++{
++	struct swapz_observation_record record;
++
++	if (carrier->observation.operation && swapz_trial_observation_active()) {
++		record = carrier->observation;
++		/* No original BIO publication: actual optional capture drop.
++		 * A bound but unaccepted operation stays incomplete, never
++		 * invent a target refusal or ACK to satisfy the parser. */
++		if (!record.original) {
++			record.event = SWAPZ_OBS_CAPTURE_DROP;
++			record.status = EOPNOTSUPP;
++			swapz_trial_observation_append(&record);
++		}
++		record.event = SWAPZ_OBS_CARRIER_RELEASE;
++		record.status = 0;
++		swapz_trial_observation_append(&record);
++	}
++	/* Inactive path avoids copying/clearing the full record. */
++	carrier->observation.operation = 0;
++	carrier->observation.original = 0;
++}
++#endif
++
+@@ -1102,0 +1231,3 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++	swapz_mm_observation_release(&swapz_mm_carrier);
++#endif
+@@ -1148,0 +1280,27 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++bool swapz_mm_candidate_observation(const struct bio *origin,
++	const struct swapz_ticket_ref *ref, struct swapz_observation_record *out)
++{
++	const struct swapz_mm_carrier *carrier;
++	bool matched = false;
++
++	if (!origin || !ref || !ref->broker || !out ||
++	    !swapz_trial_observation_active())
++		return false;
++	rcu_read_lock();
++	carrier = rcu_dereference(origin->bi_swapz_original);
++	if (swapz_mm_bio_matches(origin, carrier) &&
++	    ref->broker == carrier->lease.broker &&
++	    ref->session == carrier->lease.session &&
++	    ref->index == carrier->lease.index &&
++	    ref->generation == carrier->lease.generation &&
++	    carrier->observation.operation && carrier->observation.original) {
++		*out = carrier->observation;
++		matched = true;
++	}
++	rcu_read_unlock();
++	return matched;
++}
++EXPORT_SYMBOL_GPL(swapz_mm_candidate_observation);
++#endif
++
+@@ -1172,0 +1331,1 @@
++	    !entry->original_scope || entry->original_scope != swapz_mm_scope.identity ||
+@@ -1188,1 +1347,2 @@
+-			       &route, &carrier->cap, &carrier->provider_owner))
++			       &route, &carrier->cap, &carrier->provider_owner,
++			       area, swp_type(slot)))
+@@ -1223,0 +1384,3 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++	swapz_mm_observation_capture(carrier, &key);
++#endif
+diff --git a/mm/page_io.c b/mm/page_io.c
+--- a/mm/page_io.c
++++ b/mm/page_io.c
+@@ -569,0 +570,9 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_NATIVE_OBSERVATION_ADAPTER)
++	/* The original SIO still owns the carrier; BIO's RCU borrow may
++	 * already be cleared by terminal bio_endio. This is the actual
++	 * original callback, not the selected clone completion. The normal
++	 * swap_write_end below performs error/redirty and ends writeback. */
++	if (sio->original && swapz_trial_observation_active())
++		swapz_mm_observation_endio(sio->original,
++			(u32)-blk_status_to_errno(bio->bi_status));
++#endif
+@@ -639,1 +648,5 @@
+-		if (swapz_mm_bio_matches(bio, sio->original))
++		if (swapz_mm_bio_matches(bio, sio->original)) {
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++			/* Record actual infallible bind before any RCU consumer. */
++			swapz_mm_observation_bind(sio->original);
++#endif
+@@ -641,1 +654,1 @@
+-		else
++		} else
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -12,0 +13,8 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++#include "native-observation-adapter.h"
++/* Frozen R097 observation ABI: implementation belongs to the single recorder
++ * owner. These calls are evidence only, never admission. */
++bool swapz_trial_observation_active(void);
++u64 swapz_trial_observation_mint(void);
++bool swapz_trial_observation_append(const struct swapz_observation_record *record);
++#endif
+@@ -48,0 +57,12 @@
++/* Future scope is immutable, independently admitted and pinned by its owner
++ * through producer RCU/worker drain. R097 provides no publication/setter.
++ * The identity is nonreused; mapper and broker pointers are comparisons only.
++ */
++struct swapz_mm_trial_scope {
++	struct block_device *bdev;
++	struct swapz_ticket_broker *broker;
++	u64 identity, session, table_epoch, target_epoch, area_epoch;
++	sector_t first_sector, sector_count;
++	u32 swap_type;
++};
++
+@@ -56,0 +77,5 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++	/* Immutable after original BIO publication, until reader grace.
++	 * Original token is filled at BIND; consumer mints clone/descriptor. */
++	struct swapz_observation_record observation;
++#endif
+@@ -78,0 +104,9 @@
++#ifdef SWAPZ_NATIVE_OBSERVATION_ADAPTER
++/* Optional exact correlation handoff for a retained candidate, only within
++ * the same live selected mapping invocation as candidate_get. No raw pointer
++ * leaves MM; caller must treat missing correlation as incomplete evidence. */
++bool swapz_mm_candidate_observation(const struct bio *origin,
++	const struct swapz_ticket_ref *ref, struct swapz_observation_record *out);
++void swapz_mm_observation_bind(struct swapz_mm_carrier *carrier);
++void swapz_mm_observation_endio(const struct swapz_mm_carrier *carrier, u32 status);
++#endif

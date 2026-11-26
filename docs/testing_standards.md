@@ -20924,3 +20924,29 @@ Engineering freeze f7cb6969db189c03d592a89cae43e5464946c716; actual source paren
 
 ## Round097 Agent3 — guarded gated target and autonomous built-in close retry (AUTH0)
 Use only exact frozen engineering f7cb6969db189c03d592a89cae43e5464946c716 and Linux c339f4010dea8b0d754f84ace70cd1b089878ef8. The new source-linked lane selects the actual R092/R094/R096 owner overlay chain and R096 gated shared storage/provider; a fresh counted cap must precede gate bind, the exact session is consumed once, the stable module gate is not reset on target resume, and embedded storage remains the only transaction/GC authority. Typed read holds its pin through the final upper copy. Suspend preserves live typed maps; final destructor retires bounded typed sidecars only after ordinary drain. Exact finish EBUSY after target debt zero transfers to actual permanent event-driven built-in retry, never a caller-provided retry boolean; old composition stays fail closed. Host drives only scheduler, Linux/DM/lower/upper primitives and proposed recorder wrapper; missing producer correlation marks observation invalid, never invents identities. Test exact compressed stream and decoded page, fresh epoch, scope/stale refusal, claimed error, deferred debt, real retry after target detach and nonreused reopen. Source guards require the selected verified retry staging marker; no positive native policy, no duplicate R096 accepted corpus or standalone native build. AUTH0 Phase A BLOCKED, compressed handoff, forced RAW and import OFF; no VM/load/physical mutation.
+
+### R097 Agent11 — actual staged MM scope and observation boundary
+
+Keep the R095 hard-off capture gate and frozen R096 owner retry unchanged.
+Stage the producer overlay after the exact qualified MM chain, including
+page_io and carrier header. Scope is independently admitted, immutable and
+nonreused; match mapper/broker, session/table/target and swap-area epoch/type,
+aligned sector range, logical page and M3568 original codec. No scope setter
+or live authorization exists. Store provenance is cookie plus scope identity,
+no per-store copy/hash/cap/ticket/cache. Natural preerase revalidates scope,
+retains exact original stream under existing source lifetime; no second BIO.
+
+Only the selected observation adapter wrapper ABI is proposed. Mint operation
+at actual seal and original token before infallible native BIO publication.
+Candidate correlation requires exact retained ticket and live selected origin.
+Observe original SIO callback status, never clone ACK; normal redirty/writeback
+and deferred RCU ticket/cap/module puts remain unchanged. Missing correlation,
+failed append or unjoined capture invalidates evidence, not ordinary I/O.
+
+New focused host-only checks exercise extracted actual scope/correlation
+helpers, observation wrapper substitutes, running retry requeue interleaving,
+stale notification against an armed replacement and revoked high-water.
+Require source pins, strict GCC/Clang, ASan/UBSan, leak checks and semantic
+session/candidate mutants. No replay of R096 accepted retry corpus, native
+build or runtime capture. AUTH0, Phase A BLOCKED; compressed handoff, forced
+RAW and import remain OFF.
