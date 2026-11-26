@@ -1,0 +1,146 @@
+{
+  "round": "097",
+  "agent": 10,
+  "kind": "directed-changed-native-objects-only",
+  "tested_commit": "007621f40e839e119851fce0c3d63ffd9d776153",
+  "source_parent": "25bf051dbb7ff4496075238f614611f16f37dc51",
+  "engineering_freeze": "f7cb6969db189c03d592a89cae43e5464946c716",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "verifier_blob": "4f14ad9d3159a78d0855e14dc002f4bf32936db6",
+  "workflow_blob": "c1a774777bdddc1ebb427b1bff588c80d53e2bfd",
+  "standards_parent_blob": "f699ab78cc8cd0a11a8b557b572ee9eeb7c82bb7",
+  "standards_new_blob": "bec6666e6222b0eca25df5d4c1b0b197cbbaef23",
+  "complete_parent_prefix_verified_by_exact_blob_readback": true,
+  "source_parent_verified": true,
+  "raw_capture_off": {
+    "patch": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+    "before": "98a8a6a66858204b61875ad9b2e8cfb0ecf8980a",
+    "after": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+    "alternative_stacked": false
+  },
+  "owner_retry": {
+    "patch": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+    "ticket_before": "ba5e891ef7f80bf0b3021ee6c676529cb72f1972",
+    "ticket_after": "70109f2c2ce9f60681649bd4807382248d0a41a2",
+    "owner_before": "0eda8753b91d3209c55f65eb90014fd9b8c6ad7c",
+    "owner_after": "278a93a3fd3fd260444aebc55d4a87112e56f704"
+  },
+  "selected_recorder": {
+    "c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "alternative_included": false
+  },
+  "frozen_target": "c60433fd6c482df9b80376ebd6326db3e56977fa",
+  "gated_adapter_c": "c59cdf4d4e203a9a40d09e9048d3eba786d2e0cc",
+  "gated_adapter_h": "6b1e3dc0230740be0d5f0e038b270d4984b5277d",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45856047307",
+  "jobs": [
+    {
+      "id": 140034584799,
+      "run_id": 45856047307,
+      "attempt": 1,
+      "name": "directed-r096-x86-objects",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Canonical exact source and parent before scratch checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Provision compiler, ELF and kernel build prerequisites (runner packages only)",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 4
+        },
+        {
+          "name": "Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout",
+          "status": "pending",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Raw immutable stage, directed changed objects and diagnostic relocatable only",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Preserve exact compile logs and manifest even on failure",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 18
+        }
+      ]
+    }
+  ],
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_error_status": "NOT_INSPECTED_TERMINAL_LOGS",
+  "artifact": null,
+  "actual_native_counts": null,
+  "exact_source_automatic_workflows": {
+    "success": 1,
+    "in_progress": 7,
+    "queued": 2
+  },
+  "exact_source_automatic_run_ids": [
+    45856047360,
+    45856047171,
+    45856047307,
+    45856047350,
+    45856047158,
+    45856047340,
+    45856047055,
+    45856046921,
+    45856047022,
+    45856046877
+  ],
+  "full_kernel_link": false,
+  "modpost": "NOT_REQUESTED",
+  "final_ko": false,
+  "native_runtime": "NOT_RUN",
+  "same_round_peer_code": false,
+  "additional_native_dispatches": 0,
+  "production_kbuild_changed": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "actual_physical_io": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false
+}
