@@ -1,3 +1,48 @@
+# Agent2 — R095 corrective recorder reservation qualification
+
+Current status: PASS_CHANGED_HOST_RECORDER_RESERVATION_ONLY / NO_GO_LIVE.
+
+[Corrected source 73e11ed4b50fb34a02e1c5cb9c0821a050d85619](https://github.com/k1moradi/swapz/commit/73e11ed4b50fb34a02e1c5cb9c0821a050d85619), sole parent b6089042b668cc4ee0c3af82c3781f0e568418cc. Explicit requested continuation in existing Agent2 lane; engineering freeze ff972661a75ca7f8c3c0458c3feb8b603c185eb8 unchanged, own prior source only, no R095 peer engineering input. No new frozen round found. Expected-head single-parent nonforce main fast-forward and exact source blobs verified. [Original terminal report and independently verified baseline](https://github.com/k1moradi/swapz/blob/9da3f5b2721711d249543bea968f0be7d378449b/docs/handoff/zswapz/round095/agent2-evidence.md) remains immutable and preserved below.
+
+## Corrective implementation
+
+- [Recorder C](https://github.com/k1moradi/swapz/blob/73e11ed4b50fb34a02e1c5cb9c0821a050d85619/tests/tools/native-observation-recorder.c), [H](https://github.com/k1moradi/swapz/blob/73e11ed4b50fb34a02e1c5cb9c0821a050d85619/tests/tools/native-observation-recorder.h): two saturating lock-free atomic unsigned reservation counters, up to 64 strong CAS attempts, unique private slots, sequence linearizes at reservation, sequence marker written last, post-external-join seal refuses holes. No held lock across copy, no wrap, no allocation/hash/log/I/O. Disabled entry still cheap. External producer revoke/join remains mandatory, no unsafe concurrent scan or export.
+- [Changed host fixture](https://github.com/k1moradi/swapz/blob/73e11ed4b50fb34a02e1c5cb9c0821a050d85619/tests/runtime/native/fixtures/native-observation-recorder.c), [same workflow narrowed to new concurrency cases](https://github.com/k1moradi/swapz/blob/73e11ed4b50fb34a02e1c5cb9c0821a050d85619/.github/workflows/phase-a-native-observation-recorder-noauth.yml), [readiness correction](https://github.com/k1moradi/swapz/blob/73e11ed4b50fb34a02e1c5cb9c0821a050d85619/docs/handoff/zswapz/round095/agent2-native-recorder-readiness.md). Wire and Python parser unchanged; previous accepted semantic corpus not replayed. Host prototype only; no native MM/DM instrumentation or product code change.
+- Actual-parent standards 1,853,423 + 1,466 = 1,854,889 bytes, full prior raw Git blob hash roundtrip and exact readback verified; parent blob aa0e89c9153b4936447676df13953449fb73d873, new 662bf821b4e1b68fb16dc2d22c7a83988d431d37. CI prefix PASS; parent SHA-256 859f178b66cf8c9738112aab00e34b26ab79ba2e2ba5c28f6af1ce798bed9b7f.
+
+## Terminal corrected-source observations
+
+[Run 45798553476/job 139835434200](https://github.com/k1moradi/swapz/actions/runs/45798553476/job/139835434200), all seven steps SUCCESS, first error null. Strict GCC 13.3.0 and Clang 18.1.3 C2x ASan/UBSan. No local test execution. Actual C checks and 14 scenarios **per compiler**:
+
+| Metric | GCC | Clang |
+| --- | ---: | ---: |
+| Checks | 1,027,438 | 1,027,438 |
+| Full-capacity trials (4 each for 2/4/8 threads) | 12 | 12 |
+| Full-capacity attempts / recorded | 98,304 / 98,304 | 98,304 / 98,304 |
+| Unexpected loss | 0 | 0 |
+| All token attempts / minted | 114,688 / 108,544 | 114,688 / 108,544 |
+| All records (incl. deliberate record saturation) | 99,328 | 99,328 |
+| Expected record / token overflow losses | 7,168 / 6,144 | 7,168 / 6,144 |
+| Record / owner bytes | 296 / 72 | 296 / 72 |
+| All scenario elapsed ns (includes joins) | 36,884,283 | 24,992,527 |
+
+Each full-capacity trial checked token uniqueness, contiguous sequence, exact record counts, per-producer program order and actual export sequence/token/footer. Deliberate capacity 1024 trial recorded 1024 of 8192 minted; separate capacity 256 mint-only trial minted 2048 of 8192 attempted, sticky overflow=2 in both. Post-join incomplete reservation refused seal/export; reinitialization/disabled checks passed. No native semantic or cross-CPU causality qualification. Prior Clang 50% contention loss retained as baseline; zero unexpected loss in tested schedules is **not** universal losslessness, and finite CAS retry exhaustion still blocks. Timings include joins, workload differs from baseline; no direct latency speedup or kernel performance claim.
+
+[Artifact 15104939406](https://github.com/k1moradi/swapz/actions/runs/45798553476/artifacts/15104939406) independently downloaded, 1193B, CRC PASS all four members, computed SHA-256 9d9be4817c68c85b1d10e1969b02d2a1be9202a8e33b92351286478a8b21b3b9 agrees with exact-source metadata and upload log. Both compiler logs empty, both recorder logs independently read and match all counts/timings.
+
+| Member | Bytes | SHA-256 |
+| --- | ---: | --- |
+| clang-compile.log | 0 | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
+| clang-recorder.log | 1841 | 789b427057f56f2298f15116928229b3fd5c79791e3797ffa48371c47cbedf20 |
+| gcc-compile.log | 0 | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
+| gcc-recorder.log | 1841 | 3081a0843f18a78f7d12d4c6a19dca1b450a259ac5bafedfa02ed6c45bdd65c9 |
+
+Broader exact-source snapshot: 2 success, 2 in progress, 6 queued; no whole-source green claim. No duplicate manual dispatch, old corpus replay, new native compile lane, VM, load, privilege, tracing, device probing or physical mutation. AUTH0 Phase A BLOCKED; compressed handoff, forced RAW and import OFF. Native producers and external entrant lifetime remain unqualified; physical readiness checklist unchanged.
+
+---
+
+## Historical baseline report (retained verbatim)
+
 # Agent2 — R095 bounded native observation recorder
 
 Status: SOURCE_PUBLISHED / PASS_HOST_RECORDER_AND_OFFLINE_EXPORT_ONLY / NO_GO_LIVE.
