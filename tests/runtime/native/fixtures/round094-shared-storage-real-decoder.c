@@ -23,7 +23,7 @@ static swapz_u8 compressed[SWAPZ_BLOCK_BYTES], scratch[SWAPZ_BLOCK_BYTES];
 static swapz_u8 verified[SWAPZ_BLOCK_BYTES], decoded[SWAPZ_BLOCK_BYTES];
 static struct swapz_tx ordinary;
 static struct swapz_original_decoder_handle_owner provider;
-static unsigned int checks, gets, puts, read_calls, writes, flushes;
+static unsigned int checks, record_gets, record_puts, read_calls, writes, flushes;
 static int fail_flush, fail_write, short_write, fail_read;
 static swapz_u64 expected_read_pin;
 static unsigned int transient_gets, transient_puts;
@@ -78,8 +78,8 @@ static int provider_get(void *context, swapz_u8 codec, swapz_u8 version,
 	CHECK(context == &storage && !provider.active_reads);
 	error = swapz_original_decoder_handle_get(&provider, codec, version, handle);
 	if (!error)
-		++gets;
-	CHECK(provider.active_records == gets - puts &&
+		++record_gets;
+	CHECK(provider.active_records == record_gets - record_puts &&
 		codec_references() == provider.active_records);
 	return error;
 }
@@ -90,8 +90,8 @@ static int provider_put(void *context, const struct swapz_original_decoder_value
 	CHECK(context == &storage && !provider.active_reads);
 	error = swapz_original_decoder_handle_put(&provider, handle);
 	if (!error)
-		++puts;
-	CHECK(provider.active_records == gets - puts &&
+		++record_puts;
+	CHECK(provider.active_records == record_gets - record_puts &&
 		codec_references() == provider.active_records);
 	return error;
 }
@@ -110,7 +110,7 @@ static int provider_read(void *context,
 
 	++read_calls;
 	CHECK(context == &storage && record && record->pins && records && !provider.active_reads);
-	CHECK(references == records && records == gets - puts);
+	CHECK(references == records && records == record_gets - record_puts);
 	/* Close must refuse while the record pin holds its exact reference. */
 	CHECK(swapz_original_decoder_handles_close(&provider) == -EBUSY);
 	reading = 1;
@@ -163,7 +163,7 @@ static void reset(void)
 {
 	CHECK(!authority.original);
 	memset(&provider, 0, sizeof(provider));
-	gets = puts = read_calls = writes = flushes = 0;
+	record_gets = record_puts = read_calls = writes = flushes = 0;
 	transient_gets = transient_puts = 0;
 	reading = 0;
 	fail_flush = fail_write = short_write = fail_read = 0;
@@ -248,7 +248,7 @@ static void exercise(swapz_u8 codec)
 	CHECK(!store(0, 2, codec, &credit, 0) && credit);
 	CHECK(provider.active_records == 1 && codec_references() == 1 && !writes && !flushes);
 	CHECK(!swapz_shared_storage_value_cancel_reserved(&storage, credit));
-	CHECK(!provider.active_records && gets == puts && authority.next_block == start);
+	CHECK(!provider.active_records && record_gets == record_puts && authority.next_block == start);
 	CHECK(authority.next_sequence == credit + 1U && !authority.abandoned_blocks);
 	CHECK(swapz_shared_storage_value_cancel_reserved(&storage, credit) == -ESTALE);
 	raw(0);
@@ -290,7 +290,7 @@ static void exercise(swapz_u8 codec)
 	verify_decoded(current_pin);
 	CHECK(provider.active_records == 1 && swapz_shared_storage_value_close(&storage) == -EBUSY);
 	CHECK(!swapz_shared_storage_value_put(&storage, current_pin));
-	CHECK(!provider.active_records && gets == puts);
+	CHECK(!provider.active_records && record_gets == record_puts);
 	discard(0);
 	discard(1);
 
@@ -307,11 +307,11 @@ static void exercise(swapz_u8 codec)
 	CHECK(provider.active_records == 1 && codec_references() == 1 && !provider.active_reads);
 	discard(2);
 	CHECK(!swapz_shared_storage_value_put(&storage, bad_pin));
-	CHECK(!provider.active_records && !codec_references() && gets == puts);
+	CHECK(!provider.active_records && !codec_references() && record_gets == record_puts);
 	CHECK(!swapz_shared_storage_value_close(&storage) && !authority.original);
 	CHECK(!swapz_original_decoder_handles_close(&provider));
 	printf("PASS ROUND094_AGENT5_REAL codec=%u checks=%u gets=%u puts=%u reads=%u transient_gets=%u transient_puts=%u map=%zu storage=%zu legacy=%zu owner=%zu handle=%zu\n",
-		(unsigned int)codec, checks, gets, puts, read_calls, transient_gets, transient_puts,
+		(unsigned int)codec, checks, record_gets, record_puts, read_calls, transient_gets, transient_puts,
 		sizeof(struct swapz_map),
 		sizeof(storage), sizeof(storage.shared), sizeof(provider), sizeof(struct swapz_original_decoder_value_handle));
 }

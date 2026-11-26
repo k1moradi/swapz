@@ -16,9 +16,9 @@ MODEL = ROOT / "tests/tools/round092-shared-storage-value-verify.py"
 STAGING = ROOT / "tests/tools/round085-original-decode-verify.py"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round094-shared-storage-real-decoder.c"
 PINS = {
-    str(MODEL.relative_to(ROOT)): "db1b01812451f45a766d74872d40983a0141052a",
+    str(MODEL.relative_to(ROOT)): "4dff860176f889507ed7ebb69358186c76fb7e9f",
     str(STAGING.relative_to(ROOT)): "6beb60c0c42662e11c3fc827dcbdacb1c6167370",
-    str(FIXTURE.relative_to(ROOT)): "b5c1a61e9f1f40b321673c7fe3befbe35631ee50",
+    str(FIXTURE.relative_to(ROOT)): "fd7f1f7155d6b5d2015d45f734ee6020b108abf1",
     "tests/tools/round080-original-lzo1x-independent-decoder-verify.py": "c2bd6a4d35bc8261e94743f92166b7c436d3c1f2",
     "src/kernel/zswap-original-decoder-handles.c": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
     "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",

@@ -15,7 +15,7 @@ FIXTURE = ROOT / "tests/runtime/native/fixtures/round092-shared-storage-value.c"
 PINS = {
     "src/kernel/zswap-original-storage-value.c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
     "src/kernel/zswap-original-storage-value.h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
-    "tests/runtime/native/fixtures/round092-shared-storage-value.c": "df2d69153f9b157ef7e505a77d3b10473a4a7c0b",
+    "tests/runtime/native/fixtures/round092-shared-storage-value.c": "29b119160361d4791946d84a0375ef4719e58d1b",
     "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
     "src/kernel/authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",

@@ -27,7 +27,7 @@ static struct swapz_tx ordinary;
 static struct swapz_original_decoder_value_handle provider[SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS];
 static swapz_u64 generations[SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS], epoch;
 static struct swapz_original_decoder_value_handle stale;
-static unsigned int checks, gets, puts, retained, writes, flushes;
+static unsigned int checks, record_gets, record_puts, retained, writes, flushes;
 static int fail_flush, fail_write, short_write, fail_read, fail_put, bad_get;
 
 #define CHECK(expr) do { ++checks; if (!(expr)) { \
@@ -70,7 +70,7 @@ static int provider_get(void *context, swapz_u8 codec, swapz_u8 version,
 				.slot_index = index, .codec = codec, .version = version,
 			};
 			*handle = provider[index];
-			++gets;
+			++record_gets;
 			++retained;
 			return 0;
 		}
@@ -84,7 +84,7 @@ static int provider_put(void *context, const struct swapz_original_decoder_value
 		return -EIO;
 	stale = *handle;
 	memset(&provider[handle->slot_index], 0, sizeof(provider[0]));
-	++puts;
+	++record_puts;
 	--retained;
 	return 0;
 }
@@ -100,7 +100,7 @@ static int provider_read(void *context,
 {
 	const struct swapz_shared_original_record *record =
 		swapz_shared_original_view(&authority, expected_read_pin);
-	unsigned int prior_gets = gets, prior_puts = puts, prior_retained = retained;
+	unsigned int prior_gets = record_gets, prior_puts = record_puts, prior_retained = retained;
 	int error;
 
 	++read_calls;
@@ -131,7 +131,7 @@ static int provider_read(void *context,
 	memset(checked, 0x73, checked_capacity);
 	error = fail_decode;
 	CHECK(active_reads == 1 && swapz_shared_original_view(&authority, expected_read_pin) == record);
-	CHECK(handle_live(&snapshot->handle) && gets == prior_gets && puts == prior_puts);
+	CHECK(handle_live(&snapshot->handle) && record_gets == prior_gets && record_puts == prior_puts);
 	++read_puts;
 	--active_reads;
 	if (!error)
@@ -176,7 +176,7 @@ static const struct swapz_shared_storage_value_ops ops = {
 
 static void reset(void)
 {
-	CHECK(!retained && gets == puts && !authority.original);
+	CHECK(!retained && record_gets == record_puts && !authority.original);
 	CHECK(!swapz_authority_init(&authority, maps, live, classes, PAGES, BLOCKS));
 	CHECK(!swapz_enable_segment_rotation(&authority, roles, SEGS));
 	CHECK(!swapz_enable_segment_mapping_counts(&authority, counts, SEGS));
@@ -187,7 +187,7 @@ static void reset(void)
 	authority.reuse_dead_segments = 1;
 	++epoch;
 	CHECK(!swapz_shared_storage_value_init(&storage, &authority, &ops));
-	gets = puts = writes = flushes = 0;
+	record_gets = record_puts = writes = flushes = 0;
 	read_gets = read_puts = active_reads = read_calls = 0;
 	fail_read_acquire = fail_decode = 0;
 	fail_write = fail_flush = short_write = fail_read = fail_put = bad_get = 0;
@@ -227,7 +227,7 @@ static void discard(swapz_u32 page)
 
 static void clean_close(void)
 {
-	CHECK(!retained && gets == puts);
+	CHECK(!retained && record_gets == record_puts);
 	CHECK(!active_reads && read_gets == read_puts);
 	CHECK(!swapz_shared_storage_value_close(&storage));
 	CHECK(!authority.original);
@@ -263,7 +263,7 @@ static void cancel_and_failures(void)
 	CHECK(swapz_shared_storage_value_commit_reserved(&storage, credit + 1U) == -ESTALE);
 	CHECK(swapz_shared_storage_value_close(&storage) == -EBUSY);
 	CHECK(!swapz_shared_storage_value_cancel_reserved(&storage, credit));
-	CHECK(!retained && gets == puts && authority.next_block == start);
+	CHECK(!retained && record_gets == record_puts && authority.next_block == start);
 	CHECK(!authority.in_flight && !authority.abandoned_blocks && authority.next_sequence == credit + 1U);
 	CHECK(!memcmp(&old, &maps[0], sizeof(old)));
 	CHECK(swapz_shared_storage_value_cancel_reserved(&storage, credit) == -ESTALE);
@@ -277,7 +277,7 @@ static void cancel_and_failures(void)
 		short_write = mode == 1;
 		fail_flush = mode == 2 ? -EIO : 0;
 		CHECK(swapz_shared_storage_value_commit_reserved(&storage, credit) == -EIO);
-		CHECK(!retained && gets == puts && !authority.in_flight);
+		CHECK(!retained && record_gets == record_puts && !authority.in_flight);
 		CHECK(authority.next_block == start + 1U && authority.abandoned_blocks == mode + 1U);
 		CHECK(!memcmp(&old, &maps[0], sizeof(old)));
 		CHECK(swapz_shared_storage_value_cancel_reserved(&storage, credit) == -ESTALE);
@@ -302,7 +302,7 @@ static void pinned_overwrite_and_aba(void)
 	CHECK(failed.error == -EINVAL && !failed.snapshot.handle.generation);
 	old = read_pin(pin);
 	second = read_pin(duplicate);
-	CHECK(same_handle(&old.handle, &second.handle) && gets == 1 && retained == 1);
+	CHECK(same_handle(&old.handle, &second.handle) && record_gets == 1 && retained == 1);
 	CHECK(old.map.generation == 1 && old.sequence);
 	memset(output, 0xa5, sizeof(output));
 	fail_read = -EIO;
@@ -397,7 +397,7 @@ static void transient_read_lifetime(void)
 	CHECK(!decode_pin(pin) && read_gets == 1 && read_puts == 1 && !active_reads);
 	for (index = 0; index < sizeof(decoded); ++index)
 		CHECK(decoded[index] == 0x73);
-	CHECK(gets == 1 && !puts && retained == 1);
+	CHECK(record_gets == 1 && !record_puts && retained == 1);
 	memset(decoded, 0xa5, sizeof(decoded));
 	fail_read_acquire = -ESHUTDOWN;
 	CHECK(decode_pin(pin) == -ESHUTDOWN && read_gets == 1 && read_puts == 1);
@@ -460,10 +460,10 @@ static void exhaustion(void)
 		CHECK(!provider_put(&storage, &external[index]));
 	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
 		CHECK(!store(index + 1U, 1, 2, NULL));
-	before_gets = gets;
+	before_gets = record_gets;
 	start = authority.next_block;
 	CHECK(store(0, 2, 2, &credit) == -ENOSPC && credit == 0x1234U);
-	CHECK(gets == before_gets && authority.next_block == start && !authority.in_flight);
+	CHECK(record_gets == before_gets && authority.next_block == start && !authority.in_flight);
 	CHECK(retained == SWAPZ_SHARED_ORIGINAL_CAPACITY);
 	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
 		discard(index + 1U);
@@ -487,11 +487,11 @@ static void provider_fault(int mode)
 	} else {
 		CHECK(!swapz_shared_storage_value_put(&storage, pin));
 		discard(0);
-		CHECK(!retained && gets == puts);
-		before_puts = puts;
+		CHECK(!retained && record_gets == record_puts);
+		before_puts = record_puts;
 		bad_get = mode;
 		CHECK(store(0, 3, 2, NULL) == -EUCLEAN && !authority.in_flight);
-		CHECK(puts == before_puts && storage.faulted && !maps[0].valid);
+		CHECK(record_puts == before_puts && storage.faulted && !maps[0].valid);
 	}
 	CHECK(swapz_shared_storage_value_close(&storage) == -EUCLEAN);
 	CHECK(store(1, 1, 2, &credit) == -EUCLEAN && credit == 0x1234U);
