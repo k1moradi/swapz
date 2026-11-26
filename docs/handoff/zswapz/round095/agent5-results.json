@@ -2,30 +2,133 @@
   "round": "095",
   "agent": 5,
   "kind": "actual-authoritative-storage-pin-shared-decoder-join",
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_STORAGE_HOST_ONLY",
   "tested_commit": "34ef333e5054f6428776dcfab63baa6309c1d4ac",
   "parent": "1134a184b592a44a4584a444c1933d22ad51a2d8",
   "engineering_freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
   "task_commit": "20122e158beef6266bd01bb545951a2a4f77d9d5",
   "source_published": true,
-  "report_ready": false,
+  "report_ready": true,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45770731713",
   "jobs": [
     {
       "run_id": 45770731713,
       "job_id": 139742467480,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45770731713/job/139742467480",
-      "status": "in_progress",
-      "conclusion": null,
-      "actual_compilers": null,
+      "status": "completed",
+      "conclusion": "success",
+      "actual_compilers": {
+        "gcc": {
+          "standard": "-std=c2x",
+          "codecs": {
+            "1": {
+              "checks": 12464,
+              "lower_reads": 9,
+              "lifecycle_gets": 2,
+              "lifecycle_puts": 2,
+              "transient_gets": 6,
+              "transient_puts": 6,
+              "map_bytes": 20,
+              "storage_bytes": 15296,
+              "legacy_bytes": 14912,
+              "overhead_bytes": 384,
+              "provider_bytes": 312,
+              "sidecar_bytes": 1112,
+              "handle_bytes": 24
+            },
+            "2": {
+              "checks": 16561,
+              "lower_reads": 9,
+              "lifecycle_gets": 2,
+              "lifecycle_puts": 2,
+              "transient_gets": 6,
+              "transient_puts": 6,
+              "map_bytes": 20,
+              "storage_bytes": 15296,
+              "legacy_bytes": 14912,
+              "overhead_bytes": 384,
+              "provider_bytes": 312,
+              "sidecar_bytes": 1112,
+              "handle_bytes": 24
+            }
+          }
+        },
+        "clang": {
+          "standard": "-std=c23",
+          "codecs": {
+            "1": {
+              "checks": 12464,
+              "lower_reads": 9,
+              "lifecycle_gets": 2,
+              "lifecycle_puts": 2,
+              "transient_gets": 6,
+              "transient_puts": 6,
+              "map_bytes": 20,
+              "storage_bytes": 15296,
+              "legacy_bytes": 14912,
+              "overhead_bytes": 384,
+              "provider_bytes": 312,
+              "sidecar_bytes": 1112,
+              "handle_bytes": 24
+            },
+            "2": {
+              "checks": 16561,
+              "lower_reads": 9,
+              "lifecycle_gets": 2,
+              "lifecycle_puts": 2,
+              "transient_gets": 6,
+              "transient_puts": 6,
+              "map_bytes": 20,
+              "storage_bytes": 15296,
+              "legacy_bytes": 14912,
+              "overhead_bytes": 384,
+              "provider_bytes": 312,
+              "sidecar_bytes": 1112,
+              "handle_bytes": 24
+            }
+          }
+        }
+      },
       "actual_checks": null,
-      "actual_layout": null,
-      "actual_mutants": null,
-      "actual_read_counts": null
+      "actual_layout": {
+        "map_bytes": 20,
+        "storage_bytes": 15296,
+        "legacy_bytes": 14912,
+        "overhead_bytes": 384,
+        "provider_bytes": 312,
+        "sidecar_bytes": 1112,
+        "handle_bytes": 24
+      },
+      "actual_mutants": "NOT_RUN_R095_NO_MUTATION_CLAIM",
+      "actual_read_counts": null,
+      "actual_checks_per_compiler": 29025,
+      "actual_read_counts_per_scenario_per_compiler": {
+        "lower_reads": 9,
+        "lifecycle_gets": 2,
+        "lifecycle_puts": 2,
+        "transient_gets": 6,
+        "transient_puts": 6
+      },
+      "all_job_steps_pass": true
     }
   ],
   "first_error": null,
-  "artifacts": [],
+  "artifacts": [
+    {
+      "id": 15093569167,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45770731713/artifacts/15093569167",
+      "size_bytes": 2226,
+      "sha256": "69c4205f1885f79384e5ed43a3fbfc4f5c5b3b98e10bdafed87dca892f8193dd",
+      "independently_downloaded": true,
+      "zip_crc": "PASS",
+      "entries": [
+        "results.json"
+      ],
+      "json_parsed": true,
+      "source_and_parent_match": true,
+      "log_and_metadata_match": true
+    }
+  ],
   "source_blobs": {
     "src/kernel/zswap-original-storage-shared-decoder.h": "b18f05a0d326dfe594e6695f13f757e313a1c3d8",
     "src/kernel/zswap-original-storage-shared-decoder.c": "05fa6a716dcd5b5fd6a531a63908b2e9bb53cb8f",
@@ -61,7 +164,11 @@
     "local_diff_check": "NOT_RUN",
     "local_policy": "NOT_RUN",
     "remote_compare": "one commit, 5 added paths and standards append only",
-    "publication": "first proposed parent advanced before ref update; reattached new files and exact standards appendix to fresh parent; expected-head nonforce success"
+    "publication": "first proposed parent advanced before ref update; reattached new files and exact standards appendix to fresh parent; expected-head nonforce success",
+    "hosted_policy": "PASS",
+    "hosted_diff_check": "PASS",
+    "hosted_full_standards_prefix": "PASS",
+    "hosted_frozen_pins": "PASS"
   },
   "previous_r094": {
     "source": "f8cac65c8adc76c13fd14b664f8f850b188e91b4",
@@ -102,12 +209,13 @@
     "per_record_provider_lease": false,
     "existing_authority_capacity": 8,
     "scope": "one sole ordered owner; no callback reentry or independent provider entry; external lifetime retained through final output copy",
-    "single_lower_read": "source contract; actual test counts pending",
+    "single_lower_read": "host verified per decode; 9 total lower calls per mixed-codec scenario include two relocation reads and one lower failure",
     "epoch": "MODELED_EXTERNAL_HOST_AUTHORITY",
     "lower": "MODELED_RAM_ONLY",
     "native": "NOT_RUN",
     "production_scale": "UNQUALIFIED",
-    "same_round_peer_dependency": false
+    "same_round_peer_dependency": false,
+    "qualification_scope": "one ordered host owner; full output bytes matched original page; compressed read compared to exact RAM medium bytes; no separate full pre/post GC compressed image comparison asserted"
   },
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -118,5 +226,80 @@
   "vm": false,
   "module_load": false,
   "manual_dispatch": false,
-  "accepted_corpus_replayed": false
+  "accepted_corpus_replayed": false,
+  "exact_source_census": {
+    "success": 4,
+    "in_progress": 2,
+    "queued": 4,
+    "failure": 1
+  },
+  "broader_runs_observed": [
+    {
+      "run_id": 45770731713,
+      "name": "Shared storage authoritative pin decoder HOST ONLY NO_AUTH",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45770731760,
+      "name": "Experimental swapz production C qualification",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45770731722,
+      "name": "Native kernel-C project-goal regressions",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "run_id": 45770731758,
+      "name": "Systemd/package 34ef333e5054f6428776dcfab63baa6309c1d4ac (run 45770731758)",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "run_id": 45770731691,
+      "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45770731750,
+      "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "run_id": 45770731832,
+      "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "run_id": 45770731728,
+      "name": "Rootless physical evidence adversarial audit",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45770731779,
+      "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45770731716,
+      "name": "Private kernel debug and static contracts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45770729983,
+      "name": ".github/workflows/phase-a-round094-decoder-shared-provider-host-noauth.yml",
+      "status": "completed",
+      "conclusion": "failure"
+    }
+  ],
+  "supersedes_interim_evidence_commit": "85139fdd0ca87541cef2cdd24f8bf0c0e1546301"
 }
