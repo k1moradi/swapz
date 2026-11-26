@@ -20732,3 +20732,25 @@ After the accepted actual-provider host qualification, compile only the new R094
 ## R094 Agent 5 host fixture identifier correction
 
 The first R094 source `7ece3ea3709ccce932467f27a1e9cdc86fde0d30` failed both focused jobs (run 45757096760, jobs 139698173485 and 139698173850) before execution: each private compiler log reports a file-scope `puts` counter conflicting with the `<stdio.h>` declaration. Both independently downloaded ZIPs passed CRC and SHA256 verification (15088417715, 15089025808); no baseline or mutant execution is credited. Rename only the record ownership counters to `record_gets`/`record_puts` in the two host fixtures, preserve the machine-readable verdict labels, and repin the changed fixtures and verifier. Strict flags, frozen implementation, original Linux staging, mutation anchors and test cases remain unchanged. A changed-source automatic focused run is required; no manual or unchanged replay, no native runtime/VM/load/physical acceptance. AUTH=0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF.
+
+## R094 Agent2 — bounded per-BIO native observation evidence (NO AUTH)
+
+Only supplied records may enter the offline native-bio-evidence parser; it
+must never activate tracing, discover devices, change ordinary zswap-off
+helpers or claim capture authentication. Scope is independently supplied
+by digest, single target/session/route incarnation and selected nonzero
+logical range. Reject unknown/duplicate fields, lost, overflow, truncated
+records, noncontiguous event sequence, reused opaque BIO/descriptor/lower
+IDs, bad typed representation/length/digest, stale map generation, reserve
+or claim mismatch, cancel after issue, missing successful full lower
+completion/flush, early/duplicate ACK, incomplete independent 4096-byte
+read oracle, stale GC generation/epoch, missing pin release and cleanup
+debt. An issued failure is quarantined and cannot publish or fall back;
+explicit failure observations remain BLOCKED. Ordinary RAW_4096 is the
+original full uncompressed page, never an imported compressed payload.
+Bounded M3568 dedicated-extent profile only; unsupported native histories
+fail closed, no aggregate-to-per-BIO inference. New focused main-push
+rootless fabricated record tests and exact parent-prefix check only; no
+replay of accepted R093 corpus. Source map documents missing producer
+instrumentation separately. AUTH0, Phase A BLOCKED, compressed handoff,
+forced RAW and import OFF; no physical admission, VM, load or mutation.

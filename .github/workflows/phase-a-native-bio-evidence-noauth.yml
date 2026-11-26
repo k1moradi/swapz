@@ -1,0 +1,56 @@
+name: Native per-BIO evidence rootless NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/native-bio-evidence.py'
+      - 'tests/runtime/native/native-bio-evidence-test.py'
+      - 'docs/handoff/zswapz/round094/agent2-native-observation-contract.md'
+      - '.github/workflows/phase-a-native-bio-evidence-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  native-bio-evidence-rootless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and full historical standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import subprocess
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(previous) and len(current) > len(previous)
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          PY
+      - name: Fabricated per-BIO observation cases only
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/native-bio-evidence"
+          python3 -B tests/runtime/native/native-bio-evidence-test.py -v 2>&1 | tee "$RUNNER_TEMP/native-bio-evidence/rootless.log"
+      - name: Retain bounded fabricated fixture results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-bio-evidence-rootless
+          path: ${{ runner.temp }}/native-bio-evidence/
+          if-no-files-found: warn
+          retention-days: 14
