@@ -1,0 +1,132 @@
+{
+  "round": "095",
+  "agent": 3,
+  "task": "source-linked broker owner/target/storage/decoder transaction",
+  "task_commit": "20122e158beef6266bd01bb545951a2a4f77d9d5",
+  "freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw_bypass": "OFF",
+  "import": "OFF",
+  "native": "NOT_RUN",
+  "physical": false,
+  "prior_r094": {
+    "source": "d620a2533ae26f109921fdff48ce28b2b05116b5",
+    "workflows": {
+      "pass": 29,
+      "total": 29
+    },
+    "run": 45761622515,
+    "job": 139712711603,
+    "compilers": {
+      "gcc": {
+        "checks": 50,
+        "mutants_killed": 6
+      },
+      "clang": {
+        "checks": 50,
+        "mutants_killed": 6
+      }
+    },
+    "artifact": 15090198553,
+    "artifact_sha256": "0400805b349c94d64d6ad4690fef95e3e3a2b194b9935eaa737b4e565b8cace1",
+    "manual_reruns": 0
+  },
+  "original_r095": {
+    "source": "ca3df00ddb22ce04c8eb064f1b82b1618e67e31c",
+    "parent": "3ae8a335b86e2b50a147e4d026c80978bcfa6bd8",
+    "workflows": {
+      "pass": 27,
+      "fail": 3,
+      "total": 30
+    },
+    "composed_run": 45771499496,
+    "composed_job": 139744955598,
+    "artifact": 15094292631,
+    "artifact_bytes": 1795,
+    "artifact_sha256": "49a47d46767bba5d37bf2c0e220fccd7c4d2dc4ee67a5043fb2093ea4586f908",
+    "artifact_zip_integrity": "PASS",
+    "frozen_inventory_count": 54,
+    "fragment_sha256": "b940c358727355ff34b04065429dbdd73e0f4e54f6e1b1f5926a8661109553a6",
+    "compilers": {},
+    "first_error": "GCC baseline fixture global ctx shadows extracted function parameter (-Werror=shadow); compressed and output also shadow",
+    "product_run": 45771499293,
+    "product_failed_jobs": [
+      139744954780,
+      139744955092
+    ],
+    "product_passed_compile_jobs": [
+      139744955086,
+      139744955096
+    ],
+    "goals_run": 45771499729,
+    "goals_failed_jobs": [
+      139744957028,
+      139744956935,
+      139763320078
+    ],
+    "source_contract_error": "source-contract-test.py:6618 obsolete two-argument process_candidate substring"
+  },
+  "correction": {
+    "source": "4b15bdf4f841195ed240243a81ed13eaad7cf396",
+    "parent": "7b1a17438f29bf081b5bd46931ef27dbf3bd9d74",
+    "blobs": {
+      "src/kernel/dm-target.c": "5f87228daba905f6aa55f950177eecd5291c41e6",
+      "tests/runtime/native/fixtures/round095-composed-target.c": "5ba7a6ed69d9d77fcbf6cac56ae20a60c4a0f964",
+      "tests/tools/round095-composed-target-verify.py": "e3afa321b03fa8299d0f051eb2f19f41a3043e2f",
+      "tests/runtime/native/source-contract-test.py": "87d89bec22370c4fdef32d76e8809448d7beb504"
+    },
+    "standards": {
+      "old_blob": "e362e2772de763ca1f3245df0a6c50d0b32b66a5",
+      "new_blob": "aa0e89c9153b4936447676df13953449fb73d873",
+      "old_bytes": 1852756,
+      "new_bytes": 1853423,
+      "complete_prefix_verified": true
+    },
+    "run": 45785010481,
+    "job": 139789467324,
+    "status": "IN_PROGRESS",
+    "prefix_preflight": "PASS",
+    "actual_compiler_counts": null,
+    "artifact": null,
+    "product_run": 45785010465,
+    "product_exact_jobs": [
+      139789467784,
+      139789467790
+    ],
+    "goals_run": 45785010290,
+    "source_contract_job": 139789467463,
+    "ordered_run": 45785010453,
+    "ordered_job": 139789467658,
+    "target_owner_run": 45785010503,
+    "target_owner_job": 139789467461
+  },
+  "planned_only": {
+    "scenarios": 11,
+    "claims": 5,
+    "claimed_errors": 3,
+    "typed_reads": 2,
+    "fallbacks": 6,
+    "ordinary_preparation_markers": 6,
+    "reopens": 11,
+    "mutants_per_compiler": 4
+  },
+  "limitations": [
+    "Actual broker/owner, target extraction, allocator/storage and original bounded decoder sources; host-selected clone, Linux primitives, lower RAM, ordinary dispatch and endio are adapters.",
+    "No genuine native BIO provenance, actual device durability, physical or integrated native build by Agent3.",
+    "Final dtr busy external owner/candidate quarantine not proven reclaimable in every native lifetime.",
+    "Local checkout unavailable: GitHub DNS resolution failed; no local compiler or diff-check result claimed."
+  ],
+  "publication": {
+    "main_only": true,
+    "force": false,
+    "competing_candidate_published": false,
+    "manual_ci_dispatches": 0,
+    "vm": false,
+    "module_load": false,
+    "physical_mutation": false
+  },
+  "conclusion": "CORRECTED_SOURCE_PUBLISHED_HOST_CI_PENDING_NO_GO_LIVE"
+}
