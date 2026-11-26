@@ -1,0 +1,94 @@
+name: R098 actual selected recorder event conformance NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/round098-observation-extract.py'
+      - 'tests/runtime/native/round098-observation-conformance-test.py'
+      - 'tests/runtime/native/fixtures/round098-observation-conformance.c'
+      - '.github/workflows/phase-a-round098-observation-conformance-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  event-conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and complete historical standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          freeze = "5a36cabf0989dfffc75de52a6ab8cc021092ebf6"
+          frozen = subprocess.check_output(["git", "show", freeze + ":docs/testing_standards.md"])
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert len(frozen) == 1874135 and previous.startswith(frozen)
+          assert current.startswith(previous) and len(current) > len(previous)
+          pins = {
+              "src/kernel/native-observation-adapter.c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+              "src/kernel/native-observation-adapter.h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+              "src/kernel/native-observation-owner.c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+              "src/kernel/native-observation-owner.h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+              "tests/tools/native-observation-export.py": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+              "tests/tools/native-observation-current-export.py": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+              "tests/runtime/native/fixtures/native-observation-adapter-host-model.h": "3dac25d2edb2d7475af3231c98af753f09e4063f",
+              "tests/runtime/native/fixtures/native-observation-owner-host-model.h": "47042c1c9f388f29e2989492c15ef479573b1019",
+          }
+          for path, blob in pins.items():
+              assert subprocess.check_output(["git", "hash-object", path], text=True).strip() == blob, path
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          print("selected frozen adapter/owner/parser/shim pins", len(pins))
+          PY
+      - name: Exact frozen constructors through real owner and adapter
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          out="$RUNNER_TEMP/round098-observation-conformance"
+          mkdir -p "$out/include/linux" "$out/include/crypto"
+          python3 -B tests/runtime/native/round098-observation-extract.py "$out" 2>&1 | tee "$out/extraction.log"
+          for header in types atomic rcupdate build_bug limits string export kernel mutex slab vmalloc; do
+            printf '#include "native-observation-owner-host-model.h"\n' > "$out/include/linux/$header.h"
+          done
+          printf '#include "native-observation-owner-host-model.h"\n' > "$out/include/crypto/sha2.h"
+          for compiler in gcc clang; do
+            "$compiler" --version | head -1
+            "$compiler" -std=c2x -D_POSIX_C_SOURCE=200809L -DSWAPZ_NATIVE_OBSERVATION_ADAPTER \
+              -DSWAPZ_TRIAL_OBSERVATION "-DSWAPZ_OBSERVATION_BUILD_SOURCE=\"$GITHUB_SHA\"" \
+              -O2 -g -Wall -Wextra -Wconversion -Wsign-conversion -Wshadow -Wpedantic -Werror \
+              -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -pthread \
+              -I"$out" -I"$out/include" -Isrc/kernel -Itests/runtime/native/fixtures \
+              src/kernel/native-observation-adapter.c src/kernel/native-observation-owner.c \
+              tests/runtime/native/fixtures/round098-observation-conformance.c \
+              -lcrypto -o "$out/$compiler-events" 2>&1 | tee "$out/$compiler-compile.log"
+            for mode in frozen-preparation frozen-bind frozen-upper frozen-drop frozen-release frozen-dm clean terminal-overflow; do
+              ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+                timeout 20s "$out/$compiler-events" "$mode" "$out/$compiler-$mode.wire" \
+                2>&1 | tee "$out/$compiler-$mode.log"
+            done
+            rm "$out/$compiler-events"
+          done
+          python3 -B tests/runtime/native/round098-observation-conformance-test.py "$GITHUB_SHA" "$out" \
+            2>&1 | tee "$out/validator.log"
+      - name: Retain bounded host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round098-observation-conformance
+          path: ${{ runner.temp }}/round098-observation-conformance/*.log
+          if-no-files-found: warn
+          retention-days: 14
