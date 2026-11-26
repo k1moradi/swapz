@@ -20855,3 +20855,30 @@ The focused source-linked regression stages the immutable engineering freeze cb3
 ## Round096 Agent7 — frozen real broker capability and external decoder entrant boundary (HOST ONLY)
 
 Accept the R095 actual lifetime corpus (81 checks and five killed mutants per compiler) without replay. R096 uses the immutable engineering freeze cb38c5de310edc4842e77099b92fc709e1934322, verifies the actual frozen gate, adapter, DM and owner bytes, stages only the ticket C/H R092 then R094 overlays, and links the actual built-in owner/broker, shared decoder and original LZ4/LZO1X host codec objects. GCC C2x/C23 and Clang C23 with ASan/UBSan; distinct deterministic pauses before gate entry and after provider return while the external exact pin and cap remain held. Real fresh owner_open identity must strictly increase across recreated consumer gates; failed second codec acquisition burns that identity and a recreated gate must not reissue the same retained cap. The one-shot cap consumer, external route join, storage snapshot/pin, allocator, pthread and module ABI are host adapters, not native kernel primitives or actual adapter gate integration. Frozen A5 adapter still calls the ungated shared provider and frozen DM calls the bounded bridge; no claim of native integration. Preserve external route borrow through pin release and return, drain/join before freeing gate/context, and retain exact broker cap until all consumer debt clears. No product edit or separate native build, no replay or mutation-count claim, no physical/VM/load. The complete actual push-before standards bytes and frozen prefix must remain unchanged. AUTH0 Phase A BLOCKED; compressed handoff, forced RAW and import OFF.
+
+## Guarded kernel observation recorder adapter (Round096 Agent2)
+
+Separate, unlinked kernel adapter files use Linux atomic_t,
+atomic_try_cmpxchg_relaxed, atomic_or, smp_store_release and smp_load_acquire.
+Normal Kbuild and production capture remain unchanged. Preallocated disjoint
+bounded slots and external entrant lifetime from before the enabled check
+through return are mandatory. One owner serializes init, one-shot start, stop,
+external revoke/join, seal and cold export; failed join retains all memory.
+Seal rejects unpublished slots; a 32-bit release marker follows the complete
+private record copy. Reservation order is not causal completion order:
+observe actual authority transitions or explicit partial order, never sort
+histories or infer upper ACK. Saturating budgets/sticky loss preserve product
+progress; no allocation/hash/I/O in append. Any loss invalidates evidence.
+
+Focused changed-source host substitutes exercise paused writer vs stop,
+later publication, pre-join seal refusal, unpublished marker refusal,
+record/token retry exhaustion, overflow/sticky loss, disabled entry without
+counter RMW/input access, sink refusal and SWZOBS2 framing. Host compiler and
+sanitizer results are not native Linux execution or native capture. No replay
+of accepted R095 stress, no standalone native build, no VM/load/physical.
+Require current integrated source/compile review, actual native event map and
+safe owner-scoped preflight before separately authorized bounded natural
+pressure (not circular prior runtime proof); independent exact compressed
+stream and full 4096-byte oracle, protected page0/UUID/table, normal swapoff
+and debt drain; failed cleanup never force-removes. AUTH0, Phase A BLOCKED,
+direct compressed handoff, forced RAW bypass and import OFF.
