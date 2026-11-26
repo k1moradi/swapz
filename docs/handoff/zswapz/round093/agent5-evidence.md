@@ -12,3 +12,27 @@ Actual dormant adapter builds a frozen immutable decoder snapshot from the exact
 Parent standards blob 36e90b28ccc4af155779558b2163c7bbee3401bc 1822952 UTF-8 bytes; candidate 2e01fd52363450759840e07d9408d4a403ea70b9 1825592 bytes; full parent prefix and complete exact readback verified, append 2640 bytes. Concurrent peer advances reconciled before nonforce expected-head publication. Five source blobs pinned in adjacent JSON. Historical R092 path names in new focused workflow retained deliberately from prepared candidate, workflow display/artifact/verdict labels R093.
 
 AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW bypass, import OFF. No VM, loaded module, privileged or physical mutation. PROGRESS, not REPORT_READY. Next action reconcile existing exact run terminal, no duplicate CI.
+
+
+## Agent1 terminal reconciliation
+```json
+{
+  "source": "e849f333b4f89d5ffd84dc14c061dfc93566e8e3",
+  "job": 139389937913,
+  "conclusion": "FAIL_HOST_BASELINE_COMPILE",
+  "exact_census": {
+    "success": 9,
+    "failure": 1
+  },
+  "artifact": 15047402390,
+  "artifact_sha256": "7cbcf0268f759ff2fc16492b354d8722aefe05555209ef3f8c2f1b487262e667",
+  "first_error": "zswap-import-codec.h:32:10 fatal error: crypto/sha2.h: No such file or directory",
+  "root_cause": "verifier defines SWAPZ_ZSWAP_IMPORT_DECODER_HOST_TEST but omits SWAPZ_ZSWAP_IMPORT_HOST_TEST controlling codec header branch",
+  "gcc_checks": 0,
+  "clang_checks": 0,
+  "executed_mutants": 0,
+  "storage_value_c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+  "storage_value_h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+  "scope": "provider modeled; new adapter unqualified, sizes unmeasured"
+}
+```

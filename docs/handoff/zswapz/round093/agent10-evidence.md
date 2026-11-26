@@ -35,3 +35,31 @@ At preparation [#211](https://github.com/k1moradi/swapz/issues/211) PREPARED not
 [New run 45666130617 / job 139388647019](https://github.com/k1moradi/swapz/actions/runs/45666130617/job/139388647019) automatic push attempt 1, status QUEUED, conclusion pending at inspection. No manual dispatch, no duplicate old build. Raw staging, compile/link, symbols, artifact and first actual error pending; do not claim PASS. Existing path-filtered repository workflows may also queue automatically; no separate dispatch. AUTH=0, Phase A BLOCKED, direct handoff, forced RAW and import OFF. No VM/build-for-VM/boot/load/physical mutation. This is PROGRESS, not REPORT_READY.
 
 Fresh job inspection: canonical source/parent/standards/repository-policy step SUCCESS; prerequisites IN_PROGRESS, actual raw staging and links PENDING.
+
+
+## Agent1 terminal reconciliation
+```json
+{
+  "source": "9f944f4e83762b846e02aade88d2c36574c8ac13",
+  "job": 139388647019,
+  "conclusion": "PASS_ACTUAL_RAW_R092_COMPILE_LINK_ONLY",
+  "exact_census": {
+    "success": 9,
+    "failure": 1
+  },
+  "artifact": 15047232671,
+  "artifact_sha256": "0187d57a98810d105a93dc728332c3c1720badc8fa82734c199acb509ed91a50",
+  "frozen_product": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "actual_overlay": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+  "old_scratch_exports": false,
+  "full_kernel": true,
+  "modpost": true,
+  "final_ko": true,
+  "kernel_bytes": 12557432,
+  "kernel_sha256": "6f2c6dc03232256884c4fbdb0e17ffdd6f229fc8819f528389cc1abca2af6438",
+  "module_bytes": 402008,
+  "module_sha256": "88add0aa34b6f86db24b7e9fb10b2945ed7936f35ac5220243ff07b14198bd56",
+  "config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+  "scope": "actual four-path raw R092 overlay applied/reversed, scratch Kbuild only; newest R093 value adapter and rollback not compiled in this lane; no runtime"
+}
+```

@@ -13,3 +13,41 @@ Historical blocked snapshot above is preserved; latest status supersedes its pub
 
 ## R093 terminal qualification (supersedes pending observation)
 [Run 45666015960/job 139388246410](https://github.com/k1moradi/swapz/actions/runs/45666015960/job/139388246410) attempt1 terminal SUCCESS, actual source 489ae36d3df6a5b2e85748c7316566a874f4fe55. Raw job JSON: PASS_STAGED_HOST_ONLY, first_error=null, ten classifier cases, 5 compressor/4 decoder staging negatives. GCC C2x and Clang C23 each 126445 baseline assertions, 24000 churn, two original codecs, all three semantic mutants compiled/executed/killed (epoch, generation, saturation). Existing race outcomes GCC 1 success/3 declined, Clang 0/4; all accounted. Independent scale fixture each 2104 checks, 1024 simultaneous modeled records, measured host sidecar16 bytes/two providers192 bytes, real original-codec retired read completed and bytes verified after joined worker for both profiles. No per-record provider refs; external storage serialization/epoch and sidecar metadata are modeled, not actual kernel storage/production capacity or unload qualification. 1024 sidecars consume 16384 bytes, plus 192 bytes two provider owners (excludes other fixture/metadata/scratch). [Artifact 15047521464](https://github.com/k1moradi/swapz/actions/runs/45666015960/artifacts/15047521464) 2185 bytes, sha256:c908ccf2500c5b487c378c4cb9d51df6eb96dbe97bca32d29f7f566fd50c29b9, digest confirmed against upload log, no independent ZIP extraction claim. R092 failure stays historical FAIL. No duplicate CI. AUTH0 Phase A BLOCKED compressed handoff/forced RAW/import OFF. Native runtime, VM, module loading, physical NOT_RUN.
+
+
+## Agent1 terminal reconciliation
+```json
+{
+  "source": "489ae36d3df6a5b2e85748c7316566a874f4fe55",
+  "job": 139388246410,
+  "conclusion": "PASS_STAGED_HOST_ONLY_SCALE_MODEL",
+  "exact_census": {
+    "success": 9,
+    "failure": 1
+  },
+  "artifact": 15047521464,
+  "artifact_sha256": "c908ccf2500c5b487c378c4cb9d51df6eb96dbe97bca32d29f7f566fd50c29b9",
+  "checks_each": 126445,
+  "churn_each": 24000,
+  "mutants_each": 3,
+  "classifier_cases": 10,
+  "scale_checks_each": 2104,
+  "modeled_records": 1024,
+  "sidecar_bytes": 16,
+  "providers_bytes": 192,
+  "handle_owner_bytes": 2304,
+  "handle_bytes": 24,
+  "slot_bytes": 32,
+  "races": {
+    "gcc": {
+      "success": 1,
+      "decline": 3
+    },
+    "clang": {
+      "success": 0,
+      "decline": 4
+    }
+  },
+  "scope": "real bounded decoder host; scale sidecar/serialization/epoch modeled only; no native scalable implementation"
+}
+```

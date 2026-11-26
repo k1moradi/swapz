@@ -20,3 +20,26 @@ Agent1 [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/211#issuecomment-71
 Complete parent standards d588a71a021dfa5db42fd3bfc4c84135919b56ca 1,826,831 bytes; source 517c1429a72362d67fc84f09e63827e35196cd20 1,828,438 bytes, +1,607. Recomputed entire Git SHA1, parent byte prefix and full remote readback, no truncation. Hosted exact event.before, prefix and diff pending.
 
 [Focused run45666993826/job139391706207](https://github.com/k1moradi/swapz/actions/runs/45666993826/job/139391706207) automatic attempt1 QUEUED; [sparse compile-only job139391706854](https://github.com/k1moradi/swapz/actions/runs/45666993826/job/139391706854) QUEUED. Nine automatic workflows at census, all queued, mandatory [project goals45666993763](https://github.com/k1moradi/swapz/actions/runs/45666993763) and [physical45666993787](https://github.com/k1moradi/swapz/actions/runs/45666993787) pending. No new CI first failure/artifact/counts observed; no manual dispatch, duplicate or periodic monitor. Terminal evidence update required when actual runs finish. No physical, VM, privileged/loaded action. AUTH0 Phase A BLOCKED compressed handoff/forced RAW/import OFF.
+
+
+## Agent1 terminal reconciliation
+```json
+{
+  "source": "74ee2d04de59db75d19adc2b5f3d30200a4dea98",
+  "job": 139391706207,
+  "conclusion": "PASS_ROOTLESS",
+  "exact_census": {
+    "success": 9,
+    "failure": 0
+  },
+  "actual_debug_tests": 48,
+  "actual_collector_tests": 3,
+  "debug_seconds": 11.41,
+  "collector_seconds": 0.037,
+  "sparse_job": 139391706854,
+  "mandatory_project_goals_run": 45666993763,
+  "mandatory_project_goals_pass": 7,
+  "physical_evidence_job": 139391706030,
+  "scope": "fixture and offline aggregate parser only; historical SIGPIPE exact cause not independently established; no authenticated per-BIO collector"
+}
+```

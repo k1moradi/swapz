@@ -214,5 +214,29 @@
     "live_claim_gate": false,
     "destination_credit": false,
     "normal_kbuild_changed": false
+  },
+  "agent1_terminal_reconciliation": {
+    "source": "ee9b6be46dc99a535439e3372b3004255b4d158d",
+    "job": 139389189043,
+    "conclusion": "PASS_HOST_ONLY",
+    "exact_census": {
+      "success": 28,
+      "failure": 0
+    },
+    "artifact": 15046849132,
+    "artifact_sha256": "3cbd9ae38052b6237d40e9e87ef52f0cc3f0c7297e12989c5a2a1a4a4fc1fb80",
+    "ordered_checks_each": 12708,
+    "claims_each": 5,
+    "refusals_each": 3,
+    "typed_reads_each": 2,
+    "ordered_mutants_each": 4,
+    "rollback_mutants_each": 2,
+    "foreground_controls": {
+      "historical": 24,
+      "typed": 6
+    },
+    "product_run": 45666284948,
+    "prototype_run": 45666285385,
+    "scope": "rollback actual extracted source host adapter; frozen R092 ordered corpus replay, not fresh native transactions; no binding caller/setup or generation authority; actual dm-target blob27d3af6f4146bc62adfb091e0d4f1fbc9f1dd285"
   }
 }

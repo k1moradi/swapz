@@ -22,3 +22,25 @@ Agent1 recovered the exact earlier report and JSON blobs in [opening commit dc3d
 **Scope and invariants:** actual frozen broker C/H overlay, pinned codec and existing module ABI shim; new external owner gate is explicitly a host fixture, not production code. Five planned deterministic scenarios: pre-reference entrant paused across unpublish/revoke/close with zero counted refs (destroy refused by owner gate until join), cap-only lifetime, claim-before-revoke, revoke-before-claim, close-before-claim; both cap/candidate drop orders, post-free admission refusal and retained payload view. Four planned semantic mutations per compiler: one modeled owner guard and three actual broker fences (cap destroy, close claim, revoke claim). Exact diagnostic/exit 77 required; compile/infrastructure/sanitizer failures not accepted as kills. Stable external admission authority must outlive the allocation and must stop new entrants before join/grace; counted broker refs alone cannot prove quiescence. Existing actual DM bind adapter has no caller in engineering freeze. No native owner implementation or actual unload proof claimed.
 
 **New CI:** [run 45666646146/job 139390474464](https://github.com/k1moradi/swapz/actions/runs/45666646146/job/139390474464), QUEUED at inspection. New compiler checks/mutants executed: unknown, not credited; artifact not yet verified; first error not yet established. No manual dispatch, no old corpus repeat. Local git transport unavailable (DNS), so no local compile claim. Native/loaded/module unload/physical NOT_RUN; A10 separate compile lease not consumed here. AUTH=0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF. This is PROGRESS, not REPORT_READY.
+
+
+## Agent1 terminal reconciliation
+```json
+{
+  "source": "87c9e64c1bd59a4aa958c4979049957b7918f74f",
+  "job": 139390474464,
+  "conclusion": "PASS_ACTUAL_BROKER_MODELED_EXTERNAL_OWNER_HOST_ONLY",
+  "exact_census": {
+    "success": 10,
+    "failure": 0
+  },
+  "artifact": 15048128346,
+  "artifact_sha256": "1b0a2815a38a95b0b736018429a707474e674cc6441067e6b3a8455980bba0d6",
+  "checks_each": 69,
+  "scenarios_each": 5,
+  "mutants_each": 4,
+  "actual_broker_mutants_each": 3,
+  "modeled_owner_mutants_each": 1,
+  "scope": "no actual built-in external owner initialization/destruction implemented; paused pre-ref entrant fence essential"
+}
+```

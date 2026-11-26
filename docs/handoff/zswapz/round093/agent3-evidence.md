@@ -27,3 +27,32 @@ Guarded bind now revokes only its exact route incarnation under queue_lock on la
 Frozen integration blocker: actual A11 staged patch 62db468c14f23b59e7adaae65a11dcb9969f02b3 exports only eight consumer operations (register/unregister provider, candidate_get, ticket_put/view, broker_put/try_get, queue-lock claim). No external independently owned broker accessor or init/close/destroy exports; frozen ticket header requires broker arrays/owner lifetime before try_get and all external entrants quiesced before destroy. Existing bind helper has no actual caller. Provider callback cannot invent broker owner or borrow unpinned storage. Storage bridge requires real lower callbacks and independently ordered lifetime; original_storage/original_decoder_bridge lack actual assignments. Native setup/teardown cannot be qualified without an explicit externally owned broker binding/quiescence contract; do not add duplicate local broker or export producer internals under A3 lease. Generation publication remains absent: authoritative map generation changes via ordinary/typed/discard/GC paths under ordered owner, not queue_lock; provider callback cannot read worker-owned map as a trusted queue-lock snapshot, cannot fabricate next gen or ignore pending FIFO. Existing final ordered revalidation remains but no positive feed. Need externally owned monotonic target incarnation and authoritative publication including pending FIFO/GC, suspend/revoke before guarded positive setup; do not claim success based on modeled route tests. Current destination-credit and ordered live-claim hard false remain untouched. No new BIO/reclaim, normal Kbuild unchanged. No peer implementation dependency taken; frozen contract permits hard refusal on missing ABI.
 
 Automatic exact-source workflows: [focused run45666285265/job139389189043](https://github.com/k1moradi/swapz/actions/runs/45666285265/job/139389189043) QUEUED; [product45666284948](https://github.com/k1moradi/swapz/actions/runs/45666284948) compile-only139389188954/139389189411 and exact-C139389189257/139389189453 QUEUED; [prototype45666285385/job139389189716](https://github.com/k1moradi/swapz/actions/runs/45666285385/job/139389189716) IN_PROGRESS staging step at observation. No new first CI error or artifact observed, no executed new check/mutant count yet. Original census23 automatic runs at initial observation (22 queued/1 in progress), no manual CI or duplicate dispatch. R092 crosslink https://github.com/k1moradi/swapz/issues/210#issuecomment-7167561367. AUTH0 Phase A BLOCKED compressed handoff/forced RAW/import OFF. No branch, PR, force, VM, loaded, privileged or physical mutation. PARTIAL_SOURCE_PUBLISHED_CI_PENDING_NO_GO_LIVE.
+
+
+## Agent1 terminal reconciliation
+```json
+{
+  "source": "ee9b6be46dc99a535439e3372b3004255b4d158d",
+  "job": 139389189043,
+  "conclusion": "PASS_HOST_ONLY",
+  "exact_census": {
+    "success": 28,
+    "failure": 0
+  },
+  "artifact": 15046849132,
+  "artifact_sha256": "3cbd9ae38052b6237d40e9e87ef52f0cc3f0c7297e12989c5a2a1a4a4fc1fb80",
+  "ordered_checks_each": 12708,
+  "claims_each": 5,
+  "refusals_each": 3,
+  "typed_reads_each": 2,
+  "ordered_mutants_each": 4,
+  "rollback_mutants_each": 2,
+  "foreground_controls": {
+    "historical": 24,
+    "typed": 6
+  },
+  "product_run": 45666284948,
+  "prototype_run": 45666285385,
+  "scope": "rollback actual extracted source host adapter; frozen R092 ordered corpus replay, not fresh native transactions; no binding caller/setup or generation authority; actual dm-target blob27d3af6f4146bc62adfb091e0d4f1fbc9f1dd285"
+}
+```

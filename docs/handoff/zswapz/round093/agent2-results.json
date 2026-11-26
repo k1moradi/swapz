@@ -147,5 +147,23 @@
     "actual_collector_negatives": null,
     "artifacts": null,
     "sparse_job": 139391706854
+  },
+  "agent1_terminal_reconciliation": {
+    "source": "74ee2d04de59db75d19adc2b5f3d30200a4dea98",
+    "job": 139391706207,
+    "conclusion": "PASS_ROOTLESS",
+    "exact_census": {
+      "success": 9,
+      "failure": 0
+    },
+    "actual_debug_tests": 48,
+    "actual_collector_tests": 3,
+    "debug_seconds": 11.41,
+    "collector_seconds": 0.037,
+    "sparse_job": 139391706854,
+    "mandatory_project_goals_run": 45666993763,
+    "mandatory_project_goals_pass": 7,
+    "physical_evidence_job": 139391706030,
+    "scope": "fixture and offline aggregate parser only; historical SIGPIPE exact cause not independently established; no authenticated per-BIO collector"
   }
 }

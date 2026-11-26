@@ -112,5 +112,22 @@
       ".github/workflows/phase-a-round093-external-broker-owner-host-noauth.yml",
       "docs/testing_standards.md"
     ]
+  },
+  "agent1_terminal_reconciliation": {
+    "source": "87c9e64c1bd59a4aa958c4979049957b7918f74f",
+    "job": 139390474464,
+    "conclusion": "PASS_ACTUAL_BROKER_MODELED_EXTERNAL_OWNER_HOST_ONLY",
+    "exact_census": {
+      "success": 10,
+      "failure": 0
+    },
+    "artifact": 15048128346,
+    "artifact_sha256": "1b0a2815a38a95b0b736018429a707474e674cc6441067e6b3a8455980bba0d6",
+    "checks_each": 69,
+    "scenarios_each": 5,
+    "mutants_each": 4,
+    "actual_broker_mutants_each": 3,
+    "modeled_owner_mutants_each": 1,
+    "scope": "no actual built-in external owner initialization/destruction implemented; paused pre-ref entrant fence essential"
   }
 }

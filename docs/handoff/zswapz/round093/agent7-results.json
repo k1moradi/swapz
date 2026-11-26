@@ -264,5 +264,38 @@
     "physical": false,
     "manual_ci_dispatches": 0,
     "status": "PASS_STAGED_HOST_ONLY_SCALE_MODEL_NO_GO_LIVE"
+  },
+  "agent1_terminal_reconciliation": {
+    "source": "489ae36d3df6a5b2e85748c7316566a874f4fe55",
+    "job": 139388246410,
+    "conclusion": "PASS_STAGED_HOST_ONLY_SCALE_MODEL",
+    "exact_census": {
+      "success": 9,
+      "failure": 1
+    },
+    "artifact": 15047521464,
+    "artifact_sha256": "c908ccf2500c5b487c378c4cb9d51df6eb96dbe97bca32d29f7f566fd50c29b9",
+    "checks_each": 126445,
+    "churn_each": 24000,
+    "mutants_each": 3,
+    "classifier_cases": 10,
+    "scale_checks_each": 2104,
+    "modeled_records": 1024,
+    "sidecar_bytes": 16,
+    "providers_bytes": 192,
+    "handle_owner_bytes": 2304,
+    "handle_bytes": 24,
+    "slot_bytes": 32,
+    "races": {
+      "gcc": {
+        "success": 1,
+        "decline": 3
+      },
+      "clang": {
+        "success": 0,
+        "decline": 4
+      }
+    },
+    "scope": "real bounded decoder host; scale sidecar/serialization/epoch modeled only; no native scalable implementation"
   }
 }
