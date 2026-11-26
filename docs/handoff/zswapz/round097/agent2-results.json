@@ -1,0 +1,306 @@
+{
+  "round": "097",
+  "agent": 2,
+  "kind": "selected-rcu-adapter-single-built-in-owner-source-linked-host-substitutes",
+  "conclusion": "PASS_SELECTED_OWNER_HOST_SUBSTITUTES_ONLY",
+  "engineering_freeze": "f7cb6969db189c03d592a89cae43e5464946c716",
+  "task_commit": "25bf051dbb7ff4496075238f614611f16f37dc51",
+  "tested_commit": "be44c51e132593c81f2d1ba773767efecea6792b",
+  "source_commit": "be44c51e132593c81f2d1ba773767efecea6792b",
+  "source_parent": "b641cf1a9efd8f18b0dc0e965c2c0b92473a2c65",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45856564834",
+  "workflow_run_id": 45856564834,
+  "job_id": 140036377176,
+  "jobs": [
+    {
+      "id": 140036377176,
+      "name": "owner-host",
+      "status": "completed",
+      "conclusion": "success",
+      "steps_success": 7,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45856564834/job/140036377176"
+    }
+  ],
+  "first_error": null,
+  "first_error_scope": "focused job",
+  "compiler_standard": "c2x",
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "compiler_results": {
+    "gcc": {
+      "version": "13.3.0",
+      "checks": 481,
+      "scenarios": 4,
+      "clean_checks": 237,
+      "failed_join_checks": 118,
+      "overflow_checks": 63,
+      "invalid_checks": 63,
+      "compile_log_bytes": 0,
+      "allocation_attempts": 5,
+      "successful_allocations": 4,
+      "frees": 4,
+      "hashes": 5,
+      "join_callbacks": 5,
+      "disabled_active_mint_append_calls_each": 128,
+      "disabled_modeled_rcu_entries": 0,
+      "disabled_modeled_cas_attempts": 0,
+      "disabled_hashes": 0,
+      "disabled_allocations": 0,
+      "exit": 0
+    },
+    "clang": {
+      "version": "18.1.3",
+      "checks": 481,
+      "scenarios": 4,
+      "clean_checks": 237,
+      "failed_join_checks": 118,
+      "overflow_checks": 63,
+      "invalid_checks": 63,
+      "compile_log_bytes": 0,
+      "allocation_attempts": 5,
+      "successful_allocations": 4,
+      "frees": 4,
+      "hashes": 5,
+      "join_callbacks": 5,
+      "disabled_active_mint_append_calls_each": 128,
+      "disabled_modeled_rcu_entries": 0,
+      "disabled_modeled_cas_attempts": 0,
+      "disabled_hashes": 0,
+      "disabled_allocations": 0,
+      "exit": 0
+    }
+  },
+  "actual_checks_per_compiler": 481,
+  "actual_scenarios_per_compiler": 4,
+  "actual_current_scope_correlation_cases_total": 22,
+  "actual_current_scope_correlation_cases_each": 11,
+  "actual_negative_cases_each": 10,
+  "standalone_mutation_builds": 0,
+  "native_kunit_ktap": null,
+  "native_kunit_executed": false,
+  "artifact": {
+    "id": 15135253842,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45856564834/artifacts/15135253842",
+    "bytes": 2069,
+    "sha256": "3b47f7bbf104cecc90558f5b4b25197689916bd294106f92fa380b4599db3829",
+    "independently_downloaded": true,
+    "crc_ok": true,
+    "members": {
+      "clang-clean.log": 87,
+      "clang-invalid.log": 88,
+      "clang-compile.log": 0,
+      "clang-join.log": 86,
+      "clang-overflow.log": 89,
+      "current-validator.log": 96,
+      "gcc-clean.log": 87,
+      "gcc-compile.log": 0,
+      "gcc-invalid.log": 88,
+      "gcc-join.log": 86,
+      "gcc-overflow.log": 89
+    },
+    "matches_job_upload_digest": true
+  },
+  "frozen_inputs": {
+    "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "selected_adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "selected_adapter_h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "legacy_parser": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+    "host_shim": "3dac25d2edb2d7475af3231c98af753f09e4063f",
+    "dm_target": "c60433fd6c482df9b80376ebd6326db3e56977fa",
+    "gated_storage_c": "c59cdf4d4e203a9a40d09e9048d3eba786d2e0cc",
+    "gated_storage_h": "6b1e3dc0230740be0d5f0e038b270d4984b5277d",
+    "provider_c": "3b48a4f6f31ef9c45034db7e0509efe92583e404",
+    "provider_h": "19bce03addcee7a2eeb0983ea360d4e2a5df0912",
+    "storage_c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+    "mm_r089": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "mm_r090": "337f7ff29e72d955251de0c54a9349f20c2586ec",
+    "mm_r091": "94bb74549c54a614406b71f28a9e8e8c22527d6a",
+    "dm_selected_clone": "5c8587c3d8205fc1ab346011c092601f2113a45a",
+    "dm_core_postimage": "e51af0d14465e92323970a84c1d62df3a8eb61c3",
+    "mm_r092": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+    "r094_owner": "e33bb8451210f9e1a97eb6d9bc0423f6b13a2edd",
+    "r095_capture_off": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+    "mm_r095_postimage": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+    "r096_owner_retry": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+    "r096_owner_postimage": "278a93a3fd3fd260444aebc55d4a87112e56f704",
+    "r096_ticket_postimage": "70109f2c2ce9f60681649bd4807382248d0a41a2"
+  },
+  "owned_blobs": {
+    "src/kernel/native-observation-owner.c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+    "src/kernel/native-observation-owner.h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+    "tests/tools/native-observation-current-export.py": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+    "tests/runtime/native/fixtures/native-observation-owner-host-model.h": "47042c1c9f388f29e2989492c15ef479573b1019",
+    "tests/runtime/native/fixtures/native-observation-owner-host.c": "0ad7332910fed9e385171c20f3250014c411a4b8",
+    "tests/runtime/native/native-observation-owner-test.py": "160d875f946f6c410d35dbba249113ce9a4436a9",
+    ".github/workflows/phase-a-round097-observation-owner-host-noauth.yml": "0b054f3fb47e7f5579cfbe711dceeaa2c460a8c0",
+    "docs/handoff/zswapz/round097/agent2-selected-observation-owner-readiness.md": "37ab356b97b09abbbc55621e70d722301b76408c"
+  },
+  "standards": {
+    "frozen_blob": "f699ab78cc8cd0a11a8b557b572ee9eeb7c82bb7",
+    "frozen_bytes": 1868056,
+    "actual_parent_blob": "bec6666e6222b0eca25df5d4c1b0b197cbbaef23",
+    "actual_parent_bytes": 1869039,
+    "new_blob": "06598d838ac9b7ef05bf71f058bf1188bd4fd5f3",
+    "new_bytes": 1871039,
+    "appended_bytes": 2000,
+    "actual_parent_sha256": "cc7a30705d3395da80073c075e4827a0ccbb401544cdbcdc5fe2eca4863aa226",
+    "connector_actual_parent_roundtrip_verified": true,
+    "complete_prefix_readback_verified": true,
+    "ci_prefix_status": "PASS",
+    "ci_frozen_recorder_parser_shim_pins": 4
+  },
+  "selected_r096": {
+    "source": "fa03b9f09cc4e6892f09282157f044edd694f073",
+    "run": 45849741037,
+    "job": 140012676393,
+    "checks_each": 200092,
+    "scenarios_each": 5,
+    "accepted_replayed": false
+  },
+  "wire": {
+    "header_bytes": 104,
+    "record_bytes": 296,
+    "footer_bytes": 24,
+    "mapping_source_lineage": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+    "build_source_macro": "SWAPZ_OBSERVATION_BUILD_SOURCE",
+    "current_scope_digest": "cold canonical manifest from exact compiler source macro and independently supplied artifact/scope",
+    "source_authentication": false
+  },
+  "owner": {
+    "max_records": 8192,
+    "max_record_storage_bytes": 2424832,
+    "one_shot_per_boot": true,
+    "guard": "SWAPZ_TRIAL_OBSERVATION",
+    "exported_wrapper_names": [
+      "swapz_trial_observation_active",
+      "swapz_trial_observation_mint",
+      "swapz_trial_observation_append"
+    ],
+    "actual_native_symbol_export_check": false,
+    "external_join_contract_installed_native": false
+  },
+  "scope_tests": [
+    "exact current-source emitted wire",
+    "stale manifest source",
+    "wrong expected source",
+    "historical lineage as expected build source",
+    "nonce/digest mismatch",
+    "wrong original ACK token",
+    "clone/original alias",
+    "missing upper ACK debt",
+    "join-loss footer",
+    "overflow footer",
+    "malformed event loss"
+  ],
+  "same_round_existing_lane_checked_before_coding": true,
+  "overlapping_implementation": false,
+  "same_round_peer_dependency": false,
+  "local_compilation": false,
+  "native_compile_performed": false,
+  "native_capture": false,
+  "native_kernel_execution": false,
+  "source_mapped_authenticated": false,
+  "actual_physical_io": false,
+  "phase_a": "BLOCKED",
+  "auth": 0,
+  "compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import": false,
+  "vm": false,
+  "module_load": false,
+  "normal_kbuild_changed": false,
+  "dm_mm_core_edits": false,
+  "physical_admission": "NO_GO",
+  "automatic_source_push_census": {
+    "total": 10,
+    "counts": {
+      "in_progress": 4,
+      "success": 3,
+      "queued": 3
+    },
+    "runs": [
+      {
+        "id": 45856564615,
+        "name": "Experimental swapz production C qualification",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564615"
+      },
+      {
+        "id": 45856564904,
+        "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564904"
+      },
+      {
+        "id": 45856564889,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564889"
+      },
+      {
+        "id": 45856564699,
+        "name": "Systemd/package be44c51e132593c81f2d1ba773767efecea6792b (run 45856564699)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564699"
+      },
+      {
+        "id": 45856564741,
+        "name": "Rootless physical evidence adversarial audit",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564741"
+      },
+      {
+        "id": 45856564812,
+        "name": "Private kernel debug and static contracts",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564812"
+      },
+      {
+        "id": 45856564834,
+        "name": "R097 single observation owner host NO_AUTH",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564834"
+      },
+      {
+        "id": 45856564619,
+        "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564619"
+      },
+      {
+        "id": 45856564884,
+        "name": "Native kernel-C project-goal regressions",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564884"
+      },
+      {
+        "id": 45856564768,
+        "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45856564768"
+      }
+    ],
+    "scope": "snapshot at evidence publication, not whole-main qualification"
+  },
+  "manual_duplicate_dispatch": false,
+  "limitations": [
+    "Actual selected owner/adapter tested with host substitutes (pthread mutex/rwlock, C11 atomics, OpenSSL SHA), not Linux RCU/LKMM/IRQ/native SHA or actual GPL linkage",
+    "No actual start/control caller, external native join, producer/consumer events, or independent native upper ACK yet; scope source is independently asserted, not authenticated",
+    "Cold start one shot per boot, failed external join retains allocation until genuine join",
+    "Frozen DM pin-through-copy implemented but gated storage and autonomous retry consumption unresolved at freeze; actual current sources reviewed, no same-round peer code",
+    "Existing path-triggered broad workflows run automatically; no manual dispatch or accepted stress replay"
+  ],
+  "next_action": "Agent1 integrate one selected built-in owner with actual guarded A3/A11 producer/consumer and independent source/ACK/debt witnesses, then qualify one connected native composition; no activation now."
+}
