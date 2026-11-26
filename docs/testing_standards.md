@@ -20950,3 +20950,7 @@ Require source pins, strict GCC/Clang, ASan/UBSan, leak checks and semantic
 session/candidate mutants. No replay of R096 accepted retry corpus, native
 build or runtime capture. AUTH0, Phase A BLOCKED; compressed handoff, forced
 RAW and import remain OFF.
+
+## Round098 Agent10 — changed SMP directed native preflight (AUTH0)
+
+Retain the R097 failed verifier and five actual compiled object hashes; do not replay UP or weaken its locked cmpxchg assertion. On the exact R098 freeze stage the real original raw chain, only R095 capture-off, R096 owner retry and R097 producer with checked pre/postimages; selected RCU adapter and built-in owner only, actual gated target and provider. Require effective CONFIG_SMP=y, CONFIG_TREE_RCU=y, CONFIG_NR_CPUS=4 and no Tiny RCU before compilation. Retain actual directed objects (including partial outputs on failure), locked atomic instructions, RCU/workqueue and actual target/owner/producer/storage gate relocations, config, logs and diagnostic relocatable when meaningful. Report hard-off scope, missing lineage and event conformance limitations; do not synthesize positive call sites or runtime evidence. No full kernel/module link, MODPOST, fake symbols or duplicate native attempt; later connected freeze requires separate full native and distro compatibility review. Preserve the entire actual parent byte prefix; no VM, activation, load, device or physical work.
