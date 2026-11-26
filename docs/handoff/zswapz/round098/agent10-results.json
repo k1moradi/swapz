@@ -1,0 +1,231 @@
+{
+  "round": "098",
+  "agent": 10,
+  "kind": "changed-smp-directed-native-components-only",
+  "tested_commit": "da19176ae71c0c1b0ae8e5a55fdb41fdeec1038d",
+  "source_parent": "d3b7896bdc63bff8e5d84b50319aea55657c908f",
+  "engineering_freeze": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "verifier_blob": "96e6750971c182dfe87e6e57eac048c7c3a529b6",
+  "workflow_blob": "56a543c48592fe74b04b333d19894c1b9e3df9d3",
+  "staging_blob": "6263f1aa27ccdf9924fd6b03d18decb39e3c06b7",
+  "standards_parent_blob": "dff61588713f8ceeecb5e406cab8788e12990147",
+  "standards_new_blob": "b681c3997a733ba40ae85cbd9c90f238c057e1d7",
+  "complete_parent_prefix_verified_by_exact_blob_readback": true,
+  "source_parent_verified": true,
+  "previous_r097": {
+    "source": "007621f40e839e119851fce0c3d63ffd9d776153",
+    "run": 45856047307,
+    "job": 140034584799,
+    "conclusion": "FAIL_NATIVE_VERIFIER_AFTER_FIVE_OBJECTS_COMPILED",
+    "first_error": "native-owner-recorder-symbol-check recorder-atomic-reservation-instruction",
+    "artifact": 15135832585,
+    "sha256": "b50ab4396e4326ab32ca23bf9d12cf86aa2b0d0fb9bc49d78c7f7f410867c174",
+    "archive_bytes": 198620,
+    "entries": 64,
+    "objects_compiled": 5,
+    "object_hashes_verified": 5,
+    "object_sha256": {
+      "native-observation-adapter.o": "28a8d65b4f1df33fd692c8383af4bb387f093ddc6a7cf14fbac9bc99f5f2a2fd",
+      "zswap-original-ticket.o": "e50e3ea34d348bdceb825977b2b276061234713bef358ea66e249d0be3116122",
+      "dm-target.o": "cb14d1138e9b59287da023610a3fbe961373ad98fb3a49bf73c4b80d605ba8ec",
+      "zswap-original-decoder-shared.o": "3cb06bd8cb438c1a94ba811cbac7a58208eadf5dd7056fe7f3807695c07858f8",
+      "zswap-original-storage-shared-decoder.o": "43fb4c0e6e5b48f49891115bb1d0a088ad014b6cac6f105fe436553458124306"
+    },
+    "actual_config": "CONFIG_SMP not set, CONFIG_TINY_RCU=y, CONFIG_PREEMPT_LAZY=y",
+    "actual_cmpxchg_sites": [
+      "0x63d cmpxchg %edi,(%rsi)",
+      "0xae3 cmpxchg %r9d,(%r8)"
+    ],
+    "actual_rcu_import": "synchronize_rcu",
+    "actual_owner_workqueue_import": "queue_work_on",
+    "adapter_gate_imports": 4,
+    "adapter_direct_provider_imports": 0,
+    "diagnostic_composite": "NOT_RUN",
+    "full_kernel_link": "NOT_RUN",
+    "modpost": "NOT_RUN",
+    "exact_census": {
+      "success": 7,
+      "failure": 1,
+      "queued": 1,
+      "in_progress": 1
+    },
+    "scope": "Actual raw overlays and five native directed objects compiled; verifier demanded literal lock cmpxchg on UP configuration. Retain FAIL; no evidence of SMP correctness. Correct build config and verifier based on actual architecture, not weaken regex or rerun same old composition.",
+    "terminal_job_failure_and_error_log_verified": true,
+    "checkpoint_sha": "d3b7896bdc63bff8e5d84b50319aea55657c908f",
+    "replayed": false
+  },
+  "requested_config": {
+    "SMP": true,
+    "TREE_RCU": true,
+    "TINY_RCU": false,
+    "NR_CPUS": 4,
+    "actual": null
+  },
+  "locked_cmpxchg_assertion_retained": true,
+  "requested_objects": [
+    "mm/round098-swapz/zswap-original-ticket.o",
+    "mm/round098-swapz/native-observation-adapter.o",
+    "mm/round098-swapz/native-observation-owner.o",
+    "mm/zswap.o",
+    "mm/page_io.o",
+    "dm-target.o",
+    "zswap-original-storage-shared-decoder.o",
+    "zswap-original-decoder-shared.o"
+  ],
+  "product_pin_count": 56,
+  "raw_capture_off": {
+    "patch": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+    "before": "98a8a6a66858204b61875ad9b2e8cfb0ecf8980a",
+    "after": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+    "alternative_stacked": false
+  },
+  "owner_retry": {
+    "patch": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+    "ticket_after": "70109f2c2ce9f60681649bd4807382248d0a41a2",
+    "owner_after": "278a93a3fd3fd260444aebc55d4a87112e56f704"
+  },
+  "producer": {
+    "patch": "c35b35c18cc11f9b86c0b65856dbc0cd2a0bd2c8",
+    "predicted_postimages": {
+      "mm/zswap.c": "128495cf9b35d37b93db1b165dc1562de94b5b89",
+      "mm/page_io.c": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+      "include/linux/swapz_mm_carrier.h": "7083f7acdb439022a073c22261b7541d15806e5e"
+    },
+    "actual_apply": "PENDING",
+    "r097_host_at_freeze": "QUEUED_NOT_ACCEPTED"
+  },
+  "selected_recorder": {
+    "adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "adapter_h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "owner_c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+    "owner_h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+    "build_source_macro": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+    "alternative_included": false
+  },
+  "frozen_target": "f1922cc26caf7bfa097c1f561f8719744c3a4e75",
+  "gated_adapter_c": "c59cdf4d4e203a9a40d09e9048d3eba786d2e0cc",
+  "gated_adapter_h": "6b1e3dc0230740be0d5f0e038b270d4984b5277d",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45869981885",
+  "jobs": [
+    {
+      "id": 140082576414,
+      "run_id": 45869981885,
+      "attempt": 1,
+      "name": "directed-r097-smp-x86-objects",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Canonical exact source and parent before scratch checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Provision compiler, ELF and kernel build prerequisites (runner packages only)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "Raw immutable stage, SMP directed native objects and diagnostic relocatable only",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Preserve exact compile logs and manifest even on failure",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 16
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 17
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 18
+        }
+      ]
+    }
+  ],
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_error_status": "NOT_INSPECTED_TERMINAL_LOGS",
+  "artifact": null,
+  "actual_native_counts": null,
+  "exact_source_automatic_workflows": {
+    "success": 2,
+    "in_progress": 6,
+    "queued": 2
+  },
+  "exact_source_automatic_run_ids": [
+    45869981876,
+    45869981859,
+    45869981885,
+    45869981874,
+    45869982088,
+    45869981979,
+    45869982152,
+    45869981881,
+    45869982066,
+    45869981994
+  ],
+  "full_kernel_link": false,
+  "modpost": "NOT_REQUESTED",
+  "final_ko": false,
+  "native_runtime": "NOT_RUN",
+  "same_round_peer_code": false,
+  "additional_native_dispatches": 0,
+  "production_kbuild_changed": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "actual_physical_io": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false
+}
