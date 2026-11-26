@@ -1,0 +1,95 @@
+name: Round095 frozen integrated R094 kernel module compile link AUTH0
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round095-integrated-native-compile-verify.py'
+      - '.github/workflows/phase-a-round095-integrated-native-compile-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  integrated-r094-x86-compile-link:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Canonical exact source and parent before scratch checkout
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
+          python3 - <<'PY'
+          import hashlib
+          import pathlib
+          import subprocess
+          import os
+          path = 'docs/testing_standards.md'
+          before = os.environ['SWAPZ_PUSH_BEFORE_SHA']
+          previous = subprocess.check_output(['git', 'show', before + ':' + path])
+          current = pathlib.Path(path).read_bytes()
+          if not previous or len(current) <= len(previous) or not current.startswith(previous):
+              raise SystemExit('FAIL: complete parent standards byte prefix not preserved')
+          print('R095_STANDARDS_PREFIX_PASS', len(previous), hashlib.sha256(previous).hexdigest(),
+                len(current), hashlib.sha256(current).hexdigest())
+          PY
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Provision compiler, ELF and kernel build prerequisites (runner packages only)
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config \
+            openssl perl python3 xz-utils cpio
+          dpkg-query -W libelf-dev libssl-dev gcc binutils
+      - name: Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          python3 -B swapz/tests/tools/round095-integrated-native-compile-verify.py \
+            --prerequisites-only --evidence round095-compile-evidence \
+            --source-sha "$GITHUB_SHA" --source-parent "$SWAPZ_PUSH_BEFORE_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ff972661a75ca7f8c3c0458c3feb8b603c185eb8
+          path: baseline
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Raw immutable stage, directed objects, full x86 kernel and actual product module link
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          python3 -B swapz/tests/tools/round095-integrated-native-compile-verify.py \
+            --baseline baseline --linux linux \
+            --out "$RUNNER_TEMP/round095-x86-build" \
+            --module "$RUNNER_TEMP/round095-product-module" \
+            --evidence round095-compile-evidence \
+            --source-sha "$GITHUB_SHA" --source-parent "$SWAPZ_PUSH_BEFORE_SHA"
+      - name: Preserve exact compile logs and manifest even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round095-integrated-native-compile-evidence
+          path: round095-compile-evidence/
+          if-no-files-found: warn
+          retention-days: 14
