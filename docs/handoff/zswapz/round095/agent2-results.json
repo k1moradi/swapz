@@ -83,7 +83,41 @@
           "bytes": 2062,
           "sha256": "f7ffbfaf517a5061a1fb006f98836eb0fa16c63303c18c3f61ff8038f08c8dff",
           "url": "https://github.com/k1moradi/swapz/actions/runs/45771314540/artifacts/15094490812",
-          "verification": "API metadata matches exact head and upload log; archive not independently extracted"
+          "verification": "Independently downloaded ZIP: exact 2062 bytes, SHA-256 matches API metadata and upload log, ZIP CRC all members valid, all six logs read and counts match",
+          "independent_zip_verified": true,
+          "crc_verified": true,
+          "members": [
+            {
+              "name": "clang-compile.log",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            {
+              "name": "clang-export.log",
+              "bytes": 1234,
+              "sha256": "998771fd813cbeb3dc5f3b4f9ffa2e39b810eac3b7217b314c0962796be2b7c2"
+            },
+            {
+              "name": "clang-recorder.log",
+              "bytes": 240,
+              "sha256": "1a7dd5171f842bf5dbf240fbbed70ca34f11397cba7585ee538cd83b7b0175e4"
+            },
+            {
+              "name": "gcc-compile.log",
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            {
+              "name": "gcc-export.log",
+              "bytes": 1234,
+              "sha256": "998771fd813cbeb3dc5f3b4f9ffa2e39b810eac3b7217b314c0962796be2b7c2"
+            },
+            {
+              "name": "gcc-recorder.log",
+              "bytes": 239,
+              "sha256": "b6caa265006f8ef2c1132625fecb25048ab77f0377b9d8724d67d73bfe425ec1"
+            }
+          ]
         }
       ],
       "steps_success": 7
@@ -147,8 +181,86 @@
   "duplicate_manual_ci": false,
   "same_round_peer_dependency": false,
   "exact_source_workflow_census": {
+    "success": 9,
+    "cancelled": 1,
+    "failure": 0,
+    "queued": 0,
+    "in_progress": 0
+  },
+  "capture_completeness_limitation": "Clang threaded contention fixture lost 2048/4096; native completeness not established; sticky loss blocks admission",
+  "prior_exact_source_workflow_census": {
     "success": 1,
     "queued": 9
   },
-  "capture_completeness_limitation": "Clang threaded contention fixture lost 2048/4096; native completeness not established; sticky loss blocks admission"
+  "exact_source_workflows": [
+    {
+      "id": 45771314617,
+      "name": "Native kernel-C project-goal regressions",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314559,
+      "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314599,
+      "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+      "status": "completed",
+      "conclusion": "cancelled"
+    },
+    {
+      "id": 45771314836,
+      "name": "Private kernel debug and static contracts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314540,
+      "name": "Native observation recorder host NO_AUTH",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314542,
+      "name": "Rootless physical evidence adversarial audit",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314532,
+      "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314748,
+      "name": "Systemd/package 8c73b49a87b2faffc950effb651dd218e564d6ce (run 45771314748)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314756,
+      "name": "Experimental swapz production C qualification",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 45771314562,
+      "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "cancelled_workflow": {
+    "run_id": 45771314599,
+    "job_id": 139744356711,
+    "conclusion": "cancelled",
+    "last_step": "Install rootless actual C compiler and source test dependencies",
+    "test_steps": "skipped",
+    "cause": "Not established by job metadata; no failure or PASS inferred",
+    "rerun": false
+  }
 }

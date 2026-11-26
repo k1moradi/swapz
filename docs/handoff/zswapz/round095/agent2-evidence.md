@@ -109,3 +109,49 @@ no whole-source green claim.
 [Artifact 15094490812](https://github.com/k1moradi/swapz/actions/runs/45771314540/artifacts/15094490812), 2062 bytes,
 SHA-256 f7ffbfaf517a5061a1fb006f98836eb0fa16c63303c18c3f61ff8038f08c8dff. Exact source association and upload-log digest
 match metadata; no independent ZIP extraction or byte-hash claim.
+
+## Post-terminal independent artifact and CI census reconciliation
+
+Follow-up to [previous terminal evidence](https://github.com/k1moradi/swapz/commit/86ca0cb6a853b7c77e548dcf1fa1fe3554f696c9):
+no source changes, no test rerun. Independently downloaded artifact 15094490812
+(2,062 bytes), computed ZIP SHA-256
+f7ffbfaf517a5061a1fb006f98836eb0fa16c63303c18c3f61ff8038f08c8dff,
+matched exact run metadata/upload log, CRC validated all six members and
+read each archived log. Both compiler logs empty, both export logs show
+5/5 tests, 41/19/1 negatives and 53 fabricated records; recorder logs
+match all measured counts/timings and Clang 2048/4096 accepted with loss=1.
+No new native or physical inference.
+
+| Archive member | Bytes | SHA-256 |
+| --- | ---: | --- |
+| clang-compile.log | 0 | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
+| clang-export.log | 1234 | 998771fd813cbeb3dc5f3b4f9ffa2e39b810eac3b7217b314c0962796be2b7c2 |
+| clang-recorder.log | 240 | 1a7dd5171f842bf5dbf240fbbed70ca34f11397cba7585ee538cd83b7b0175e4 |
+| gcc-compile.log | 0 | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
+| gcc-export.log | 1234 | 998771fd813cbeb3dc5f3b4f9ffa2e39b810eac3b7217b314c0962796be2b7c2 |
+| gcc-recorder.log | 239 | b6caa265006f8ef2c1132625fecb25048ab77f0377b9d8724d67d73bfe425ec1 |
+
+Exact source 8c73b49a87b2faffc950effb651dd218e564d6ce: all ten automatic workflows terminal, **9 success,
+1 cancelled**, 0 failure, 0 queued/running. No whole-source all-green claim.
+
+| Exact-source run | Conclusion | Workflow |
+| --- | --- | --- |
+| [45771314617](https://github.com/k1moradi/swapz/actions/runs/45771314617) | success | Native kernel-C project-goal regressions |
+| [45771314559](https://github.com/k1moradi/swapz/actions/runs/45771314559) | success | Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source) |
+| [45771314599](https://github.com/k1moradi/swapz/actions/runs/45771314599) | cancelled | Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source |
+| [45771314836](https://github.com/k1moradi/swapz/actions/runs/45771314836) | success | Private kernel debug and static contracts |
+| [45771314540](https://github.com/k1moradi/swapz/actions/runs/45771314540) | success | Native observation recorder host NO_AUTH |
+| [45771314542](https://github.com/k1moradi/swapz/actions/runs/45771314542) | success | Rootless physical evidence adversarial audit |
+| [45771314532](https://github.com/k1moradi/swapz/actions/runs/45771314532) | success | Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source) |
+| [45771314748](https://github.com/k1moradi/swapz/actions/runs/45771314748) | success | Systemd/package 8c73b49a87b2faffc950effb651dd218e564d6ce (run 45771314748) |
+| [45771314756](https://github.com/k1moradi/swapz/actions/runs/45771314756) | success | Experimental swapz production C qualification |
+| [45771314562](https://github.com/k1moradi/swapz/actions/runs/45771314562) | success | Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source) |
+
+Cancelled [job 139744356711](https://github.com/k1moradi/swapz/actions/runs/45771314599/job/139744356711)
+stopped during rootless compiler/source-test dependency installation;
+all actual pinned Linux/production C test steps skipped. Cancellation
+cause not established by job metadata. No manual retry, no claimed PASS
+or new error attribution. Dedicated Agent2 result unchanged:
+PASS_HOST_RECORDER_AND_OFFLINE_EXPORT_ONLY / NO_GO_LIVE. AUTH0, Phase A
+BLOCKED; compressed handoff, forced RAW and import OFF. Native producer
+and physical admission remain unestablished; no new lane or peer dependency.
