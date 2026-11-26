@@ -1,7 +1,7 @@
 {
   "round": "094",
   "agent": 11,
-  "status": "IN_PROGRESS",
+  "status": "PASS_HOST_ONLY",
   "publication_gate": "ROUND_OPEN",
   "opening_commit": "e4de57c4e96669add5072290870ca199d17d8a04",
   "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
@@ -58,22 +58,46 @@
     },
     "planned_scenarios_per_compiler": 5,
     "planned_mutants_per_compiler": 6,
-    "actual_checks": null,
-    "actual_mutants_killed": null,
+    "actual_checks": {
+      "gcc": 78,
+      "clang": 78
+    },
+    "actual_mutants_killed": {
+      "gcc": 6,
+      "clang": 6
+    },
     "run_id": 45756711070,
     "job_id": 139696920288,
     "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45756711070",
     "job_url": "https://github.com/k1moradi/swapz/actions/runs/45756711070/job/139696920288",
-    "ci_status": "TERMINAL_UNRECONCILED",
+    "ci_status": "COMPLETED",
     "job_conclusion": "success",
     "first_error": null,
-    "artifact": null,
+    "artifact": {
+      "id": 15088525802,
+      "size_bytes": 5750,
+      "sha256": "95b76abea75dba611f3cf3840ad380ecdfdabe9aa3141800b5c4afcfd4e4d46f",
+      "head_sha": "40b52f8e7a80680dcb6b074df5be897f57eae1b9",
+      "verification": "workflow artifact metadata and exact-source decoded job logs; no archive extraction claimed"
+    },
     "native_compile": "NOT_RUN",
     "native_modpost": "NOT_RUN",
     "native_rcu": "NOT_RUN",
     "native_owner_integration": "NOT_RUN",
     "module_unload": "NOT_RUN",
-    "local_git": "DNS resolution failure; no local compile claim"
+    "local_git": "DNS resolution failure; no local compile claim",
+    "actual_scenarios": {
+      "gcc": 5,
+      "clang": 5
+    },
+    "mutant_names": [
+      "ignore_paused_entrant",
+      "ignore_close_identity",
+      "ignore_wrap",
+      "ignore_unwind",
+      "ignore_second_open",
+      "ignore_revoked_epoch"
+    ]
   },
   "standards": {
     "parent_blob": "13eaf8c16d39a2d5cc5eea55ed24fc4a5f72a383",
@@ -81,7 +105,8 @@
     "parent_bytes": 1831396,
     "append_bytes": 1468,
     "published_bytes": 1832864,
-    "complete_prefix_verified": true
+    "complete_prefix_verified": true,
+    "parent_sha256": "a7061cd11878bf725be16826a9e164c8d1aac6911da911b910f6fac81e670060"
   },
   "manual_ci_dispatches": 0,
   "duplicate_corpus": false,
