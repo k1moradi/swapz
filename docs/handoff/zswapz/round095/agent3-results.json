@@ -87,10 +87,67 @@
     },
     "run": 45785010481,
     "job": 139789467324,
-    "status": "IN_PROGRESS",
+    "status": "SUCCESS",
     "prefix_preflight": "PASS",
-    "actual_compiler_counts": null,
-    "artifact": null,
+    "actual_compiler_counts": {
+      "gcc": {
+        "standard": "-std=c2x",
+        "checks": 673,
+        "claims": 5,
+        "claimed_errors": 3,
+        "typed_reads": 2,
+        "modeled_fallbacks": 6,
+        "modeled_preparations": 6,
+        "reopens": 11,
+        "mutants": [
+          {
+            "name": "ignore_live_permission",
+            "witness": "R095_SEMANTIC_FAIL line=343 handled == expected_claim"
+          },
+          {
+            "name": "ignore_registration_incarnation",
+            "witness": "R095_SEMANTIC_FAIL line=343 handled == expected_claim"
+          },
+          {
+            "name": "ignore_prepared_owner",
+            "witness": "R095_SEMANTIC_FAIL line=343 handled == expected_claim"
+          },
+          {
+            "name": "ignore_pending_release",
+            "witness": "R095_SEMANTIC_FAIL line=392 allocations == 4U && owner_allocations == 3U && fixture_target.original_storage"
+          }
+        ]
+      },
+      "clang": {
+        "standard": "-std=c23",
+        "checks": 673,
+        "claims": 5,
+        "claimed_errors": 3,
+        "typed_reads": 2,
+        "modeled_fallbacks": 6,
+        "modeled_preparations": 6,
+        "reopens": 11,
+        "mutants": [
+          {
+            "name": "ignore_live_permission",
+            "witness": "R095_SEMANTIC_FAIL line=343 handled == expected_claim"
+          },
+          {
+            "name": "ignore_registration_incarnation",
+            "witness": "R095_SEMANTIC_FAIL line=343 handled == expected_claim"
+          },
+          {
+            "name": "ignore_prepared_owner",
+            "witness": "R095_SEMANTIC_FAIL line=343 handled == expected_claim"
+          },
+          {
+            "name": "ignore_pending_release",
+            "witness": "R095_SEMANTIC_FAIL line=392 allocations == 4U && owner_allocations == 3U && fixture_target.original_storage"
+          }
+        ]
+      }
+    },
+    "artifact": 15100256797,
     "product_run": 45785010465,
     "product_exact_jobs": [
       139789467784,
@@ -101,7 +158,30 @@
     "ordered_run": 45785010453,
     "ordered_job": 139789467658,
     "target_owner_run": 45785010503,
-    "target_owner_job": 139789467461
+    "target_owner_job": 139789467461,
+    "first_error": null,
+    "artifact_bytes": 793,
+    "artifact_sha256": "c637d8cfdf0685f7df800aa1bc1d8ccc1e735902b45d3d43449cc08f172f2d32",
+    "artifact_zip_integrity": "PASS",
+    "artifact_digest_matches_ci": true,
+    "frozen_inventory_count": 54,
+    "fragment_sha256": "43657e523b486a983980cd269ccc6a321b650821c050a176e1b420b2fc4fbf78",
+    "workflow_census": {
+      "total": 30,
+      "success": 30,
+      "failed": 0,
+      "pending": 0
+    },
+    "product_status": "success",
+    "product_compile_jobs": [
+      139789467431,
+      139789467772
+    ],
+    "goals_status": "success",
+    "ordered_status": "success",
+    "target_owner_status": "success",
+    "source_diff_check": "PASS_CI",
+    "ci_complete_historical_prefix": "PASS"
   },
   "planned_only": {
     "scenarios": 11,
@@ -126,7 +206,18 @@
     "manual_ci_dispatches": 0,
     "vm": false,
     "module_load": false,
-    "physical_mutation": false
+    "physical_mutation": false,
+    "terminal_update": {
+      "kind": "evidence_only",
+      "parent": "1afc53328376f9a3b95331bbaac63f208d40556e",
+      "standards_unchanged": true,
+      "manual_ci_dispatches": 0,
+      "duplicate_fixture": false
+    }
   },
-  "conclusion": "CORRECTED_SOURCE_PUBLISHED_HOST_CI_PENDING_NO_GO_LIVE"
+  "conclusion": "PASS_COMPOSED_HOST_ONLY_NO_GO_LIVE",
+  "tested_commit": "4b15bdf4f841195ed240243a81ed13eaad7cf396",
+  "first_error": null,
+  "source_mapped_authenticated": false,
+  "actual_physical_io": false
 }
