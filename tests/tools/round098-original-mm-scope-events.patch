@@ -1,0 +1,333 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -44,0 +45,3 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++#include <linux/file.h>
++#include <linux/fs.h>
+@@ -45,0 +49,1 @@
++#endif
+@@ -982,2 +986,2 @@
+-/* No current runtime scope or publication mechanism. The hard-off gate
+- * below also protects ordinary store and eviction from speculative work.
++/* No implicit runtime scope or automatic publication. The default-off
++ * gate protects ordinary store and eviction from speculative work.
+@@ -984,0 +989,11 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++/* One-shot permanent storage; only the RCU publication is revoked.
++ * Control owns file and broker cap until all carrier debt is drained.
++ */
++static DEFINE_MUTEX(swapz_mm_scope_lock);
++static struct swapz_mm_trial_scope swapz_mm_scope_storage;
++static const struct swapz_mm_trial_scope __rcu *swapz_mm_scope;
++static struct swapz_ticket_cap swapz_mm_scope_cap;
++static struct file *swapz_mm_scope_file;
++static bool swapz_mm_scope_used;
++#else
+@@ -985,0 +1001,1 @@
++#endif
+@@ -1008,0 +1025,120 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++static bool swapz_mm_scope_valid(const struct swapz_mm_trial_scope *scope)
++{
++	return scope && scope->identity && scope->bdev && scope->broker &&
++	       scope->session && scope->table_epoch && scope->target_epoch &&
++	       scope->area_epoch && scope->swap_type < MAX_SWAPFILES &&
++	       scope->first_sector && !(scope->first_sector & 7) &&
++	       scope->sector_count >= 8 && scope->sector_count <= 16 * 8 &&
++	       !(scope->sector_count & 7) &&
++	       scope->sector_count <= (sector_t)-1 - scope->first_sector &&
++	       (scope->first_sector + scope->sector_count - 8) / 8 <= U32_MAX;
++}
++
++int swapz_mm_trial_scope_publish(const struct swapz_mm_trial_scope *scope,
++	struct file *mapper_file)
++{
++	int error = -EINVAL;
++
++	/* The trusted caller owns a live opened block file through this call.
++	 * Holding a file ref retains the actual bdev/open, not just its address.
++	 * No open, claim or device operation is performed by this interface.
++	 * Controller must hold the current owner identity, freeze its request,
++	 * and serialize target readiness/route revoke under target queue lock
++	 * before calling scope revoke; join area, map and terminal ingress.
++	 */
++	if (!swapz_mm_scope_valid(scope) || !mapper_file ||
++	    !S_ISBLK(file_inode(mapper_file)->i_mode) ||
++	    file_bdev(mapper_file) != scope->bdev || bdev_is_partition(scope->bdev) ||
++	    scope->first_sector + scope->sector_count > bdev_nr_sectors(scope->bdev) ||
++	    atomic64_read(&swapz_mm_area_epochs[scope->swap_type]) != scope->area_epoch)
++		return error;
++	mutex_lock(&swapz_mm_scope_lock);
++	if (swapz_mm_scope_used || swapz_mm_scope_file) {
++		error = -EBUSY;
++		goto unlock;
++	}
++	error = swapz_ticket_broker_try_get(scope->broker, scope->session,
++		scope->table_epoch, &swapz_mm_scope_cap);
++	if (error)
++		goto unlock;
++	get_file(mapper_file);
++	swapz_mm_scope_file = mapper_file;
++	swapz_mm_scope_storage = *scope;
++	swapz_mm_scope_used = true;
++	rcu_assign_pointer(swapz_mm_scope, &swapz_mm_scope_storage);
++unlock:
++	mutex_unlock(&swapz_mm_scope_lock);
++	return error;
++}
++
++int swapz_mm_trial_scope_revoke(u64 identity)
++{
++	int error = -ESTALE;
++
++	mutex_lock(&swapz_mm_scope_lock);
++	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity)
++		goto unlock;
++	/* No producer acquires this control mutex. Unpublish before grace;
++	 * a pre-reference entrant after grace sees NULL and cannot retain.
++	 * An already retained carrier keeps busy set through final release.
++	 */
++	if (rcu_access_pointer(swapz_mm_scope)) {
++		rcu_assign_pointer(swapz_mm_scope, NULL);
++		synchronize_rcu();
++	}
++	error = -EBUSY;
++	if (atomic_read_acquire(&swapz_mm_busy))
++		goto unlock; /* controller joins external debt, then retries */
++	error = swapz_ticket_broker_put(&swapz_mm_scope_cap);
++	if (error)
++		goto unlock; /* quarantine file and storage; never reuse */
++	fput(swapz_mm_scope_file);
++	swapz_mm_scope_file = NULL;
++unlock:
++	mutex_unlock(&swapz_mm_scope_lock);
++	return error;
++}
++
++bool swapz_mm_trial_scope_matches_route(struct block_device *bdev,
++	sector_t sector, u64 area, u32 type, u8 codec, u32 length,
++	const struct swapz_mm_route *route)
++{
++	const struct swapz_mm_trial_scope *scope;
++	bool matched;
++
++	if (!rcu_access_pointer(swapz_mm_scope) || type >= MAX_SWAPFILES ||
++	    atomic64_read(&swapz_mm_area_epochs[type]) != area)
++		return false;
++	rcu_read_lock();
++	scope = rcu_dereference(swapz_mm_scope);
++	matched = swapz_mm_scope_matches(scope, bdev, sector, area, type,
++		codec, length, route);
++	rcu_read_unlock();
++	return matched;
++}
++EXPORT_SYMBOL_GPL(swapz_mm_trial_scope_matches_route);
++
++/* No caller-provided area/type for read/ordinary/discard BIOs. Use the
++ * retained scope's own current area epoch, and exact whole-page geometry.
++ * This is an evidence prefilter; DM still owns exact target admission.
++ */
++bool swapz_mm_trial_scope_matches_origin(struct block_device *bdev, sector_t sector)
++{
++	const struct swapz_mm_trial_scope *scope;
++	bool matched = false;
++
++	if (!rcu_access_pointer(swapz_mm_scope))
++		return false;
++	rcu_read_lock();
++	scope = rcu_dereference(swapz_mm_scope);
++	if (scope && bdev == scope->bdev && !(sector & 7) &&
++	    sector >= scope->first_sector &&
++	    sector - scope->first_sector <= scope->sector_count - 8 &&
++	    atomic64_read(&swapz_mm_area_epochs[scope->swap_type]) == scope->area_epoch)
++		matched = true;
++	rcu_read_unlock();
++	return matched;
++}
++#endif
++
+@@ -1010,1 +1146,2 @@
+-			      u8 codec, u32 length, u64 area, u32 type)
++			      u8 codec, u32 length, u64 area, u32 type,
++			      u64 *scope_identity)
+@@ -1012,0 +1150,1 @@
++	const struct swapz_mm_trial_scope *scope;
+@@ -1017,0 +1156,5 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	scope = rcu_dereference(swapz_mm_scope);
++#else
++	scope = &swapz_mm_scope;
++#endif
+@@ -1019,1 +1162,1 @@
+-	if (provider) {
++	if (scope && scope->identity && provider) {
+@@ -1025,1 +1168,1 @@
+-				swapz_mm_scope_matches(&swapz_mm_scope, bdev, sector,
++				swapz_mm_scope_matches(scope, bdev, sector,
+@@ -1026,0 +1170,2 @@
++			if (eligible)
++				*scope_identity = scope->identity;
+@@ -1037,1 +1182,1 @@
+-			      u64 area, u32 type)
++			      u64 area, u32 type, u64 scope_identity)
+@@ -1039,0 +1185,1 @@
++	const struct swapz_mm_trial_scope *scope;
+@@ -1043,0 +1190,5 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	scope = rcu_dereference(swapz_mm_scope);
++#else
++	scope = &swapz_mm_scope;
++#endif
+@@ -1045,1 +1196,1 @@
+-	if (provider) {
++	if (scope && scope->identity && provider) {
+@@ -1048,2 +1199,3 @@
+-			if (provider->lookup(si->bdev, sector, codec, length, route) &&
+-			    swapz_mm_scope_matches(&swapz_mm_scope, si->bdev, sector,
++			if (scope && scope->identity == scope_identity &&
++			    provider->lookup(si->bdev, sector, codec, length, route) &&
++			    swapz_mm_scope_matches(scope, si->bdev, sector,
+@@ -1064,2 +1216,3 @@
+- * is not admission. Keep speculative MM capture OFF until a separately
+- * qualified authorization contract exists; no runtime observation bypass.
++ * is not admission. In the development composition, only independently
++ * published exact scope permits speculative MM capture; observation is
++ * never an authorization bypass. All other builds remain hard OFF.
+@@ -1068,0 +1222,3 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	return rcu_access_pointer(swapz_mm_scope) != NULL;
++#else
+@@ -1069,0 +1226,1 @@
++#endif
+@@ -1080,1 +1237,1 @@
+-	u64 area;
++	u64 area, scope_identity = 0;
+@@ -1104,1 +1261,2 @@
+-	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length, area, swp_type(slot)))
++	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length,
++			       area, swp_type(slot), &scope_identity))
+@@ -1108,1 +1266,1 @@
+-		entry->original_scope = swapz_mm_scope.identity;
++		entry->original_scope = scope_identity;
+@@ -1145,4 +1303,4 @@
+-		struct swapz_observation_record preparation = *record;
+-
+-		preparation.event = SWAPZ_OBS_PREPARATION;
+-		preparation.flags = 1;
++		struct swapz_observation_record preparation = {
++			.event = SWAPZ_OBS_PREPARATION,
++			.operation = operation, .flags = 1
++		};
+@@ -1155,1 +1313,1 @@
+-	struct swapz_observation_record *record;
++	struct swapz_observation_record record;
+@@ -1157,4 +1315,2 @@
+-	if (!carrier || !swapz_trial_observation_active())
+-		return;
+-	record = &carrier->observation;
+-	if (!record->operation || record->original)
++	if (!carrier || !swapz_trial_observation_active() ||
++	    !carrier->observation.operation || carrier->observation_original)
+@@ -1162,2 +1318,2 @@
+-	record->original = swapz_trial_observation_mint();
+-	if (!record->original)
++	carrier->observation_original = swapz_trial_observation_mint();
++	if (!carrier->observation_original)
+@@ -1165,2 +1321,5 @@
+-	record->event = SWAPZ_OBS_BIND;
+-	swapz_trial_observation_append(record);
++	record = (struct swapz_observation_record){
++		.event = SWAPZ_OBS_BIND, .operation = carrier->observation.operation,
++		.original = carrier->observation_original
++	};
++	swapz_trial_observation_append(&record);
+@@ -1174,1 +1333,1 @@
+-	    !carrier->observation.operation || !carrier->observation.original)
++	    !carrier->observation.operation || !carrier->observation_original)
+@@ -1176,3 +1335,4 @@
+-	record = carrier->observation;
+-	record.event = SWAPZ_OBS_UPPER_ENDIO;
+-	record.status = status;
++	record = (struct swapz_observation_record){
++		.event = SWAPZ_OBS_UPPER_ENDIO, .operation = carrier->observation.operation,
++		.original = carrier->observation_original, .status = status
++	};
+@@ -1187,1 +1346,0 @@
+-		record = carrier->observation;
+@@ -1191,3 +1350,5 @@
+-		if (!record.original) {
+-			record.event = SWAPZ_OBS_CAPTURE_DROP;
+-			record.status = EOPNOTSUPP;
++		if (!carrier->observation_original) {
++			record = (struct swapz_observation_record){
++				.event = SWAPZ_OBS_CAPTURE_DROP,
++				.operation = carrier->observation.operation, .status = EOPNOTSUPP
++			};
+@@ -1196,2 +1357,5 @@
+-		record.event = SWAPZ_OBS_CARRIER_RELEASE;
+-		record.status = 0;
++		record = (struct swapz_observation_record){
++			.event = SWAPZ_OBS_CARRIER_RELEASE,
++			.operation = carrier->observation.operation,
++			.original = carrier->observation_original
++		};
+@@ -1202,1 +1366,1 @@
+-	carrier->observation.original = 0;
++	carrier->observation_original = 0;
+@@ -1233,0 +1398,3 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	swapz_mm_carrier.scope_identity = 0;
++#endif
+@@ -1264,1 +1431,6 @@
+-	if (swapz_mm_bio_matches(origin, carrier)) {
++	if (swapz_mm_bio_matches(origin, carrier)
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	    && rcu_dereference(swapz_mm_scope) &&
++	    carrier->scope_identity == swapz_mm_scope_storage.identity
++#endif
++	    ) {
+@@ -1297,1 +1469,1 @@
+-	    carrier->observation.operation && carrier->observation.original) {
++	    carrier->observation.operation && carrier->observation_original) {
+@@ -1298,0 +1471,1 @@
++		out->original = carrier->observation_original;
+@@ -1331,1 +1504,1 @@
+-	    !entry->original_scope || entry->original_scope != swapz_mm_scope.identity ||
++	    !entry->original_scope ||
+@@ -1348,1 +1521,1 @@
+-			       area, swp_type(slot)))
++			       area, swp_type(slot), entry->original_scope))
+@@ -1349,0 +1523,3 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	carrier->scope_identity = entry->original_scope;
++#endif
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -68,0 +69,17 @@
++/* R098 source-only control. Caller must be separately authorized trusted
++ * built-in controller with a live opened exact mapper file and active swap
++ * scope. No export, no automatic caller, no user switch. One publication
++ * per boot, scope identity never reused. Revoke retries only in process
++ * context after external ingress is stopped and accepted I/O joined.
++ */
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++int swapz_mm_trial_scope_publish(const struct swapz_mm_trial_scope *scope,
++	struct file *mapper_file);
++int swapz_mm_trial_scope_revoke(u64 identity);
++/* Built-in core evidence prefilter, not a substitute for target admission. */
++bool swapz_mm_trial_scope_matches_origin(struct block_device *bdev, sector_t sector);
++bool swapz_mm_trial_scope_matches_route(struct block_device *bdev,
++	sector_t sector, u64 area, u32 type, u8 codec, u32 length,
++	const struct swapz_mm_route *route);
++#endif
++
+@@ -75,0 +93,3 @@
++#ifdef SWAPZ_ROUND098_SCOPED_PRODUCER_TEST
++	u64 scope_identity; /* immutable from exact retain until carrier drain */
++#endif
+@@ -80,1 +100,2 @@
+-	struct swapz_observation_record observation;
++	struct swapz_observation_record observation; /* immutable CAPTURE fields */
++	u64 observation_original; /* BIND token, immutable after BIO publication */

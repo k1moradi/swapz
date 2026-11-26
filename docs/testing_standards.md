@@ -20966,3 +20966,30 @@ Freeze 5a36cabf0989dfffc75de52a6ab8cc021092ebf6; retain accepted R097 gated stor
 
 ### Round098 Agent3 focused verifier correction
 Exact source fdb750848000b59a2ca18b64efdc3f81ee6ebc02 job 140085220786 failed before compilation with R098_FIRST_ERROR carrier type swapz_mm_route: the new runner double-escaped raw regex literals for staged carrier struct extraction and two verdict parsers. Preserve the failed run/artifact and correct only those three raw regex strings; no DM/provider/MM/recorder source or accepted corpus changes, no manual rerun. A new exact-source automatic focused result is required before any PASS. Complete historical standards prefix remains mandatory; AUTH0 Phase A BLOCKED, no activation/native build/physical mutation.
+
+### R098 Agent11 — scoped MM publication and actual event-field validation
+
+Retain the exact R097 producer preimages and R096 permanent broker owner.
+Only SWAPZ_ROUND098_SCOPED_PRODUCER_TEST permits cold explicit scope
+publication: one nonreused identity, exact retained mapper file and counted
+broker cap, current swap area, exact bounded 16-page range and M3568.
+No exported setter or implicit startup. Revoke target readiness under its
+queue lock first, unpublish and join RCU, refuse release with carrier debt;
+join external map/area/terminal entrants before capture stop. No target
+pointer in the scope and no new store hash/copy or reclaim/BIO path.
+
+Construct each event from zero; retain immutable CAPTURE fields plus separate
+original token, expose exact correlation only from a retained ticket and live
+origin. Original SIO completion remains the sole carrier-write ACK. Optional
+selected core stores two minted tokens in its own dm_io for exact single-page
+noncarrier read/write/discard, invalidates requeue/split/reissue, and observes
+terminal original status before freeing io. No guessed clone ACK. Missing
+consumer correlation remains incomplete; no native activation or device use.
+
+Use actual frozen selected recorder/owner and broker in focused host checks,
+not permissive append. Exercise scope retain/revoke/late denial and immutable
+capture, fresh per-event records, original-core ACK without duplicate, wire
+schema and offline fail-closed incomplete lineage. Host substitutes for
+kernel/file/geometry/RCU and explicit fixture consumer records are not
+native observations. R097 terminal result reconciled without rerun; no prior
+accepted test replay. AUTH0 Phase A BLOCKED, direct handoff/forced RAW/import OFF.

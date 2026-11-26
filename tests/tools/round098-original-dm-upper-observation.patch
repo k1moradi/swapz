@@ -1,0 +1,127 @@
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -9,0 +10,4 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) && defined(SWAPZ_TRIAL_OBSERVATION)
++#include "native-observation-owner.h"
++#include <linux/swapz_mm_carrier.h>
++#endif
+@@ -588,0 +593,4 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) && defined(SWAPZ_TRIAL_OBSERVATION)
++	io->swapz_observation_operation = 0;
++	io->swapz_observation_original = 0;
++#endif
+@@ -949,0 +958,27 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) && defined(SWAPZ_TRIAL_OBSERVATION)
++static void dm_swapz_original_observation_endio(struct dm_io *io,
++	bool requeued, blk_status_t status)
++{
++	struct swapz_observation_record record;
++
++	if (!io->swapz_observation_operation || !swapz_trial_observation_active())
++		return;
++	/* No ACK for requeue, split, or flush reissue. These shapes invalidate
++	 * qualification, not ordinary I/O. No second attempt at correlation. */
++	if (requeued || io->requeue_flush_with_data ||
++	    dm_io_flagged(io, DM_IO_WAS_SPLIT)) {
++		swapz_trial_observation_append(NULL);
++	} else {
++		record = (struct swapz_observation_record){
++			.event = SWAPZ_OBS_UPPER_ENDIO,
++			.operation = io->swapz_observation_operation,
++			.original = io->swapz_observation_original,
++			.status = (u32)-blk_status_to_errno(status)
++		};
++		swapz_trial_observation_append(&record);
++	}
++	io->swapz_observation_operation = 0;
++	io->swapz_observation_original = 0;
++}
++#endif
++
+@@ -957,0 +993,8 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) && defined(SWAPZ_TRIAL_OBSERVATION)
++	/* Invalidate unsupported requeue shapes BEFORE handing io/bio to
++	 * another worker. Do not read a requeued original's status later. */
++	if (io->status == BLK_STS_DM_REQUEUE ||
++	    (io->status == BLK_STS_AGAIN && (bio->bi_opf & REQ_POLLED)) ||
++	    first_stage || io->requeue_flush_with_data)
++		dm_swapz_original_observation_endio(io, true, io->status);
++#endif
+@@ -962,0 +1006,5 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) && defined(SWAPZ_TRIAL_OBSERVATION)
++	if (!requeued && !io->requeue_flush_with_data)
++		dm_swapz_original_observation_endio(io, false,
++			io_error ? io_error : bio->bi_status);
++#endif
+@@ -1541,0 +1590,62 @@
++#if defined(SWAPZ_TRIAL_OBSERVATION) && defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST)
++/* Call only from the selected target's synchronous map, after independent
++ * target scope validation, before descriptor publication/clone completion.
++ * Evidence only. One unsplit 4096-byte read/ordinary write/discard.
++ * Typed carrier writes already have an original MM ACK, never mint here.
++ */
++bool dm_swapz_trial_observation_origin(struct dm_target *ti, struct bio *clone,
++	u64 *operation, u64 *original);
++bool dm_swapz_trial_observation_origin(struct dm_target *ti, struct bio *clone,
++	u64 *operation, u64 *original)
++{
++	struct dm_target_io *tio;
++	struct dm_io *io;
++	struct bio *bio;
++	u64 op_id, original_id;
++	sector_t sector;
++	bool route_live;
++
++	if (!operation || !original || !ti || !clone ||
++	    !swapz_trial_observation_active() || clone->bi_end_io != clone_endio)
++		return false;
++	tio = clone_to_tio(clone);
++	if (tio->magic != DM_TIO_MAGIC || !dm_tio_is_normal(tio) ||
++	    tio->ti != ti || tio->target_bio_nr || !tio->len_ptr ||
++	    *tio->len_ptr != 8U)
++		return false;
++	io = tio->io;
++	if (!io || io->magic != DM_IO_MAGIC || io->swapz_observation_operation ||
++	    dm_io_flagged(io, DM_IO_WAS_SPLIT) || io->requeue_flush_with_data)
++		return false;
++	bio = io->orig_bio;
++	sector = clone->bi_iter.bi_sector;
++	if (!bio)
++		return false;
++	rcu_read_lock();
++	route_live = dm_swapz_round090_route_live(ti, bio->bi_bdev, sector);
++	rcu_read_unlock();
++	if (bio == clone || rcu_access_pointer(bio->bi_swapz_original) ||
++	    bio_flagged(bio, BIO_CLONED) || bio_flagged(bio, BIO_REMAPPED) ||
++	    !route_live || !swapz_mm_trial_scope_matches_origin(bio->bi_bdev, sector) ||
++	    clone->bi_bdev != bio->bi_bdev || bio->bi_iter.bi_sector != sector ||
++	    clone->bi_iter.bi_size != 4096U || bio->bi_iter.bi_size != 4096U ||
++	    clone->bi_iter.bi_idx || clone->bi_iter.bi_offset ||
++	    bio->bi_iter.bi_idx || bio->bi_iter.bi_offset ||
++	    bio_op(clone) != bio_op(bio) ||
++	    ((clone->bi_opf | bio->bi_opf) &
++	     (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT | REQ_POLLED | REQ_ATOMIC)) ||
++	    (bio_op(bio) != REQ_OP_READ && bio_op(bio) != REQ_OP_WRITE &&
++	     bio_op(bio) != REQ_OP_DISCARD))
++		return false;
++	op_id = swapz_trial_observation_mint();
++	original_id = swapz_trial_observation_mint();
++	if (!op_id || !original_id)
++		return false;
++	io->swapz_observation_operation = op_id;
++	io->swapz_observation_original = original_id;
++	*operation = op_id;
++	*original = original_id;
++	return true;
++}
++EXPORT_SYMBOL_GPL(dm_swapz_trial_observation_origin);
++#endif
+diff --git a/drivers/md/dm-core.h b/drivers/md/dm-core.h
+--- a/drivers/md/dm-core.h
++++ b/drivers/md/dm-core.h
+@@ -293,0 +294,4 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) && defined(SWAPZ_TRIAL_OBSERVATION)
++	/* One selected unsplit original, never a pointer-derived ID. */
++	u64 swapz_observation_operation, swapz_observation_original;
++#endif
