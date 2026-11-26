@@ -1,8 +1,8 @@
 {
   "round": "099",
   "agent": 3,
-  "status": "PROGRESS",
-  "conclusion": "PARTIAL_LIFETIME_ANCHOR_SOURCE_REPAIR_CI_QUEUED_CONNECTED_CANDIDATE_BLOCKED",
+  "status": "BLOCKED",
+  "conclusion": "R048_R049_ANCHOR_PASS_R043_REGRESSION_FAILURE_CONNECTED_CANDIDATE_BLOCKED",
   "task": "77f79801940b63457fc2a34f7c729c9791f4ead7",
   "freeze": "eea7c4308bbd7a34af4c5a3f933d6ec695e011a1",
   "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
@@ -31,17 +31,41 @@
     "job": 140115828225,
     "head_sha": "c5b360e750f42383585043a91d4f6ddd8252b95b",
     "attempt": 1,
-    "status": "queued",
-    "conclusion": null,
-    "first_error": null,
+    "status": "completed",
+    "conclusion": "failure",
+    "first_error": "tests/tools/round043-dm-real-ingress-verify.py:58: AssertionError: Round043 callsite precedes real BIO geometry validation",
     "artifact": null,
-    "checks": null,
-    "mutants": null
+    "checks": {
+      "round048": "PASS",
+      "round049": "PASS",
+      "round050": "PASS",
+      "round052_per_compiler": 144,
+      "round053_per_compiler": 162,
+      "round054_per_compiler": 24,
+      "round043": "FAIL_BEFORE_COMPILATION",
+      "round046": "SKIPPED_IN_EXACT_JOB"
+    },
+    "mutants": {
+      "round048_source": 18,
+      "round048_fake_export": "REJECTED",
+      "round049_source": 26,
+      "round050_source": 22,
+      "round050_binary_per_compiler": 22,
+      "round052_source": 13,
+      "round052_binary_per_compiler": 13,
+      "round053_binary_per_compiler": 17,
+      "round054_binary_per_compiler": 6,
+      "round045_nested_source": 9
+    },
+    "failed_step": 12,
+    "exit_code": 1
   },
   "exact_census": {
     "total": 29,
-    "in_progress": 8,
-    "queued": 21
+    "success": 6,
+    "failure": 8,
+    "queued": 3,
+    "in_progress": 12
   },
   "prior_failure": {
     "run": 45871228833,
@@ -68,7 +92,7 @@
     "original_core_ack_connected": false,
     "independent_page_oracle_bound": false,
     "exact_built_in_retirement_witness_connected": false,
-    "reason": "Actual trusted cold entry and two-phase scope/debt join, original completion/read/fallback correlation and independent oracle not complete."
+    "reason": "No trusted cold controller, split capture/observation teardown, original core completion and independent read oracle, or exact built-in retirement witness; additional R043 source audit failure."
   },
   "native_full_link": {
     "status": "NOT_RUN_SOURCE_NOT_CONNECTED",
@@ -87,5 +111,16 @@
   "activation": false,
   "vm": false,
   "module_load": false,
-  "physical": false
+  "physical": false,
+  "terminal_evidence_parent": "42011246a517d99792011335a288dec65e61e43d",
+  "terminal_standards": {
+    "parent_blob": "ce56f56ac3095eebe60ba56c38f72898f729e645",
+    "parent_bytes": 1885685,
+    "changes": false
+  },
+  "regression": {
+    "source_anchor": "return DM_MAPIO_KILL;",
+    "diagnosis": "Round043 looks for a literal early KILL before the witness; c5b360e replaced immediate geometry returns with a refusal value and jump. Actual control flow skips witnesses, but the original source validator rejects the new shape. No Round043 compiler or hostile regression credit.",
+    "next": "Preserve a real early default-off KILL/REQUEUE before historical witnesses and a single shared per-BIO lookup; scoped refusal must reset observation token. Qualify the changed source with original unmodified auditors; no disconnected build."
+  }
 }
