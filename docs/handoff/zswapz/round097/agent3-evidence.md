@@ -26,3 +26,40 @@ The optional `SWAPZ_ROUND097_TARGET_OBSERVATION_TEST` declares the frozen propos
 ## Standards and qualification
 
 Frozen standards f699ab78cc8cd0a11a8b557b572ee9eeb7c82bb7 (1868056 bytes); source parent 06598d838ac9b7ef05bf71f058bf1188bd4fd5f3 (1871039 bytes), post 411cebf374af8a8b8f730016f9bab57de5629daf (1872507 bytes). Complete raw historical prefix verified by parent exact Git blob roundtrip and append readback. Evidence-only publication leaves standards unchanged. No VM, boot, module load, physical mutation, native build by A3, manual CI duplicate or force push. The new focused corpus intends both original codecs, stale incarnation/scope refusals, safe claimed WRITE failure, exact bytes, pin retention, suspend vs final dtr, actual autonomous retry/reopen, and four changed-boundary semantic mutants; only actual results above count. Remaining: terminal exact-source CI, native connected compilation by designated lane in a later freeze, complete recorder lineage, actual producer/candidate and measurement proof. All physical trial authority remains separate.
+
+
+## Agent1 independent reconciliation (A11 still pending)
+```json
+{
+  "source": "f15e3682c87444dde69c1ee75b6e4f3ad146493f",
+  "run": 45856728473,
+  "job": 140036956683,
+  "conclusion": "PASS_ACTUAL_GATED_TARGET_RETRY_HOST_ONLY",
+  "artifact": 15135319557,
+  "sha256": "81f61ec8f9389f56b181b7a4e6906745173e5cc0866eeb76f5ea1f87541bc8fe",
+  "archive_bytes": 944,
+  "checks_each": 453,
+  "claims_each": 3,
+  "claimed_errors_each": 1,
+  "typed_reads_each": 2,
+  "fallbacks_each": 2,
+  "preparations_each": 2,
+  "reopens_each": 5,
+  "retries_each": 5,
+  "observation_losses_each": 3,
+  "mutants_each": 4,
+  "mutant_names": [
+    "no_retry_transfer",
+    "wrong_read_epoch",
+    "ignore_gated_scope",
+    "ignore_missing_observation"
+  ],
+  "inventory": 61,
+  "exact_census": {
+    "success": 13,
+    "queued": 7,
+    "in_progress": 10
+  },
+  "scope": "Actual frozen A5 gated storage, A11 retry, original codecs, retained pin through copy; host Linux/DM/lower/upper substitutes. Native scope hard false, missing correlation deliberately records invalid append. No native execution."
+}
+```

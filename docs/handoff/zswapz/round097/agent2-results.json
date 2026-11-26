@@ -302,5 +302,29 @@
     "Frozen DM pin-through-copy implemented but gated storage and autonomous retry consumption unresolved at freeze; actual current sources reviewed, no same-round peer code",
     "Existing path-triggered broad workflows run automatically; no manual dispatch or accepted stress replay"
   ],
-  "next_action": "Agent1 integrate one selected built-in owner with actual guarded A3/A11 producer/consumer and independent source/ACK/debt witnesses, then qualify one connected native composition; no activation now."
+  "next_action": "Agent1 integrate one selected built-in owner with actual guarded A3/A11 producer/consumer and independent source/ACK/debt witnesses, then qualify one connected native composition; no activation now.",
+  "agent1_terminal_reconciliation": {
+    "source": "be44c51e132593c81f2d1ba773767efecea6792b",
+    "run": 45856564834,
+    "job": 140036377176,
+    "conclusion": "PASS_SELECTED_OWNER_HOST_SUBSTITUTES_ONLY",
+    "artifact": 15135253842,
+    "sha256": "3b47f7bbf104cecc90558f5b4b25197689916bd294106f92fa380b4599db3829",
+    "archive_bytes": 2069,
+    "entries": 11,
+    "checks_each": 481,
+    "modes_each": {
+      "clean": 237,
+      "join": 118,
+      "overflow": 63,
+      "invalid": 63
+    },
+    "source_correlation_cases": 11,
+    "exact_census": {
+      "success": 7,
+      "queued": 2,
+      "in_progress": 1
+    },
+    "scope": "Actual one-shot owner wrappers with host substitutes; selected adapter/parser unchanged; native controller, external drain and producer correlation not established."
+  }
 }

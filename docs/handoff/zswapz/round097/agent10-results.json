@@ -142,5 +142,44 @@
   "module_loaded": false,
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
-  "import_active": false
+  "import_active": false,
+  "agent1_terminal_reconciliation": {
+    "source": "007621f40e839e119851fce0c3d63ffd9d776153",
+    "run": 45856047307,
+    "job": 140034584799,
+    "conclusion": "FAIL_NATIVE_VERIFIER_AFTER_FIVE_OBJECTS_COMPILED",
+    "first_error": "native-owner-recorder-symbol-check recorder-atomic-reservation-instruction",
+    "artifact": 15135832585,
+    "sha256": "b50ab4396e4326ab32ca23bf9d12cf86aa2b0d0fb9bc49d78c7f7f410867c174",
+    "archive_bytes": 198620,
+    "entries": 64,
+    "objects_compiled": 5,
+    "object_hashes_verified": 5,
+    "object_sha256": {
+      "native-observation-adapter.o": "28a8d65b4f1df33fd692c8383af4bb387f093ddc6a7cf14fbac9bc99f5f2a2fd",
+      "zswap-original-ticket.o": "e50e3ea34d348bdceb825977b2b276061234713bef358ea66e249d0be3116122",
+      "dm-target.o": "cb14d1138e9b59287da023610a3fbe961373ad98fb3a49bf73c4b80d605ba8ec",
+      "zswap-original-decoder-shared.o": "3cb06bd8cb438c1a94ba811cbac7a58208eadf5dd7056fe7f3807695c07858f8",
+      "zswap-original-storage-shared-decoder.o": "43fb4c0e6e5b48f49891115bb1d0a088ad014b6cac6f105fe436553458124306"
+    },
+    "actual_config": "CONFIG_SMP not set, CONFIG_TINY_RCU=y, CONFIG_PREEMPT_LAZY=y",
+    "actual_cmpxchg_sites": [
+      "0x63d cmpxchg %edi,(%rsi)",
+      "0xae3 cmpxchg %r9d,(%r8)"
+    ],
+    "actual_rcu_import": "synchronize_rcu",
+    "actual_owner_workqueue_import": "queue_work_on",
+    "adapter_gate_imports": 4,
+    "adapter_direct_provider_imports": 0,
+    "diagnostic_composite": "NOT_RUN",
+    "full_kernel_link": "NOT_RUN",
+    "modpost": "NOT_RUN",
+    "exact_census": {
+      "success": 7,
+      "failure": 1,
+      "queued": 1,
+      "in_progress": 1
+    },
+    "scope": "Actual raw overlays and five native directed objects compiled; verifier demanded literal lock cmpxchg on UP configuration. Retain FAIL; no evidence of SMP correctness. Correct build config and verifier based on actual architecture, not weaken regex or rerun same old composition."
+  }
 }
