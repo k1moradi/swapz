@@ -1,0 +1,108 @@
+{
+  "round": "096",
+  "agent": 7,
+  "kind": "frozen-real-gate-broker-host-test-and-source-audit",
+  "conclusion": "QUEUED",
+  "message": "PROGRESS",
+  "engineering_freeze": "cb38c5de310edc4842e77099b92fc709e1934322",
+  "task_commit": "d756136217332fe03bce41e57328473fa4505220",
+  "tested_commit": "588d4de2bd1b86ed969493594babd70264de89be",
+  "parent": "58b599346139dd9dbee4120030a23c84a14f03dc",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_blobs": {
+    "src/kernel/zswap-original-decoder-shared.c": "3b48a4f6f31ef9c45034db7e0509efe92583e404",
+    "src/kernel/zswap-original-decoder-shared.h": "19bce03addcee7a2eeb0983ea360d4e2a5df0912",
+    "src/kernel/zswap-original-storage-shared-decoder.c": "05fa6a716dcd5b5fd6a531a63908b2e9bb53cb8f",
+    "src/kernel/zswap-original-storage-shared-decoder.h": "b18f05a0d326dfe594e6695f13f757e313a1c3d8",
+    "src/kernel/zswap-original-broker-owner.inc": "0eda8753b91d3209c55f65eb90014fd9b8c6ad7c",
+    "src/kernel/dm-target.c": "5f87228daba905f6aa55f950177eecd5291c41e6"
+  },
+  "test_blobs": {
+    "tests/runtime/native/fixtures/round096-provider-broker-lifetime.c": "67451ab89cec02882e926ff5e55b1a4bc18a49a5",
+    "tests/tools/round096-provider-broker-lifetime-verify.py": "2600901e9352342d6ede98cda8dbbbaaa4290775",
+    ".github/workflows/phase-a-round096-provider-broker-lifetime-host-noauth.yml": "1d84ebed577fb6c8354140b900af6860016d368f"
+  },
+  "ticket_postimages": {
+    "round092": {
+      "c": "634b38e52b3b1e6493d6b10a694065ccc4b698ad",
+      "h": "6afac83a0655e532ce1ef9b8f290a367e8aabfce"
+    },
+    "round094": {
+      "c": "ba5e891ef7f80bf0b3021ee6c676529cb72f1972",
+      "h": "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea"
+    }
+  },
+  "standards": {
+    "freeze_blob": "4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e",
+    "freeze_bytes": 1856114,
+    "parent_blob": "d7b1502b2b2051978f384be4a8e2b2addeca5af1",
+    "parent_bytes": 1860879,
+    "current_blob": "1e4befccf27e96238c8ce6c1fb55f561d19ba602",
+    "current_bytes": 1862494,
+    "append_bytes": 1615,
+    "parent_exact_blob_roundtrip": true,
+    "full_prefix_verified": true,
+    "remote_readback_exact": true,
+    "hosted_prefix_check": "QUEUED"
+  },
+  "source_commit_url": "https://github.com/k1moradi/swapz/commit/588d4de2bd1b86ed969493594babd70264de89be",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45827821204",
+  "run_id": 45827821204,
+  "attempt": 1,
+  "jobs": [
+    {
+      "id": 139936425051,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45827821204/job/139936425051",
+      "name": "actual-provider-broker-lifetime-host",
+      "status": "QUEUED",
+      "conclusion": null,
+      "actual_checks": null,
+      "actual_mutants": null
+    }
+  ],
+  "artifact": null,
+  "first_error": null,
+  "local_blocker": "git ls-remote could not resolve host github.com; local compile not run; GitHub connector publication successful",
+  "actual_compilers": {
+    "gcc": null,
+    "clang": null
+  },
+  "historical_r095": {
+    "run_id": 45770634552,
+    "job_id": 139742145865,
+    "checks_each": 81,
+    "mutants_each": 5,
+    "owner_bytes": 312,
+    "gate_bytes": 88,
+    "handle_bytes": 24,
+    "artifact_id": 15093757410,
+    "artifact_sha256": "b6281fc8eb17be9345af38a853c2537152a9ebe3eb2efa617d43111037ba719f",
+    "legacy_yaml_failure_run": 45770632922,
+    "replayed": false
+  },
+  "scope": {
+    "product_changed": false,
+    "actual_frozen_adapter_gate_integration": false,
+    "frozen_adapter_source_audit": true,
+    "frozen_dm_source_audit": true,
+    "host_modeled": [
+      "one-shot retained cap consumption",
+      "external route join",
+      "storage pin and snapshot",
+      "pthread/allocator/module ABI"
+    ],
+    "native": "NOT_RUN",
+    "native_module_reload": "NOT_RUN",
+    "peer_dependencies": [],
+    "native_builds": 0,
+    "physical": false,
+    "vm": false,
+    "load": false
+  },
+  "source_mapped_authenticated": 0,
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false
+}
