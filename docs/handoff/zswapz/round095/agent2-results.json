@@ -1,0 +1,88 @@
+{
+  "round": "095",
+  "agent": 2,
+  "kind": "host-recorder-prototype-and-offline-concurrent-observation-validator",
+  "conclusion": "TERMINAL_SUCCESS_LOG_REVIEW_REQUIRED",
+  "source_published": true,
+  "tested_commit": "8c73b49a87b2faffc950effb651dd218e564d6ce",
+  "parent": "1eda391009b9813f1e556517ec962ca1604f1ef8",
+  "engineering_freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+  "linux_source": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45771314540",
+  "jobs": [
+    {
+      "run_id": 45771314540,
+      "job_id": 139744356343,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45771314540/job/139744356343",
+      "status": "completed",
+      "conclusion": "success",
+      "actual_counts": null,
+      "measured_record_bytes": null,
+      "measured_owner_bytes": null,
+      "append_timing_ns": null,
+      "disabled_timing_ns": null,
+      "artifacts": [
+        {
+          "id": 15094490812,
+          "name": "native-observation-recorder-host",
+          "digest": "sha256:f7ffbfaf517a5061a1fb006f98836eb0fa16c63303c18c3f61ff8038f08c8dff"
+        }
+      ]
+    }
+  ],
+  "first_error": null,
+  "prior_accepted": {
+    "run_id": 45763872508,
+    "job_id": 139719991043,
+    "artifact_id": 15090728833,
+    "tests": 4,
+    "semantic_negatives": 55,
+    "cli_negatives": 8,
+    "observed_failure_cases": 7,
+    "records": 88,
+    "replayed": false
+  },
+  "wire": {
+    "header_bytes": 104,
+    "record_bytes": 296,
+    "footer_bytes": 24,
+    "max_records": 8192,
+    "max_record_wire_bytes": 2424832,
+    "max_wire_bytes": 2424960
+  },
+  "local_git_error": "Could not resolve host: github.com",
+  "local_test_execution": false,
+  "owned_blobs": {
+    "recorder_h": "d0698321ed19b1cf6c496ea56beb6c9425dcc0a3",
+    "recorder_c": "33350002c05223bbb82a33ff79eee6304cab8462",
+    "validator": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+    "fixture": "8ea25662a820bb21fcd194ee0a9a99d2a10ee7b9",
+    "tests": "c47dcea342ae511f0d52105211d53ab07672c2fa",
+    "readiness": "c86efe3b406538ed7fe8eb9d1ba582eecde6f598",
+    "workflow": "2fddc6ff3b5cbada3123bdfcb92d6d272463c054",
+    "standards": "6571c7e8a8d88e9b0938d901e75aa4e4127d74fe"
+  },
+  "standards": {
+    "parent_blob": "90bf941e697651c6433561d23d90ddc0c1780e48",
+    "post_blob": "6571c7e8a8d88e9b0938d901e75aa4e4127d74fe",
+    "parent_bytes": 1848465,
+    "append_bytes": 1594,
+    "post_bytes": 1850059,
+    "full_prefix_verified": true,
+    "parent_git_hash_roundtrip": true
+  },
+  "publication_reconciliations": 2,
+  "source_mapped_authenticated": false,
+  "semantic_qualification": false,
+  "phase_a": "BLOCKED",
+  "actual_physical_io": false,
+  "native_capture": false,
+  "native_producer_implemented": false,
+  "physical_admission_ready": false,
+  "live_admission": false,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "duplicate_manual_ci": false,
+  "same_round_peer_dependency": false
+}
