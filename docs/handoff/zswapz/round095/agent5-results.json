@@ -89,7 +89,7 @@
           }
         }
       },
-      "actual_checks": null,
+      "actual_checks": 58050,
       "actual_layout": {
         "map_bytes": 20,
         "storage_bytes": 15296,
@@ -126,7 +126,8 @@
       ],
       "json_parsed": true,
       "source_and_parent_match": true,
-      "log_and_metadata_match": true
+      "log_and_metadata_match": true,
+      "reverified_on_continuation": true
     }
   ],
   "source_blobs": {
@@ -228,53 +229,45 @@
   "manual_dispatch": false,
   "accepted_corpus_replayed": false,
   "exact_source_census": {
-    "success": 4,
-    "in_progress": 2,
-    "queued": 4,
+    "success": 10,
     "failure": 1
   },
   "broader_runs_observed": [
     {
-      "run_id": 45770731713,
-      "name": "Shared storage authoritative pin decoder HOST ONLY NO_AUTH",
+      "run_id": 45770731722,
+      "name": "Native kernel-C project-goal regressions",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45770731832,
+      "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45770731691,
+      "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
       "status": "completed",
       "conclusion": "success"
     },
     {
       "run_id": 45770731760,
       "name": "Experimental swapz production C qualification",
-      "status": "in_progress",
-      "conclusion": null
-    },
-    {
-      "run_id": 45770731722,
-      "name": "Native kernel-C project-goal regressions",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "run_id": 45770731758,
       "name": "Systemd/package 34ef333e5054f6428776dcfab63baa6309c1d4ac (run 45770731758)",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
-      "run_id": 45770731691,
-      "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
-      "status": "in_progress",
-      "conclusion": null
-    },
-    {
-      "run_id": 45770731750,
-      "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
-      "status": "queued",
-      "conclusion": null
-    },
-    {
-      "run_id": 45770731832,
-      "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
-      "status": "queued",
-      "conclusion": null
+      "run_id": 45770731713,
+      "name": "Shared storage authoritative pin decoder HOST ONLY NO_AUTH",
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "run_id": 45770731728,
@@ -295,11 +288,41 @@
       "conclusion": "success"
     },
     {
+      "run_id": 45770731750,
+      "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
       "run_id": 45770729983,
       "name": ".github/workflows/phase-a-round094-decoder-shared-provider-host-noauth.yml",
       "status": "completed",
       "conclusion": "failure"
     }
   ],
-  "supersedes_interim_evidence_commit": "85139fdd0ca87541cef2cdd24f8bf0c0e1546301"
+  "supersedes_interim_evidence_commit": "85139fdd0ca87541cef2cdd24f8bf0c0e1546301",
+  "prior_exact_source_census": {
+    "success": 4,
+    "in_progress": 2,
+    "queued": 4,
+    "failure": 1
+  },
+  "exact_source_census_terminal": true,
+  "broader_first_error": {
+    "run_id": 45770729983,
+    "job_count": 0,
+    "conclusion": "failure",
+    "classification": "WORKFLOW_CONFIGURATION_BEFORE_JOB_CREATION",
+    "first_cause": "Unquoted YAML colon in legacy provider workflow if expression (source inspection; no job log exists).",
+    "workflow_blob": "bbd1dae6823bee1be6c4571eeb1d04c65feaf6fd",
+    "correction_commit": "68479945f382bfcce2f882b484cbdd6bb48cd414",
+    "corrected_blob": "16a88359faed5c070732ed26107065e8371ecdfe",
+    "correction_run_ids": [
+      45771115565,
+      45771115671
+    ],
+    "correction_runs_conclusion": "skipped",
+    "historical_failure_retained": true
+  },
+  "supersedes_terminal_evidence_commit": "1eda391009b9813f1e556517ec962ca1604f1ef8"
 }
