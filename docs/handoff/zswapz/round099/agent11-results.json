@@ -1,0 +1,139 @@
+{
+  "round": "099",
+  "agent": 11,
+  "kind": "actual-frozen-R098-producer-scope-event-retry-host-only",
+  "conclusion": "PASS_ACTUAL_RECORDER_HOST_ONLY",
+  "tested_commit": "2da957bcb62cc45adebee14fa3c494ee247b6e92",
+  "source_parent": "77f79801940b63457fc2a34f7c729c9791f4ead7",
+  "engineering_freeze": "eea7c4308bbd7a34af4c5a3f933d6ec695e011a1",
+  "task_commit": "77f79801940b63457fc2a34f7c729c9791f4ead7",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45879625317",
+  "run_id": 45879625317,
+  "run_attempt": 1,
+  "jobs": [
+    {
+      "id": 140115368578,
+      "name": "mm-scope-events-host",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45879625317/job/140115368578"
+    }
+  ],
+  "artifact": {
+    "id": 15147141754,
+    "bytes": 3065,
+    "sha256": "8c0e73b658b0c6b0f20fcfd27ff762189a2fed79635cec6a226f0ce995491862",
+    "archive_independently_verified": false
+  },
+  "checks_per_compiler": 135,
+  "retries_per_compiler": 2,
+  "events_per_compiler": 21,
+  "mutants_per_compiler": 0,
+  "loss_per_compiler": 0,
+  "host": {
+    "gcc": {
+      "drop": {
+        "checks": 66,
+        "retries": 1,
+        "records": 10,
+        "loss": 0,
+        "parser": "CONSISTENT_RECORDER_OBSERVATIONS_ONLY"
+      },
+      "bound": {
+        "checks": 69,
+        "retries": 1,
+        "records": 11,
+        "loss": 0,
+        "parser": "BLOCKED",
+        "expected_reason": "upper_endio"
+      }
+    },
+    "clang": {
+      "drop": {
+        "checks": 66,
+        "retries": 1,
+        "records": 10,
+        "loss": 0,
+        "parser": "CONSISTENT_RECORDER_OBSERVATIONS_ONLY"
+      },
+      "bound": {
+        "checks": 69,
+        "retries": 1,
+        "records": 11,
+        "loss": 0,
+        "parser": "BLOCKED",
+        "expected_reason": "upper_endio"
+      }
+    }
+  },
+  "first_error": null,
+  "stage": "PASS",
+  "sanitizers": "ASan/UBSan both compilers PASS",
+  "product_edits": false,
+  "exact_census": {
+    "success": 3,
+    "failure": 1,
+    "in_progress": 6
+  },
+  "legacy_failure": {
+    "run": 45879625318,
+    "job": 140115368713,
+    "first_error": "Round048 current DM NO_AUTH source: target_map lost actual original lifetime anchor: entry = dm_per_bio_data(bio, sizeof(*entry));",
+    "ownership": "Agent3 existing frozen product defect; no edit in A11"
+  },
+  "prior_r098": {
+    "source": "f209e51d6cb874cec736d224851b0f8c8282601a",
+    "run": 45871396136,
+    "job": 140087429484,
+    "conclusion": "FAIL_HOST_BROKER_COMPILE",
+    "first_error": "owner_retry_run defined but not used [-Werror=unused-function]",
+    "artifact": 15143272836,
+    "sha256": "245a9856914c5a4eeddcd46afa8218f346db1c459b68d92e43915cfa7a32562f",
+    "archive_independently_verified_by_agent1": true,
+    "rerun": false
+  },
+  "standards": {
+    "parent_blob": "7e7d607601b38f5ceebaed1fcbc5e943d0a195e9",
+    "parent_bytes": 1881523,
+    "blob": "c1c5a6725c4c9f4193e8696077ece4f2e7fd3c37",
+    "bytes": 1882875,
+    "complete_prefix_readback": true,
+    "ci_prefix_check": "PASS",
+    "parent_sha256": "aa420333d12312011dfa627175505715cdb7aa296e8593fe8a411a39ee57a3d0"
+  },
+  "pins": {
+    "verifier": "36b2977aacc3ec1170f7c2fbafc1ddbcb18d6d42",
+    "fixture": "826ce119dd5d285c9298397ee1061935d193cd12",
+    "workflow": "42186fe623099e352546e4579d43412fa3d4aa20",
+    "mm_overlay": "3832b6aa76b783f3790b869cf40512b114d66cd6",
+    "core_overlay": "5b0b0a3582b16e54046f1f11355e6814c9ca4e1f",
+    "mm_post": "cad0d9ba05cd614b95b335ed0c7d70d9e69d00f0",
+    "carrier_post": "5e11fe42a9dce147cdaf7f30c43b1c8b6feff59a",
+    "page_io_post": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+    "core_post": "f0c0cd4add03bf2b6f9bf37997444ecd08bbb83b",
+    "core_header_post": "a010598cb4e884a78f06ab66ab4488a1a7f9c418",
+    "broker": "70109f2c2ce9f60681649bd4807382248d0a41a2",
+    "broker_owner": "278a93a3fd3fd260444aebc55d4a87112e56f704",
+    "broker_header": "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea",
+    "recorder": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "recorder_owner": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673"
+  },
+  "native": "NOT_RUN",
+  "physical": "NOT_RUN",
+  "actual_physical_io": false,
+  "source_mapped_authenticated": false,
+  "source_authentication": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw": "DISABLED",
+  "import": 0,
+  "limitations": [
+    "Actual frozen extracted scope/event and core origin/endio helpers plus exact broker/owner/recorder; host modeled RCU/file/geometry/route/work scheduling, no true parallel kernel execution",
+    "Consumer discard events explicitly fixture assertions; no actual DM consumer/native original ACK observed",
+    "Bound scenario intentionally lacks consumer lineage and parser rejects upper_endio",
+    "No separate capture inhibit: whole scope revoke also blocks new core origin observations; Agent3 owns product correction",
+    "No actual native controller, device use, full linkage or physical qualification in A11 lane",
+    "Artifact SHA256 from GitHub metadata only; no independent archive extraction by A11"
+  ]
+}
