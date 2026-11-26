@@ -241,7 +241,7 @@ def stage_producer(workspace, linux):
     types = obs[obs.index("#define SWAPZ_OBSERVATION_DIGEST_BYTES"):
                 obs.index("struct swapz_observation_recorder {")]
     for name in ("swapz_mm_route", "swapz_mm_trial_scope", "swapz_mm_carrier"):
-        match = re.search(r"(?ms)^struct " + name + r" \\{.*?^\\};", header)
+        match = re.search(r"(?ms)^struct " + name + r" \{.*?^\};", header)
         require(match is not None, "carrier type " + name)
         types += match[0] + "\n"
     actual = "\n".join(namespace["function"](source, name) for name in
@@ -333,11 +333,11 @@ def compile_and_run(compiler, stage, linux, work, evidence, prior, helpers, reco
             run = execute([str(binary), scenario], evidence, compiler + " run " + name + "/" + scenario,
                           expected=77 if old else 0, mutant=bool(old))
             if old:
-                require(not run.stdout and re.fullmatch(r"R098_SEMANTIC_FAIL line=\\d+ [^\\n]+\\n", run.stderr),
+                require(not run.stdout and re.fullmatch(r"R098_SEMANTIC_FAIL line=\d+ [^\n]+\n", run.stderr),
                         "not a semantic kill " + name)
                 result["mutants"].append({"name": name, "witness": run.stderr.strip()})
             else:
-                match = re.fullmatch(r"PASS R098_SCOPED mode=(\\w+) checks=(\\d+) claims=(\\d+) fallbacks=(\\d+) events=(\\d+) loss=(\\d+) AUTH0\\n", run.stdout)
+                match = re.fullmatch(r"PASS R098_SCOPED mode=(\w+) checks=(\d+) claims=(\d+) fallbacks=(\d+) events=(\d+) loss=(\d+) AUTH0\n", run.stdout)
                 require(match and match[1] == scenario, "actual scenario counts")
                 result["scenarios"][scenario] = dict(zip(("checks", "claims", "fallbacks", "events", "loss"),
                                                           map(int, match.groups()[1:]), strict=True))
