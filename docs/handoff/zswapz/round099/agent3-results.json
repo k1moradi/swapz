@@ -1,0 +1,91 @@
+{
+  "round": "099",
+  "agent": 3,
+  "status": "PROGRESS",
+  "conclusion": "PARTIAL_LIFETIME_ANCHOR_SOURCE_REPAIR_CI_QUEUED_CONNECTED_CANDIDATE_BLOCKED",
+  "task": "77f79801940b63457fc2a34f7c729c9791f4ead7",
+  "freeze": "eea7c4308bbd7a34af4c5a3f933d6ec695e011a1",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "c5b360e750f42383585043a91d4f6ddd8252b95b",
+  "source_parent": "2da957bcb62cc45adebee14fa3c494ee247b6e92",
+  "source_tree": "9d40525808c8a85062bfcabf74d79f05a5cc8337",
+  "evidence_parent": "8a06cb750b3b6778048bd1e381cca1961fb0d24f",
+  "owned_changes": [
+    "src/kernel/dm-target.c",
+    "docs/testing_standards.md"
+  ],
+  "dm_pre": "aaff4d782323f9f17046cb2ba4fabcc0069e51e6",
+  "dm_post": "0f53224a43ef8aec58b2627904c5204e67a6a295",
+  "source_checks": {
+    "unique_anchor_before": 2,
+    "unique_anchor_after": 1,
+    "early_refusal_jumps": 4,
+    "accepting_check_before_anchor": true,
+    "reset_after_anchor_before_fifo_init": true,
+    "postimage_exact_readback": true,
+    "original_auditors_unchanged": true,
+    "scope": "source-local checks only; no original audit execution yet"
+  },
+  "ci": {
+    "run": 45879760732,
+    "job": 140115828225,
+    "head_sha": "c5b360e750f42383585043a91d4f6ddd8252b95b",
+    "attempt": 1,
+    "status": "queued",
+    "conclusion": null,
+    "first_error": null,
+    "artifact": null,
+    "checks": null,
+    "mutants": null
+  },
+  "exact_census": {
+    "total": 29,
+    "in_progress": 8,
+    "queued": 21
+  },
+  "prior_failure": {
+    "run": 45871228833,
+    "job": 140086855188,
+    "first_error": "Round048 target_map lost actual original lifetime anchor: entry = dm_per_bio_data(bio, sizeof(*entry));"
+  },
+  "standards": {
+    "freeze": "7e7d607601b38f5ceebaed1fcbc5e943d0a195e9",
+    "freeze_bytes": 1881523,
+    "parent": "c1c5a6725c4c9f4193e8696077ece4f2e7fd3c37",
+    "parent_bytes": 1882875,
+    "post": "1631ff27fcff372ddbe02a7bee1a26af835e01da",
+    "post_bytes": 1883774,
+    "append_bytes": 899,
+    "complete_prefix_verified": true,
+    "evidence_parent": "ce56f56ac3095eebe60ba56c38f72898f729e645",
+    "evidence_parent_bytes": 1885685,
+    "evidence_changes_standards": false
+  },
+  "connected_product": {
+    "complete": false,
+    "actual_trusted_controller": false,
+    "two_phase_scope_teardown": false,
+    "original_core_ack_connected": false,
+    "independent_page_oracle_bound": false,
+    "exact_built_in_retirement_witness_connected": false,
+    "reason": "Actual trusted cold entry and two-phase scope/debt join, original completion/read/fallback correlation and independent oracle not complete."
+  },
+  "native_full_link": {
+    "status": "NOT_RUN_SOURCE_NOT_CONNECTED",
+    "attempts": 0,
+    "lease_unspent": true,
+    "artifact": null
+  },
+  "same_round_dependencies": false,
+  "duplicate_manual_ci": 0,
+  "AUTH": 0,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw_bypass": "OFF",
+  "import": "OFF",
+  "activation": false,
+  "vm": false,
+  "module_load": false,
+  "physical": false
+}
