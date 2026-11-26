@@ -2,7 +2,7 @@
   "round": "099",
   "agent": 2,
   "kind": "independent-private-byte-oracle-offline-only",
-  "conclusion": "QUEUED",
+  "conclusion": "PASS_INDEPENDENT_BYTE_ORACLE_OFFLINE_ONLY",
   "engineering_freeze": "eea7c4308bbd7a34af4c5a3f933d6ec695e011a1",
   "task_commit": "77f79801940b63457fc2a34f7c729c9791f4ead7",
   "tested_commit": "9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6",
@@ -15,19 +15,34 @@
     {
       "id": 140116224719,
       "name": "byte-oracle",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
+      "steps_success": 7,
+      "attempt": 1,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45879877815/job/140116224719"
     }
   ],
   "first_error": null,
-  "first_error_scope": "not executed; no error or pass established",
-  "actual_checks": null,
-  "actual_byte_mutants": null,
-  "actual_semantic_refusals": null,
-  "actual_clean_operations": null,
-  "actual_claimed_error_operations": null,
-  "artifact": null,
+  "first_error_scope": "focused exact-source job only; broader automatic failure separately recorded",
+  "actual_checks": 4143,
+  "actual_byte_mutants": 4096,
+  "actual_semantic_refusals": 39,
+  "actual_clean_operations": 7,
+  "actual_claimed_error_operations": 8,
+  "artifact": {
+    "id": 15146913761,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45879877815/artifacts/15146913761",
+    "bytes": 1069,
+    "sha256": "fe67d9efed5ab3ce648dac5940a49197925af0669c1fb5548bfdcde5ed44e083",
+    "independently_downloaded": true,
+    "crc_ok": true,
+    "members": {
+      "pins.log": 133,
+      "validation.log": 2725
+    },
+    "matches_upload_and_api_digest": true,
+    "redacted_logs_only": true
+  },
   "planned_fixture_not_actual": {
     "byte_positions": 4096,
     "explicit_rejection_cases": 39,
@@ -55,7 +70,9 @@
     "append_bytes": 1909,
     "actual_parent_roundtrip_verified": true,
     "complete_prefix_readback_verified": true,
-    "ci_prefix_status": "QUEUED"
+    "ci_prefix_status": "PASS",
+    "actual_parent_sha256": "ade9772a3744659ed314b912f4581e1d966ca7624c44168650004b10cc19bcd0",
+    "ci_frozen_pins_pass": 10
   },
   "frozen_inputs": {
     "selected_adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
@@ -80,9 +97,84 @@
   "automatic_source_push_census": {
     "total": 10,
     "counts": {
-      "queued": 10
+      "queued": 4,
+      "success": 4,
+      "in_progress": 1,
+      "failure": 1
     },
-    "scope": "snapshot before evidence publication; not whole-main qualified"
+    "runs": [
+      {
+        "id": 45879877761,
+        "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877761"
+      },
+      {
+        "id": 45879877758,
+        "name": "Rootless physical evidence adversarial audit",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877758"
+      },
+      {
+        "id": 45879877746,
+        "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877746"
+      },
+      {
+        "id": 45879877754,
+        "name": "Experimental swapz production C qualification",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877754"
+      },
+      {
+        "id": 45879877821,
+        "name": "Native kernel-C project-goal regressions",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877821"
+      },
+      {
+        "id": 45879877786,
+        "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877786"
+      },
+      {
+        "id": 45879878019,
+        "name": "Systemd/package 9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6 (run 45879878019)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879878019"
+      },
+      {
+        "id": 45879877766,
+        "name": "Private kernel debug and static contracts",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877766"
+      },
+      {
+        "id": 45879877844,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "completed",
+        "conclusion": "failure",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877844"
+      },
+      {
+        "id": 45879877815,
+        "name": "Independent private byte oracle offline NO_AUTH",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45879877815"
+      }
+    ],
+    "scope": "snapshot at terminal evidence publication, not whole-main qualification"
   },
   "schema": "swapz-independent-byte-oracle-v1",
   "limits": {
@@ -116,7 +208,7 @@
   "limitations": [
     "Synthetic fixture only, reference and mock witnesses not native collection; no real native independent workload or final BIO bytes proven.",
     "Actual original ACK, two-phase capture stop, exact old-session retry retirement witness, native full linkage and trusted collection provenance remain blockers.",
-    "No CI test count credited until exact source job terminal. No actual independent native oracle or semantic qualification."
+    "The automatically triggered Round048 regression failed at Round043 BIO geometry ordering; no whole-main PASS. No product edits or rerun in A2 lane."
   ],
   "native_kunit_ktap": null,
   "native_kunit_executed": false,
@@ -141,5 +233,23 @@
   "same_round_peer_dependency": false,
   "manual_duplicate_dispatch": false,
   "physical_admission": "NO_GO",
-  "next_action": "Reconcile existing run only when terminal; publish terminal evidence with actual log/artifact digest and first error if any. Agent3 owns actual connected source, no dependency on this oracle."
+  "next_action": "Agent1 review offline oracle and Agent3 independently connected native source; actual collection provenance, exact original completion, pin-bound independent final copy and user-visible bytes, old-session retirement, safe scope/controller teardown and full native linkage remain blocked. No activation.",
+  "historical_pending_evidence_commit": "42011246a517d99792011335a288dec65e61e43d",
+  "python_version": "3.12.3",
+  "actual_cli_cases": 6,
+  "actual_clean_full_pages": 8,
+  "actual_clean_bytes": 32768,
+  "actual_claimed_error_full_pages": 9,
+  "actual_claimed_error_bytes": 36864,
+  "actual_claimed_error_verdict": "OBSERVED_CLAIMED_ERROR_BLOCKED",
+  "automatic_regression_failure": {
+    "run": 45879877844,
+    "job": 140116224734,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45879877844/job/140116224734",
+    "step": 12,
+    "first_error": "AssertionError: Round043 callsite precedes real BIO geometry validation",
+    "failures": 2,
+    "owner": "Agent3 product-source lane",
+    "rerun": false
+  }
 }

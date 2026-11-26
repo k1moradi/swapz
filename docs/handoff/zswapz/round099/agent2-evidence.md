@@ -1,3 +1,38 @@
+# R099 Agent2 — terminal independent bounded byte oracle evidence
+
+**PASS_INDEPENDENT_BYTE_ORACLE_OFFLINE_ONLY / NO_GO_LIVE.** Existing exact-source focused job completed successfully on attempt 1. No native or physical proof. No new implementation or duplicate CI in terminal reconciliation.
+
+- [Engineering freeze](https://github.com/k1moradi/swapz/commit/eea7c4308bbd7a34af4c5a3f933d6ec695e011a1), [task](https://github.com/k1moradi/swapz/commit/77f79801940b63457fc2a34f7c729c9791f4ead7), [source](https://github.com/k1moradi/swapz/commit/9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6), sole [actual publication parent](https://github.com/k1moradi/swapz/commit/c5b360e750f42383585043a91d4f6ddd8252b95b). [Historical queued evidence](https://github.com/k1moradi/swapz/commit/42011246a517d99792011335a288dec65e61e43d) retained below and in Git history.
+- [Oracle](https://github.com/k1moradi/swapz/blob/9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6/tests/tools/native-observation-byte-oracle.py), [fixture](https://github.com/k1moradi/swapz/blob/9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6/tests/runtime/native/independent-byte-oracle-test.py), [private schema and integration map](https://github.com/k1moradi/swapz/blob/9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6/docs/handoff/zswapz/round099/agent2-private-byte-oracle.md), [workflow](https://github.com/k1moradi/swapz/blob/9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6/.github/workflows/phase-a-independent-byte-oracle-noauth.yml).
+- [Exact CI run 45879877815 / job 140116224719](https://github.com/k1moradi/swapz/actions/runs/45879877815/job/140116224719), Python3.12.3, seven successful steps, first unexpected error null. No compiler or native KUnit applicable.
+- [Artifact 15146913761](https://github.com/k1moradi/swapz/actions/runs/45879877815/artifacts/15146913761) independently downloaded 1,069B, SHA-256 `fe67d9efed5ab3ce648dac5940a49197925af0669c1fb5548bfdcde5ed44e083` matches uploaded ZIP digest and API, both members CRC PASS: pins.log 133B and validation.log 2725B, 39 named rejection lines and terminal aggregate verified. Redacted logs only; no raw page, plan, wire or identity artifacts.
+- Historical complete standards byte prefix CI PASS: frozen 1,881,523B; actual parent 1,883,776B -> 1,885,685B, +1,909B only; actual parent SHA-256 `ade9772a3744659ed314b912f4581e1d966ca7624c44168650004b10cc19bcd0`. Ten exact selected/frozen source pins passed. Prior accepted R098 corpus not replayed.
+
+## Actual new results
+
+| Metric | Observed |
+| --- | ---: |
+| Total checks | 4143 |
+| Exhaustive single-byte corruption positions | 4096 |
+| Named rejection cases | 39 |
+| CLI cases | 6 |
+| Clean synthetic operations / full pages / bytes | 7 / 8 / 32768 |
+| Terminal claimed-error operations / full pages / bytes | 8 / 9 / 36864 |
+
+Clean result CONSISTENT_PRIVATE_BYTE_WITNESSES_ONLY; terminal claimed-error result OBSERVED_CLAIMED_ERROR_BLOCKED, exit2. Every individual byte position mismatch rejected; named refusals cover stale/reused keys, aliasing, foreign original/clone/descriptor, wrong pin/copy/upper ordinal, missing byte witnesses, digest-only, source and scope/plan binding, loss/nonzero debt, incomplete fallback and missing preparation/upper ACK, unread typed page. These are new synthetic offline witness cases, not actual native reads/writes or real collection provenance. Independent full4096 generation from preheld seed/nonce/logical/version and comparison of separate full input/final-copy/user bytes; frozen selected recorder and parsers unchanged. Supported narrow shapes and limits in historical source report below; no new controller/recorder/product edits.
+
+## Broader automatic CI, not qualified
+
+Exact-source automatic workflow census at terminal publication: {"queued":4,"success":4,"in_progress":1,"failure":1}. [Round048 regression run45879877844/job140116224734](https://github.com/k1moradi/swapz/actions/runs/45879877844/job/140116224734) failed step12; observed first assertion `Round043 callsite precedes real BIO geometry validation`, two failures, exit1. This is product-source ordering, Agent3-owned; not an oracle job failure and not repaired or rerun here. Do not infer whole-main PASS. No manual duplicate CI.
+
+## Remaining gates
+
+Actual native collector, independently observed original BIO ACK, exact pin-bound final full-copy and separate user-visible workload bytes, actual two-phase scope/claim inhibition and source quiescence, exact built-in old-session retirement/terminal debt witness, connected native full linkage remain unproven. Offline consistency cannot authenticate those observations. No actual controller or native source changes in this lane. AUTH0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF. No actual activation, VM, module loading, physical mutation, branches/PRs/force or duplicate accepted tests.
+
+---
+
+## Historical queued report (verbatim; superseded by terminal results above)
+
 # R099 Agent2 — independent bounded full-page oracle and offline evidence
 
 **QUEUED / NO_GO_LIVE.** Source delivered; focused GitHub Actions job queued at evidence snapshot. No actual test count, artifact, first error, compiler/native KUnit/KTAP or PASS claimed. Do not rerun or dispatch duplicate CI.
