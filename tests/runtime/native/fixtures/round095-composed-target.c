@@ -123,14 +123,14 @@ struct swapz_dm {
 };
 
 enum { PAGES = 64, BLOCKS = 2048, SEGS = BLOCKS / SWAPZ_SEGMENT_BLOCKS };
-static struct swapz_dm ctx;
+static struct swapz_dm fixture_target;
 static struct swapz_map maps[PAGES];
 static u16 live[BLOCKS], min_blocks[SEGS];
 static u8 classes[BLOCKS], roles[SEGS], delta[BLOCKS];
 static u32 counts[SEGS], programs[SEGS], bases[SEGS], first[SEGS], last[SEGS];
 static u32 prev[PAGES], next[PAGES], costs[SEGS], live_bytes[SEGS];
 static u8 media[BLOCKS][SWAPZ_BLOCK_BYTES], page[SWAPZ_BLOCK_BYTES],
-	compressed[SWAPZ_BLOCK_BYTES], compressed_read[SWAPZ_BLOCK_BYTES], output[SWAPZ_BLOCK_BYTES];
+	fixture_compressed[SWAPZ_BLOCK_BYTES], compressed_read[SWAPZ_BLOCK_BYTES], fixture_output[SWAPZ_BLOCK_BYTES];
 static unsigned int checks, allocations, owner_allocations, writes, flushes, reads, terminal_calls;
 static unsigned int claims, fallbacks, typed_reads, ordinary_preparations, claimed_errors, reopened;
 static int fail_write, fail_flush, terminal_error;
@@ -139,7 +139,7 @@ static struct swapz_bio_ref *active_entry;
 #define CHECK(condition) do { ++checks; if (!(condition)) { \
 	fprintf(stderr, "R095_SEMANTIC_FAIL line=%d %s\n", __LINE__, #condition); exit(77); \
 } } while (0)
-void r094_owner_mutex_lock(pthread_mutex_t *lock) { assert(!ctx.queue_lock && !ctx.ordered_owner); assert(!pthread_mutex_lock(lock)); }
+void r094_owner_mutex_lock(pthread_mutex_t *lock) { assert(!fixture_target.queue_lock && !fixture_target.ordered_owner); assert(!pthread_mutex_lock(lock)); }
 void r094_owner_mutex_unlock(pthread_mutex_t *lock) { assert(!pthread_mutex_unlock(lock)); }
 void *r094_owner_allocate(size_t bytes)
 {
@@ -154,28 +154,28 @@ void r094_owner_free(void *address)
 void r094_owner_after_enter(void) {}
 static void *vzalloc(size_t bytes)
 {
-	assert(ctx.ordered_owner && !ctx.queue_lock);
+	assert(fixture_target.ordered_owner && !fixture_target.queue_lock);
 	void *address = calloc(1, bytes);
 	if (address) ++allocations;
 	return address;
 }
 static void vfree(void *address)
 {
-	assert(ctx.ordered_owner && !ctx.queue_lock);
+	assert(fixture_target.ordered_owner && !fixture_target.queue_lock);
 	if (address) { assert(allocations); --allocations; free(address); }
 }
 static bool swapz_has_inflight(const struct swapz_dm *target) { return target->inflight; }
 static bool dm_swapz_round090_selected_origin(struct dm_target *target, struct bio *bio)
-{ return target == ctx.target && bio->selected; }
+{ return target == fixture_target.target && bio->selected; }
 static bool dm_swapz_round091_accepted_clone_matches(struct dm_target *target, struct bio *bio)
 { return dm_swapz_round090_selected_origin(target, bio); }
 static bool dm_swapz_round090_route_live(struct dm_target *target, void *bdev, u64 sector)
-{ return target == ctx.target && bdev == ctx.target->table && sector == SWAPZ_SECTORS && ctx.original_listed; }
+{ return target == fixture_target.target && bdev == fixture_target.target->table && sector == SWAPZ_SECTORS && fixture_target.original_listed; }
 static int swapz_lower(void *opaque, int operation, u32 block, u8 blocks, u8 *bytes)
 {
-	CHECK(opaque == &ctx && ctx.ordered_owner && !ctx.queue_lock && block < BLOCKS && blocks == 1U);
+	CHECK(opaque == &fixture_target && fixture_target.ordered_owner && !fixture_target.queue_lock && block < BLOCKS && blocks == 1U);
 	if (operation == REQ_OP_WRITE) {
-		CHECK(ctx.authority.in_flight && !ctx.authority.shared_unissued_sequence && !live[block]);
+		CHECK(fixture_target.authority.in_flight && !fixture_target.authority.shared_unissued_sequence && !live[block]);
 		CHECK(active_entry && active_entry->original_claimed);
 		++writes;
 		memcpy(media[block], bytes, SWAPZ_BLOCK_BYTES);
@@ -190,18 +190,18 @@ static int swapz_lower_read(void *opaque, u32 block, u8 blocks, u8 *bytes)
 { return swapz_lower(opaque, REQ_OP_READ, block, blocks, bytes); }
 static int swapz_issue_flush(void *opaque)
 {
-	CHECK(opaque == &ctx && ctx.ordered_owner && !ctx.queue_lock && ctx.authority.in_flight);
+	CHECK(opaque == &fixture_target && fixture_target.ordered_owner && !fixture_target.queue_lock && fixture_target.authority.in_flight);
 	++flushes;
 	return fail_flush;
 }
-static int swapz_flush_window(struct swapz_dm *target) { CHECK(target == &ctx && !target->batch_count); return 0; }
+static int swapz_flush_window(struct swapz_dm *target) { CHECK(target == &fixture_target && !target->batch_count); return 0; }
 static int swapz_finalize_all_inflight(struct swapz_dm *target, bool wait)
-{ CHECK(target == &ctx && wait && !target->inflight); return 0; }
-static void swapz_invalidate_read_caches(struct swapz_dm *target) { CHECK(target == &ctx); }
-static void swapz_fail(struct swapz_dm *target, int error) { CHECK(target == &ctx && error); target->failed = true; }
+{ CHECK(target == &fixture_target && wait && !target->inflight); return 0; }
+static void swapz_invalidate_read_caches(struct swapz_dm *target) { CHECK(target == &fixture_target); }
+static void swapz_fail(struct swapz_dm *target, int error) { CHECK(target == &fixture_target && error); target->failed = true; }
 static u64 ktime_get_ns(void) { return 1U; }
 static void swapz_count_verified_zswap_writeback_commit(struct swapz_dm *target, struct bio *bio)
-{ CHECK(target == &ctx && bio == active_entry->bio); }
+{ CHECK(target == &fixture_target && bio == active_entry->bio); }
 static void swapz_complete(struct bio *, int);
 typedef struct { u64 val; } swp_entry_t;
 /* Host-only reversible swap identity encoding, not a native swp_entry claim. */
@@ -223,7 +223,7 @@ static int short_lower(void *opaque, u32 block, const u8 *bytes, u32 length, u32
 static void swapz_complete(struct bio *bio, int error)
 {
 	CHECK(active_entry && active_entry->bio == bio && !terminal_calls);
-	CHECK(!ctx.queue_lock);
+	CHECK(!fixture_target.queue_lock);
 	if (active_entry->original_claimed) {
 		++claims;
 		if (error) ++claimed_errors;
@@ -231,7 +231,7 @@ static void swapz_complete(struct bio *bio, int error)
 	}
 	++terminal_calls;
 	terminal_error = error;
-	swapz_round091_release_candidate(&ctx, active_entry);
+	swapz_round091_release_candidate(&fixture_target, active_entry);
 }
 
 int round085_compress(u8 codec, const u8 *source, u32 length, u8 *destination, u32 capacity, u32 *written);
@@ -239,36 +239,36 @@ int round085_compress(u8 codec, const u8 *source, u32 length, u8 *destination, u
 static void raw(u32 logical)
 {
 	struct swapz_tx transaction;
-	CHECK(!swapz_stage(&ctx.authority, &logical, 1U, 1U, &transaction));
-	CHECK(!swapz_finish_raw(&ctx.authority, &transaction, page, 1U, 0));
+	CHECK(!swapz_stage(&fixture_target.authority, &logical, 1U, 1U, &transaction));
+	CHECK(!swapz_finish_raw(&fixture_target.authority, &transaction, page, 1U, 0));
 }
 static void initialize(struct dm_target *target)
 {
 	CHECK(!allocations && !owner_allocations && !swapz_round090_targets);
-	memset(&ctx, 0, sizeof(ctx));
-	ctx.target = target; target->private = &ctx;
-	ctx.maps = maps; ctx.logical_pages = PAGES; ctx.accepting = true; ctx.original_trial = true;
-	ctx.async_prepare = true;
-	ctx.original_setup_work.function = swapz_round094_setup_work;
-	ctx.original_teardown_work.function = swapz_round094_teardown_work;
-	ctx.original_cap_release_work.function = swapz_round090_cap_release_work;
-	ctx.original_release_work.function = swapz_round090_release_work;
-	CHECK(!swapz_authority_init(&ctx.authority, maps, live, classes, PAGES, BLOCKS));
-	CHECK(!swapz_enable_segment_rotation(&ctx.authority, roles, SEGS));
-	CHECK(!swapz_enable_segment_mapping_counts(&ctx.authority, counts, SEGS));
-	CHECK(!swapz_enable_segment_program_counts(&ctx.authority, programs, SEGS));
-	CHECK(!swapz_enable_segment_page_lists(&ctx.authority, first, last, prev, next, SEGS, PAGES));
-	CHECK(!swapz_enable_segment_gc_accounting(&ctx.authority, live_bytes, costs, min_blocks, SEGS));
-	CHECK(!swapz_enable_extent_sequence_index(&ctx.authority, delta, bases, SEGS));
-	ctx.authority.reuse_dead_segments = 1;
+	memset(&fixture_target, 0, sizeof(fixture_target));
+	fixture_target.target = target; target->private = &fixture_target;
+	fixture_target.maps = maps; fixture_target.logical_pages = PAGES; fixture_target.accepting = true; fixture_target.original_trial = true;
+	fixture_target.async_prepare = true;
+	fixture_target.original_setup_work.function = swapz_round094_setup_work;
+	fixture_target.original_teardown_work.function = swapz_round094_teardown_work;
+	fixture_target.original_cap_release_work.function = swapz_round090_cap_release_work;
+	fixture_target.original_release_work.function = swapz_round090_release_work;
+	CHECK(!swapz_authority_init(&fixture_target.authority, maps, live, classes, PAGES, BLOCKS));
+	CHECK(!swapz_enable_segment_rotation(&fixture_target.authority, roles, SEGS));
+	CHECK(!swapz_enable_segment_mapping_counts(&fixture_target.authority, counts, SEGS));
+	CHECK(!swapz_enable_segment_program_counts(&fixture_target.authority, programs, SEGS));
+	CHECK(!swapz_enable_segment_page_lists(&fixture_target.authority, first, last, prev, next, SEGS, PAGES));
+	CHECK(!swapz_enable_segment_gc_accounting(&fixture_target.authority, live_bytes, costs, min_blocks, SEGS));
+	CHECK(!swapz_enable_extent_sequence_index(&fixture_target.authority, delta, bases, SEGS));
+	fixture_target.authority.reuse_dead_segments = 1;
 	writes = flushes = reads = terminal_calls = 0;
 	fail_write = fail_flush = terminal_error = 0; short_write = false;
-	mutex_lock(&ctx.ordered_owner); raw(1U); mutex_unlock(&ctx.ordered_owner);
-	CHECK(queue_work(system_unbound_wq, &ctx.original_setup_work));
-	flush_work(&ctx.original_setup_work);
-	CHECK(!ctx.original_setup_error && ctx.original_listed && ctx.original_cap.broker);
-	CHECK(allocations == 4U && owner_allocations == 3U && ctx.original_storage->authority == &ctx.authority);
-	CHECK(ctx.original_snapshot_epoch == ctx.original_route.registration_epoch);
+	mutex_lock(&fixture_target.ordered_owner); raw(1U); mutex_unlock(&fixture_target.ordered_owner);
+	CHECK(queue_work(system_unbound_wq, &fixture_target.original_setup_work));
+	flush_work(&fixture_target.original_setup_work);
+	CHECK(!fixture_target.original_setup_error && fixture_target.original_listed && fixture_target.original_cap.broker);
+	CHECK(allocations == 4U && owner_allocations == 3U && fixture_target.original_storage->authority == &fixture_target.authority);
+	CHECK(fixture_target.original_snapshot_epoch == fixture_target.original_route.registration_epoch);
 }
 enum scenario { OK, STALE_ROUTE, STALE_INCARNATION, STALE_GENERATION, BUSY, SHORT, WRITE_ERROR, FLUSH_ERROR, LIVE_OFF, PREPARED };
 static void exercise(u8 codec, enum scenario scenario)
@@ -289,64 +289,64 @@ static void exercise(u8 codec, enum scenario scenario)
 		scenario == WRITE_ERROR || scenario == FLUSH_ERROR;
 
 	initialize(&target);
-	session = ctx.original_owner_session; epoch = ctx.original_owner_epoch;
-	registration = ctx.original_route.registration_epoch;
-	predecessor = maps[1]; reserve_start = ctx.authority.next_block; next_sequence = ctx.authority.next_sequence;
+	session = fixture_target.original_owner_session; epoch = fixture_target.original_owner_epoch;
+	registration = fixture_target.original_route.registration_epoch;
+	predecessor = maps[1]; reserve_start = fixture_target.authority.next_block; next_sequence = fixture_target.authority.next_sequence;
 	CHECK(!swapz_round091_ordered_claim_permitted());
-	ctx.queue_lock = true;
-	CHECK(swapz_round094_snapshot_next_locked(&ctx, 1U, &generation));
-	ctx.queue_lock = false;
-	CHECK(!round085_compress(codec, page, sizeof(page), compressed, sizeof(compressed), &length));
+	fixture_target.queue_lock = true;
+	CHECK(swapz_round094_snapshot_next_locked(&fixture_target, 1U, &generation));
+	fixture_target.queue_lock = false;
+	CHECK(!round085_compress(codec, page, sizeof(page), fixture_compressed, sizeof(fixture_compressed), &length));
 	key = (struct swapz_ticket_key){ .area_epoch = 3U, .store_sequence = 4U, .slot_offset = 8U,
-		.target_session = session, .table_epoch = epoch, .target_epoch = ctx.original_route.target_epoch,
+		.target_session = session, .table_epoch = epoch, .target_epoch = fixture_target.original_route.target_epoch,
 		.logical_page = 1U, .dm_generation = generation, .length = length,
 		.decoded_length = SWAPZ_BLOCK_BYTES, .representation = SWAPZ_TICKET_ORIGINAL,
-		.codec = codec, .version = 1U, .crc = swapz_crc32c_bytes(compressed, length) };
+		.codec = codec, .version = 1U, .crc = swapz_crc32c_bytes(fixture_compressed, length) };
 	CHECK(!swapz_zswap_import_sha256(page, key.sha256));
-	CHECK(!swapz_ticket_broker_try_get(ctx.original_cap.broker, session, epoch, &external));
+	CHECK(!swapz_ticket_broker_try_get(fixture_target.original_cap.broker, session, epoch, &external));
 	CHECK(!swapz_ticket_reserve(external.broker, &key, &source));
-	CHECK(!swapz_ticket_seal(&source, compressed, length));
+	CHECK(!swapz_ticket_seal(&source, fixture_compressed, length));
 	CHECK(!swapz_ticket_retain(&source, &candidate));
 	CHECK(!swapz_ticket_view(&candidate, &view));
 	CHECK(!swapz_ticket_put(&source));
-	ctx.queue_lock = true;
-	CHECK(swapz_round091_retain_candidate_locked(&ctx, &entry, &candidate, &view));
+	fixture_target.queue_lock = true;
+	CHECK(swapz_round091_retain_candidate_locked(&fixture_target, &entry, &candidate, &view));
 	CHECK(!candidate.broker && entry.original_candidate.broker);
-	swapz_round094_invalidate_locked(&ctx);
+	swapz_round094_invalidate_locked(&fixture_target);
 	entry.list = true; /* one already accepted descriptor */
-	ctx.queue_lock = false;
+	fixture_target.queue_lock = false;
 	active_entry = &entry;
-	mutex_lock(&ctx.ordered_owner);
+	mutex_lock(&fixture_target.ordered_owner);
 	entry.list = false; /* ordered head dequeued once */
 	if (scenario == STALE_ROUTE) {
-		ctx.queue_lock = true;
-		swapz_round089_revoke_route_locked(&ctx);
-		ctx.queue_lock = false;
+		fixture_target.queue_lock = true;
+		swapz_round089_revoke_route_locked(&fixture_target);
+		fixture_target.queue_lock = false;
 	}
 	if (scenario == STALE_INCARNATION)
 		--entry.original_registration_epoch;
 	if (scenario == STALE_GENERATION) {
 		raw(1U); /* actual ordinary authority publication, not a guessed generation */
-		predecessor = maps[1]; reserve_start = ctx.authority.next_block; next_sequence = ctx.authority.next_sequence;
+		predecessor = maps[1]; reserve_start = fixture_target.authority.next_block; next_sequence = fixture_target.authority.next_sequence;
 	}
 	if (scenario == BUSY) CHECK(!pthread_mutex_lock(&external.broker->lock));
 	if (scenario == PREPARED) { entry.prepared_page = page; ++ordinary_preparations; }
 	if (scenario == SHORT) {
 		short_write = true;
-		ctx.original_decoder_bridge->lower_write = short_lower;
+		fixture_target.original_decoder_bridge->lower_write = short_lower;
 	}
 	if (scenario == WRITE_ERROR) fail_write = -EIO;
 	if (scenario == FLUSH_ERROR) fail_flush = -EIO;
 	/* Positive permission only in this extracted rootless translation unit. */
-	handled = swapz_round091_process_candidate(&ctx, &entry, scenario != LIVE_OFF);
+	handled = swapz_round091_process_candidate(&fixture_target, &entry, scenario != LIVE_OFF);
 	if (scenario == BUSY) CHECK(!pthread_mutex_unlock(&external.broker->lock));
 	CHECK(handled == expected_claim);
-	CHECK(!ctx.authority.in_flight && !ctx.authority.shared_unissued_sequence && !ctx.original_storage->pending_decoder);
+	CHECK(!fixture_target.authority.in_flight && !fixture_target.authority.shared_unissued_sequence && !fixture_target.original_storage->pending_decoder);
 	if (!handled) {
 		CHECK(!terminal_calls && !writes && !flushes);
 		CHECK(!memcmp(&maps[1], &predecessor, sizeof(predecessor)));
-		CHECK(ctx.authority.next_block == reserve_start);
-		CHECK(ctx.authority.next_sequence == next_sequence +
+		CHECK(fixture_target.authority.next_block == reserve_start);
+		CHECK(fixture_target.authority.next_sequence == next_sequence +
 			((scenario == STALE_ROUTE || scenario == STALE_INCARNATION ||
 			  scenario == BUSY || scenario == PREPARED) ? 1U : 0U));
 		/* Real ordinary allocator/finish, modeled ordinary dispatch/endio. */
@@ -361,54 +361,59 @@ static void exercise(u8 codec, enum scenario scenario)
 		if (scenario == OK) {
 			CHECK(!terminal_error && maps[1].generation == generation);
 			CHECK(maps[1].payload_length == length &&
-				!memcmp(media[maps[1].start_block] + maps[1].payload_offset, compressed, length));
-			CHECK(!swapz_round091_read_original(&ctx.authority, ctx.original_storage,
-				ctx.original_decoder_bridge, 1U, compressed_read, ctx.original_decode_scratch,
-				ctx.original_decode_verified, output));
-			CHECK(!memcmp(output, page, sizeof(output)) && reads == 1U);
+				!memcmp(media[maps[1].start_block] + maps[1].payload_offset, fixture_compressed, length));
+			CHECK(!swapz_round091_read_original(&fixture_target.authority, fixture_target.original_storage,
+				fixture_target.original_decoder_bridge, 1U, compressed_read, fixture_target.original_decode_scratch,
+				fixture_target.original_decode_verified, fixture_output));
+			CHECK(!memcmp(fixture_output, page, sizeof(fixture_output)) && reads == 1U);
 			++typed_reads;
 		} else {
 			CHECK(terminal_error == -EIO && !memcmp(&maps[1], &predecessor, sizeof(predecessor)));
 		}
 	}
 	CHECK(terminal_calls == 1U);
-	CHECK(!entry.original_candidate.broker && ctx.original_release_busy);
-	CHECK(!swapz_prevalidate_discard_range(&ctx.authority, 1U, 1U));
-	CHECK(!swapz_discard_page(&ctx.authority, 1U));
-	CHECK(!ctx.original_decoder_bridge->active_reads && !ctx.original_decoder_bridge->active_tokens);
-	mutex_unlock(&ctx.ordered_owner);
+	CHECK(!entry.original_candidate.broker && fixture_target.original_release_busy);
+	CHECK(!swapz_prevalidate_discard_range(&fixture_target.authority, 1U, 1U));
+	CHECK(!swapz_discard_page(&fixture_target.authority, 1U));
+	CHECK(!fixture_target.original_decoder_bridge->active_reads && !fixture_target.original_decoder_bridge->active_tokens);
+	mutex_unlock(&fixture_target.ordered_owner);
 	/* Actual release work runs outside locks; preserve external cap to prove
 	 * finish refuses until real outstanding references have drained. */
-	flush_work(&ctx.original_release_work);
-	CHECK(!ctx.original_release_busy);
-	ctx.queue_lock = true; ctx.accepting = false;
-	swapz_round089_revoke_route_locked(&ctx);
-	swapz_round094_invalidate_locked(&ctx);
-	ctx.queue_lock = false;
-	swapz_round090_unpublish_target(&ctx);
-	CHECK(grace_periods == old_graces + 1U && !ctx.original_listed && !ctx.original_cap.broker);
-	CHECK(queue_work(system_unbound_wq, &ctx.original_teardown_work));
-	flush_work(&ctx.original_teardown_work);
-	CHECK(ctx.original_teardown_error == -EBUSY && ctx.original_owner_session == session);
+	fixture_target.queue_lock = true; fixture_target.accepting = false;
+	swapz_round089_revoke_route_locked(&fixture_target);
+	swapz_round094_invalidate_locked(&fixture_target);
+	fixture_target.queue_lock = false;
+	swapz_round090_unpublish_target(&fixture_target);
+	CHECK(grace_periods == old_graces + 1U && !fixture_target.original_listed && !fixture_target.original_cap.broker);
+	/* Deliberately invoke teardown before the deferred ticket put joins. */
+	CHECK(queue_work(system_unbound_wq, &fixture_target.original_teardown_work));
+	flush_work(&fixture_target.original_teardown_work);
+	CHECK(fixture_target.original_teardown_error == -EBUSY && fixture_target.original_release_busy);
+	CHECK(allocations == 4U && owner_allocations == 3U && fixture_target.original_storage);
+	flush_work(&fixture_target.original_release_work);
+	CHECK(!fixture_target.original_release_busy);
+	CHECK(queue_work(system_unbound_wq, &fixture_target.original_teardown_work));
+	flush_work(&fixture_target.original_teardown_work);
+	CHECK(fixture_target.original_teardown_error == -EBUSY && fixture_target.original_owner_session == session);
 	CHECK(!allocations && owner_allocations == 3U);
 	CHECK(!swapz_ticket_broker_put(&external));
-	CHECK(queue_work(system_unbound_wq, &ctx.original_teardown_work));
-	flush_work(&ctx.original_teardown_work);
-	CHECK(!ctx.original_teardown_error && !allocations && !owner_allocations && !ctx.original_owner_session);
-	ctx.accepting = true;
-	CHECK(queue_work(system_unbound_wq, &ctx.original_setup_work));
-	flush_work(&ctx.original_setup_work);
-	CHECK(!ctx.original_setup_error && ctx.original_owner_session > session &&
-		ctx.original_route.registration_epoch > registration);
+	CHECK(queue_work(system_unbound_wq, &fixture_target.original_teardown_work));
+	flush_work(&fixture_target.original_teardown_work);
+	CHECK(!fixture_target.original_teardown_error && !allocations && !owner_allocations && !fixture_target.original_owner_session);
+	fixture_target.accepting = true;
+	CHECK(queue_work(system_unbound_wq, &fixture_target.original_setup_work));
+	flush_work(&fixture_target.original_setup_work);
+	CHECK(!fixture_target.original_setup_error && fixture_target.original_owner_session > session &&
+		fixture_target.original_route.registration_epoch > registration);
 	++reopened;
-	ctx.queue_lock = true; ctx.accepting = false;
-	swapz_round089_revoke_route_locked(&ctx);
-	swapz_round094_invalidate_locked(&ctx);
-	ctx.queue_lock = false;
-	swapz_round090_unpublish_target(&ctx);
-	CHECK(queue_work(system_unbound_wq, &ctx.original_teardown_work));
-	flush_work(&ctx.original_teardown_work);
-	CHECK(!ctx.original_teardown_error && !allocations && !owner_allocations);
+	fixture_target.queue_lock = true; fixture_target.accepting = false;
+	swapz_round089_revoke_route_locked(&fixture_target);
+	swapz_round094_invalidate_locked(&fixture_target);
+	fixture_target.queue_lock = false;
+	swapz_round090_unpublish_target(&fixture_target);
+	CHECK(queue_work(system_unbound_wq, &fixture_target.original_teardown_work));
+	flush_work(&fixture_target.original_teardown_work);
+	CHECK(!fixture_target.original_teardown_error && !allocations && !owner_allocations);
 	active_entry = NULL;
 }
 int main(void)

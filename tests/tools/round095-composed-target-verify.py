@@ -53,14 +53,16 @@ POST92 = {BROKER: "634b38e52b3b1e6493d6b10a694065ccc4b698ad",
           HEADER: "6afac83a0655e532ce1ef9b8f290a367e8aabfce"}
 POST94 = {BROKER: "ba5e891ef7f80bf0b3021ee6c676529cb72f1972",
           HEADER: "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea"}
-TARGET_POST = "def953a4a87846152aaf597b4b83177b9f576633"
-FIXTURE_POST = "50e342d9130e4ed836870a95beb8522fdd360afc"
+TARGET_POST = "5f87228daba905f6aa55f950177eecd5291c41e6"
+FIXTURE_POST = "5ba7a6ed69d9d77fcbf6cac56ae20a60c4a0f964"
 MUTANTS = (
     ("ignore_live_permission", "if (!permit_claim ||", "if ((void)permit_claim, false ||"),
     ("ignore_registration_incarnation",
      "entry->original_registration_epoch != route->registration_epoch ||", "false ||"),
     ("ignore_prepared_owner", "entry->prepared_page ||\n\t    atomic_read(&entry->preparation_submitter_active)",
      "false ||\n\t    atomic_read(&entry->preparation_submitter_active)"),
+    ("ignore_pending_release", "if (error || atomic_read(&ctx->original_release_busy)) {",
+     "if (error) {"),
 )
 
 

@@ -6615,7 +6615,11 @@ int main(void)
         # call after ordinary preparation ownership and canonical dequeue.
         self.assertNotIn("swapz_round091_process_candidate(", ordered)
         process = source_body("swapz_process", DM)
-        self.assertLess(process.index("swapz_round091_process_candidate(ctx, entry)"),
+        native_claim = ("swapz_round091_process_candidate(ctx, entry,\n"
+                        "\t\t\t\t\tswapz_round091_ordered_claim_permitted())")
+        self.assertEqual(process.count(native_claim), 1)
+        self.assertIn("swapz_round091_ordered_claim_permitted(void)\n{\n\treturn false;\n}", DM)
+        self.assertLess(process.index(native_claim),
                         process.index("swapz_accept_write(ctx, bio)"))
         self.assertIn("prepared_async = ctx->async_prepare && !entry->preparation_inline",
                       accept)

@@ -15091,6 +15091,11 @@ static void swapz_round094_teardown_work(struct work_struct *work)
 	 * Fence and drop the cap first, finish only after decoder/storage close.
 	 */
 	error = swapz_round094_close_owner(ctx, &ctx->original_retired_cap, false);
+	/* Preserve the target-side lifetime if deferred release has not joined. */
+	if (error || atomic_read(&ctx->original_release_busy)) {
+		ctx->original_teardown_error = error ? error : -EBUSY;
+		return;
+	}
 	mutex_lock(&ctx->ordered_owner);
 	storage_error = swapz_round094_close_storage(ctx);
 	mutex_unlock(&ctx->ordered_owner);
