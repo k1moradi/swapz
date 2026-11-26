@@ -987,6 +987,8 @@ struct swapz_dm {
 	bool original_bridge_ready;
 	bool original_storage_ready;
 	bool original_owner_closing;
+	/* Serialized lifecycle: only a completed ordinary target drain sets this. */
+	bool original_target_drained;
 	int original_setup_error;
 	int original_teardown_error;
 #endif
@@ -11343,15 +11345,15 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 /* ROUND091_TYPED_READ_BEGIN */
-/* Ordered owner holds the storage and bridge alive. The final page here is
- * private worker output, never the upper BIO; only the caller copies it after
- * the pin has been released successfully. All pages are disjoint and owned.
+/* Ordered owner holds storage and bridge alive. On success the native caller
+ * receives the exact record pin and retains it through the final BIO copy.
+ * The caller owns disjoint full pages; a failed decode never transfers a pin.
  */
-static int swapz_round091_read_original(struct swapz_authority *authority,
+static int swapz_round096_read_original_pinned(struct swapz_authority *authority,
 		struct swapz_shared_storage *storage,
 		struct swapz_original_decoder_bridge *bridge, swapz_u32 logical,
 		swapz_u8 *compressed, swapz_u8 *scratch, swapz_u8 *verified,
-		swapz_u8 *output)
+		swapz_u8 *output, swapz_u64 *retained_pin)
 {
 	struct swapz_shared_storage_snapshot snapshot;
 	struct swapz_original_decoder_snapshot decoder = {};
@@ -11359,6 +11361,8 @@ static int swapz_round091_read_original(struct swapz_authority *authority,
 	swapz_u64 pin;
 	int error, release_error;
 
+	if (retained_pin)
+		*retained_pin = 0;
 	if (!authority || !storage || !bridge || storage->authority != authority ||
 	    storage->ops.context != bridge || !authority->maps ||
 	    logical >= authority->logical_pages || !compressed || !scratch ||
@@ -11405,9 +11409,24 @@ static int swapz_round091_read_original(struct swapz_authority *authority,
 	error = swapz_original_decoder_bridge_read(bridge, &decoder,
 		SWAPZ_ORIGINAL_DECODE_M3568, scratch, SWAPZ_BLOCK_BYTES,
 		verified, SWAPZ_BLOCK_BYTES, output, SWAPZ_BLOCK_BYTES);
+	if (!error && retained_pin) {
+		*retained_pin = pin;
+		return 0;
+	}
 release:
 	release_error = swapz_shared_original_put(authority, pin);
 	return error ? error : release_error;
+}
+
+/* Historical source-linked entry only: private output, no upper BIO copy. */
+static __maybe_unused int swapz_round091_read_original(struct swapz_authority *authority,
+		struct swapz_shared_storage *storage,
+		struct swapz_original_decoder_bridge *bridge, swapz_u32 logical,
+		swapz_u8 *compressed, swapz_u8 *scratch, swapz_u8 *verified,
+		swapz_u8 *output)
+{
+	return swapz_round096_read_original_pinned(authority, storage, bridge,
+		logical, compressed, scratch, verified, output, NULL);
 }
 /* ROUND091_TYPED_READ_END */
 #endif
@@ -11421,14 +11440,16 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 	int error, decompressed;
 
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	u64 original_pin = 0;
+
 	/* Never interpret the typed original namespace as predictor/RAW/LZ4
 	 * or consult ordinary caches. Decode using the frozen pinned lease.
 	 */
 	if (map->state & SWAPZ_MAP_ORIGINAL) {
-		error = swapz_round091_read_original(&ctx->authority,
+		error = swapz_round096_read_original_pinned(&ctx->authority,
 			ctx->original_storage, ctx->original_decoder_bridge, logical,
 			ctx->read_compressed, ctx->original_decode_scratch,
-			ctx->original_decode_verified, ctx->read_page);
+			ctx->original_decode_verified, ctx->read_page, &original_pin);
 		if (error)
 			return error;
 	} else
@@ -11494,6 +11515,14 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 	error = swapz_copy_bio_accounted(bio, ctx->read_page, true,
 					 &ctx->read_copy_wall_ns,
 					 &ctx->read_copy_bytes);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (original_pin) {
+		int release_error = swapz_shared_original_put(&ctx->authority, original_pin);
+
+		if (!error)
+			error = release_error;
+	}
+#endif
 	if (!error)
 		ctx->logical_read_bytes += SWAPZ_BLOCK_BYTES;
 	return error;
@@ -12668,8 +12697,15 @@ static bool swapz_round091_process_candidate(struct swapz_dm *ctx,
 		return false;
 	lockdep_assert_held(&ctx->ordered_owner);
 	/* Only the source-extracted rootless fixture supplies true; the sole
-	 * native caller supplies the hard-false live gate.
+	 * native caller supplies the hard-false live gate. Even that modeled
+	 * entry must have a complete bounded owner/storage incarnation.
 	 */
+#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+	if (!ctx->original_trial || !ctx->original_storage_ready ||
+	    !ctx->original_bridge_ready || !ctx->original_owner_session ||
+	    !ctx->original_owner_epoch || ctx->original_owner_closing)
+		permit_claim = false;
+#endif
 	if (!permit_claim ||
 	    !ctx->original_storage || !ctx->original_decoder_bridge ||
 	    ctx->original_storage->authority != &ctx->authority ||
@@ -15685,6 +15721,9 @@ static void swapz_drain(struct dm_target *ti)
 	 */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
+#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+	ctx->original_target_drained = false;
+#endif
 #if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
 	swapz_round089_revoke_route_locked(ctx);
 #endif
@@ -15771,6 +15810,9 @@ static void swapz_drain(struct dm_target *ti)
 			      "drain-invariant");
 		swapz_fail(ctx, -EUCLEAN);
 	} else {
+#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+		ctx->original_target_drained = true;
+#endif
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
@@ -15800,6 +15842,9 @@ static void swapz_resume(struct dm_target *ti)
 	/* ID178: a predecessor from before suspend is a stale generation. */
 	atomic64_inc(&ctx->lane_profile_epoch);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
+#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+	ctx->original_target_drained = false;
+#endif
 	if (!READ_ONCE(ctx->failed))
 		WRITE_ONCE(ctx->accepting, true);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -15908,6 +15953,35 @@ static void swapz_free(struct swapz_dm *ctx)
 	kfree(ctx);
 }
 
+#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+/* ROUND096_TARGET_RELEASE_BEGIN */
+/* Called only after serialized drain and all optional work joins. An EBUSY
+ * alone does not prove a durable independent retry. Frozen R095 owner has
+ * no such guarantee; the native call below therefore supplies false.
+ * The explicit host boundary may model the future built-in contract.
+ */
+static bool swapz_round096_target_can_free(const struct swapz_dm *ctx,
+		bool independent_retry)
+{
+	if ((ctx->original_trial && !ctx->original_target_drained) ||
+	    ctx->original_listed || ctx->original_route.registration_epoch ||
+	    ctx->original_snapshot_epoch || ctx->original_storage ||
+	    ctx->original_decoder_bridge || ctx->original_decode_scratch ||
+	    ctx->original_decode_verified || ctx->original_storage_ready ||
+	    ctx->original_bridge_ready || ctx->original_retired_cap.broker ||
+	    ctx->original_cap.broker || ctx->original_release_ref.broker ||
+	    atomic_read(&ctx->original_release_busy))
+		return false;
+	if (!ctx->original_owner_session && !ctx->original_owner_epoch &&
+	    !ctx->original_owner_closing)
+		return true;
+	return independent_retry && ctx->original_owner_session &&
+	       ctx->original_owner_epoch && ctx->original_owner_closing &&
+	       ctx->original_teardown_error == -EBUSY;
+}
+/* ROUND096_TARGET_RELEASE_END */
+#endif
+
 static void swapz_dtr(struct dm_target *ti)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -15921,14 +15995,10 @@ static void swapz_dtr(struct dm_target *ti)
 	 * context, rather than freeing callback/authority memory on an invariant
 	 * violation. No new entrants after drain; report failure only.
 	 */
-	if (ctx->original_storage || ctx->original_decoder_bridge ||
-	    ctx->original_retired_cap.broker || ctx->original_cap.broker ||
-	    atomic_read(&ctx->original_release_busy)) {
+	if (!swapz_round096_target_can_free(ctx, false)) {
 		DMERR("guarded owner teardown quarantined errno=%d", ctx->original_teardown_error);
 		goto detach;
 	}
-	if (ctx->original_owner_session)
-		DMERR("built-in owner remains closed errno=%d", ctx->original_teardown_error);
 #endif
 	swapz_free(ctx);
 #if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
