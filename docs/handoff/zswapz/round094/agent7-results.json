@@ -147,5 +147,36 @@
   "vm": false,
   "module_loaded": false,
   "physical": false,
-  "status": "PASS_ACTUAL_SHARED_PROVIDER_HOST_ONLY_NO_GO_LIVE"
+  "status": "PASS_ACTUAL_SHARED_PROVIDER_HOST_ONLY_NO_GO_LIVE",
+  "directed_native_continuation": {
+    "source_commit": "f2f0a3ec0450352e5b70338b21710029c892fd31",
+    "source_parent": "0f490355e1a414909b694ff20d9dc92486f1c16d",
+    "provider_source": "0bd024561b2b03fa7837556cbd723f8f27d80b27",
+    "source_published": true,
+    "verifier_blob": "34405ed6e77a9aacbb1c9fc618b59176c4a7540d",
+    "workflow_blob": "ff07cbe0fea8336cbb2eecab2498a9be68a80389",
+    "standards": {
+      "parent_blob": "dad412d7e8f0b069538b3460420f90bd949f5e3d",
+      "parent_bytes": 1838245,
+      "post_blob": "19c38b30cc013c227d6048b3e8ce2fe7ccd76d95",
+      "post_bytes": 1839146,
+      "append_bytes": 901,
+      "full_prefix": true
+    },
+    "ci": {
+      "run_id": 45763547658,
+      "job_id": 139718948300,
+      "attempt": 1,
+      "status": "queued",
+      "conclusion": null,
+      "results": null,
+      "artifacts": null,
+      "first_error": null
+    },
+    "scope": "one actual shared provider native object, no repeated host corpus or native R093 composite, no full link/load/runtime",
+    "native_compile": "NOT_RUN",
+    "native_link": "NOT_RUN",
+    "native_runtime": "NOT_RUN",
+    "manual_dispatches": 0
+  }
 }
