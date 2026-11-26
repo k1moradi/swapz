@@ -1,0 +1,49 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1028,0 +1029,14 @@
++/* R094 target advertises speculative snapshots, not destination credit.
++ * Live claim is hard OFF. Keep observation separately opt-in at compile
++ * time; no runtime switch, extra reclaim, or implicit route authorization.
++ * The single existing carrier and M3568 bound still apply.
++ */
++static bool swapz_mm_capture_observation_enabled(void)
++{
++#ifdef SWAPZ_ROUND095_MM_CAPTURE_OBSERVATION_TEST
++	return true;
++#else
++	return false;
++#endif
++}
++
+@@ -1033,2 +1047,2 @@
+-	struct crypto_acomp *tfm = crypto_acomp_reqtfm(request);
+-	swp_entry_t slot = folio_swap_entry(folio, index);
++	struct crypto_acomp *tfm;
++	swp_entry_t slot;
+@@ -1039,0 +1054,6 @@
++	/* Refuse before even inspecting the compressor or folio. */
++	if (!swapz_mm_capture_observation_enabled())
++		return;
++	tfm = crypto_acomp_reqtfm(request);
++	slot = folio_swap_entry(folio, index);
++
+@@ -1045,1 +1065,1 @@
+-	    index || folio_order(folio) || !entry->length || entry->length > 4095 ||
++	    index || folio_order(folio) || !entry->length || entry->length > 3568 ||
+@@ -1117,0 +1138,3 @@
++	if (!swapz_mm_capture_observation_enabled())
++		return -EOPNOTSUPP;
++
+@@ -1146,1 +1169,1 @@
+-	struct swap_info_struct *si = __swap_entry_to_info(slot);
++	struct swap_info_struct *si;
+@@ -1155,0 +1179,5 @@
++	/* Even a previously minted cookie cannot bypass disabled admission. */
++	if (!swapz_mm_capture_observation_enabled())
++		return;
++	si = __swap_entry_to_info(slot);
++
+@@ -1164,1 +1192,1 @@
+-	    !entry->length || entry->length > 4095 || ctx->sio || ctx->original ||
++	    !entry->length || entry->length > 3568 || ctx->sio || ctx->original ||

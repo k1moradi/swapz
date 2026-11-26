@@ -1,0 +1,65 @@
+name: Round095 Agent11 actual MM owner capture host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round095-original-mm-observation-fence.patch'
+      - 'tests/runtime/native/fixtures/round095-mm-owner-capture.c'
+      - 'tests/tools/round095-mm-owner-capture-verify.py'
+      - '.github/workflows/phase-a-round095-mm-owner-capture-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  mm-owner-capture-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source, parent and canonical policy
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          import hashlib
+          import subprocess
+          from pathlib import Path
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(previous) and len(current) > len(previous)
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Actual MM and built-in broker source-linked host observation
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B swapz/tests/tools/round095-mm-owner-capture-verify.py \
+            --linux linux --output "$RUNNER_TEMP/r095-a11-mm-evidence"
+      - name: Retain bounded host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round095-agent11-mm-owner-host
+          path: ${{ runner.temp }}/r095-a11-mm-evidence/
+          if-no-files-found: warn
+          retention-days: 14
