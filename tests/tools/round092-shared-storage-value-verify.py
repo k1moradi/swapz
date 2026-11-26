@@ -13,6 +13,9 @@ KERNEL = ROOT / "src/kernel"
 SOURCE = KERNEL / "zswap-original-storage-value.c"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round092-shared-storage-value.c"
 PINS = {
+    "src/kernel/zswap-original-storage-value.c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+    "src/kernel/zswap-original-storage-value.h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+    "tests/runtime/native/fixtures/round092-shared-storage-value.c": "df2d69153f9b157ef7e505a77d3b10473a4a7c0b",
     "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
     "src/kernel/authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
@@ -108,7 +111,7 @@ MUTANTS = [
         "if (0)"
     ]
 ]
-REPORT = {"round": "093", "agent": 5, "compilers": {}, "first_error": None,
+REPORT = {"round": "094", "agent": 5, "compilers": {}, "first_error": None,
           "source_mapped_authenticated": 0, "phase_a": "BLOCKED", "import_active": 0,
           "physical_io": False, "native": "NOT_RUN", "provider": "MODELED_FROZEN_VALUE_ABI"}
 MODES = (("normal", ()), ("stale_generation", ("1",)),
@@ -180,11 +183,11 @@ def compile_source(compiler, standard, paths, binary, label, work):
                "-DSWAPZ_ORIGINAL_STORAGE_TEST", "-DSWAPZ_ORIGINAL_EXTENT_TEST",
                "-DSWAPZ_ROUND066_IMPORT_DISK_TEST", "-DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST",
                "-DSWAPZ_SHARED_ORIGINAL_TEST", "-DSWAPZ_SHARED_STORAGE_VALUE_TEST",
-               "-DSWAPZ_ZSWAP_IMPORT_DECODER_HOST_TEST", "-I", str(KERNEL),
+               "-DSWAPZ_ZSWAP_IMPORT_HOST_TEST=1", "-DSWAPZ_ZSWAP_IMPORT_DECODER_HOST_TEST", "-I", str(KERNEL),
                *(str(path) for path in paths), str(FIXTURE),
                str(KERNEL / "zswap-original-storage.c"),
                str(KERNEL / "zswap-original-extent.c"), str(KERNEL / "codec.c"),
-               "-o", str(binary)]
+               "-llz4", "-lcrypto", "-o", str(binary)]
     compiled = run(command)
     if compiled.returncode:
         first_failure(work, compiled, compiler + "/" + label + "/compile")
@@ -258,6 +261,6 @@ if __name__ == "__main__":
         REPORT["conclusion"] = "FAIL" if status else "PASS"
         (work / "results.json").write_text(json.dumps(REPORT, indent=2) + "\n")
         if status:
-            print("ROUND093_AGENT5_FIRST_ERROR " + REPORT["first_error"], file=sys.stderr)
+            print("ROUND094_AGENT5_FIRST_ERROR " + REPORT["first_error"], file=sys.stderr)
             print("Inspect private first-child-error.log if present; fix exact source, no unchanged rerun.", file=sys.stderr)
     raise SystemExit(status)
