@@ -60,7 +60,15 @@
     "TREE_RCU": true,
     "TINY_RCU": false,
     "NR_CPUS": 4,
-    "actual": null
+    "actual": {
+      "SMP": true,
+      "TREE_RCU": true,
+      "TINY_RCU": false,
+      "NR_CPUS": 4,
+      "PREEMPT_LAZY": true,
+      "bytes": 46577,
+      "sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf"
+    }
   },
   "locked_cmpxchg_assertion_retained": true,
   "requested_objects": [
@@ -92,8 +100,25 @@
       "mm/page_io.c": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
       "include/linux/swapz_mm_carrier.h": "7083f7acdb439022a073c22261b7541d15806e5e"
     },
-    "actual_apply": "PENDING",
-    "r097_host_at_freeze": "QUEUED_NOT_ACCEPTED"
+    "actual_apply": "PASS_CHECK_APPLY_REVERSE_EXACT_POSTIMAGES",
+    "r097_host_at_freeze": "QUEUED_NOT_ACCEPTED",
+    "actual_postimages": {
+      "mm/zswap.c": {
+        "blob": "128495cf9b35d37b93db1b165dc1562de94b5b89",
+        "sha256": "14cfce378cf54c2d096d3964f2a68682575b8f4aa1024a77c406039bc7d80b45",
+        "bytes": 74088
+      },
+      "mm/page_io.c": {
+        "blob": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+        "sha256": "0c337f642c1549b7540fadf96aebfb9209f403c4bfefccc9709b5b43a0173234",
+        "bytes": 20283
+      },
+      "include/linux/swapz_mm_carrier.h": {
+        "blob": "7083f7acdb439022a073c22261b7541d15806e5e",
+        "sha256": "92f75eaf743fa2a3b9622ac6478b201debb6cd513b6c680c504b93ed8b655304",
+        "bytes": 5738
+      }
+    }
   },
   "selected_recorder": {
     "adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
@@ -113,8 +138,8 @@
       "run_id": 45869981885,
       "attempt": 1,
       "name": "directed-r097-smp-x86-objects",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "steps": [
         {
           "name": "Set up job",
@@ -160,58 +185,90 @@
         },
         {
           "name": "Raw immutable stage, SMP directed native objects and diagnostic relocatable only",
-          "status": "in_progress",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 8
         },
         {
           "name": "Preserve exact compile logs and manifest even on failure",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 9
         },
         {
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 16
         },
         {
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 17
         },
         {
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 18
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19
         }
       ]
     }
   ],
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_CHANGED_SMP_DIRECTED_NATIVE_COMPONENTS_ONLY",
   "first_error": null,
-  "first_error_status": "NOT_INSPECTED_TERMINAL_LOGS",
-  "artifact": null,
-  "actual_native_counts": null,
+  "first_error_status": "NONE",
+  "artifact": {
+    "id": 15143025907,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45869981885/artifacts/15143025907",
+    "bytes": 760331,
+    "entries": 93,
+    "sha256": "709cbbd2acc43148515144ee2f7d656c2a0bdcc13e431fbe7771d944472c462d",
+    "independent_download": true,
+    "zip_crc": "PASS",
+    "upload_log_api_local_sha256_match": true
+  },
+  "actual_native_counts": {
+    "build_attempts": 1,
+    "completed_verifier_steps": 49,
+    "product_pins": 56,
+    "directed_objects": 8,
+    "independent_object_sha256_git_blob_matches": 8,
+    "locked_cmpxchg_sites": 2,
+    "observation_owner_definitions": 7,
+    "observation_owner_adapter_imports": 7,
+    "dm_owner_imports": 3,
+    "dm_gated_storage_gate_imports": 4,
+    "dm_bridge_imports": 0,
+    "dm_observation_wrapper_imports": 2,
+    "dm_candidate_accessor_imports": 0,
+    "storage_gate_imports": 4,
+    "storage_direct_provider_imports": 0,
+    "composite_undefined_symbols": 234
+  },
   "exact_source_automatic_workflows": {
-    "success": 2,
-    "in_progress": 6,
-    "queued": 2
+    "success": 5,
+    "in_progress": 4,
+    "queued": 1
   },
   "exact_source_automatic_run_ids": [
     45869981876,
     45869981859,
-    45869981885,
     45869981874,
     45869982088,
     45869981979,
-    45869982152,
     45869981881,
+    45869981994,
+    45869981885,
     45869982066,
-    45869981994
+    45869982152
   ],
   "full_kernel_link": false,
   "modpost": "NOT_REQUESTED",
@@ -227,5 +284,134 @@
   "module_loaded": false,
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
-  "import_active": false
+  "import_active": false,
+  "native_objects": {
+    "mm/page_io.o": {
+      "blob": "7e88093f2b6a3adc879674e712827e6216bd1f27",
+      "bytes": 21008,
+      "sha256": "dd3399cf392f55776188c1b9f7b42fe63c7e4a8f0ff3ffcd15e6ba4b49f85ca5"
+    },
+    "mm/round098-swapz/native-observation-adapter.o": {
+      "blob": "710c5f1e3ba2ee0dac7b2223206130cb6d46252f",
+      "bytes": 7616,
+      "sha256": "3a4e422c5b8f5396e2ddd945a6bc644063fb4b81c632ce05476a4bce9671185c"
+    },
+    "mm/round098-swapz/native-observation-owner.o": {
+      "blob": "3e8e118385f3923bd92a1bc53c381ab2efafd032",
+      "bytes": 8888,
+      "sha256": "8c4c1c112d350d46cfc3f850aea21d541a1782bc9558f4ca19af8e8ff9e05959"
+    },
+    "mm/round098-swapz/zswap-original-ticket.o": {
+      "blob": "3d0889e1a008b70590f0e68e0f656ca67369f7be",
+      "bytes": 27104,
+      "sha256": "416e3301c0c62add63f8f11fa4c7a651e179e23e088a0ab03ea8a2286ea3ca54"
+    },
+    "mm/zswap.o": {
+      "blob": "0b6feb4d723fcbdde12004050c1dacb72eff2b2b",
+      "bytes": 50288,
+      "sha256": "f3752d5018f4720a58c3850d86680ed1c584734d2380bf61f44c4efd555bf53b"
+    },
+    "dm-target.o": {
+      "blob": "e69d4d583f97110c9282cb12bafe27c7d4d8dc43",
+      "bytes": 208904,
+      "sha256": "430949e542c942853a8de4f7512abfb2b3e8521a6ba48446a20a0056d56a97c6"
+    },
+    "zswap-original-decoder-shared.o": {
+      "blob": "e18a439da9c11d70e961220cbb998c594cefdabd",
+      "bytes": 12568,
+      "sha256": "a2e80aaee17ed4f321d98b2e4596debbbfb3c74db981c83e1fe1592cc82a1984"
+    },
+    "zswap-original-storage-shared-decoder.o": {
+      "blob": "2cf3c4f5bfa3ca6c0f44bacd1735101c97cc6e1a",
+      "bytes": 9304,
+      "sha256": "eeb69e1612f8dfb526915eb580878d1c9d7a285e04b788ee4c855c8a2d57ca4e"
+    }
+  },
+  "native_inspection": {
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+    "actual_elf_type": "ELF64_X86_64_ET_REL",
+    "locked_cmpxchg": [
+      "63e: f0 0f b1 3e lock cmpxchg %edi,(%rsi)",
+      "afc: f0 45 0f b1 08 lock cmpxchg %r9d,(%r8)"
+    ],
+    "recorder_rcu_imports": [
+      "synchronize_rcu"
+    ],
+    "owner_retry_workqueue_imports": [
+      "queue_work_on"
+    ],
+    "observation_owner_definitions": [
+      "active",
+      "append",
+      "export",
+      "mint",
+      "release",
+      "start",
+      "stop"
+    ],
+    "observation_owner_adapter_imports": [
+      "append",
+      "export",
+      "init",
+      "mint",
+      "publish",
+      "seal",
+      "stop"
+    ],
+    "target_gated_imports": [
+      "swapz_original_decoder_shared_gate_init",
+      "swapz_shared_storage_decoder_close",
+      "swapz_shared_storage_decoder_init",
+      "swapz_shared_storage_decoder_read"
+    ],
+    "target_owner_imports": [
+      "swapz_mm_broker_owner_begin_close",
+      "swapz_mm_broker_owner_finish_close",
+      "swapz_mm_broker_owner_open"
+    ],
+    "target_bridge_imports": [],
+    "target_observation_imports": [
+      "swapz_trial_observation_active",
+      "swapz_trial_observation_append"
+    ],
+    "producer_observation_imports": {
+      "mm-page-io": [
+        "swapz_mm_observation_bind",
+        "swapz_mm_observation_endio",
+        "swapz_trial_observation_active"
+      ],
+      "mm-zswap": [
+        "swapz_trial_observation_active",
+        "swapz_trial_observation_append",
+        "swapz_trial_observation_mint"
+      ]
+    },
+    "candidate_accessor_defined": true,
+    "target_candidate_accessor_import": false,
+    "storage_gate_imports": [
+      "swapz_original_decoder_shared_gate_begin_close",
+      "swapz_original_decoder_shared_gate_finish_close",
+      "swapz_original_decoder_shared_gate_open",
+      "swapz_original_decoder_shared_gate_read"
+    ],
+    "storage_direct_provider_imports": [],
+    "independent_nm_objdump_readelf": "PASS"
+  },
+  "diagnostic_composite": {
+    "blob": "1c0dd000ff9d59155023a55d04fca71858f558ce",
+    "bytes": 330120,
+    "sha256": "5cf24736c442f1d87730ec8fe53eff4b134838832ab0e4fd0fc9b29c909d5dc1",
+    "undefined_symbols": 234,
+    "scope": "MIXED_DOMAIN_DIAGNOSTIC_ET_REL_ONLY",
+    "independent_sha256_blob_elf_verified": true
+  },
+  "standards_prefix_ci": {
+    "parent_bytes": 1874135,
+    "parent_sha256": "03c288b603663e773a1b033dded2743222ef30d325333e7eb8809bcf466279f4",
+    "source_bytes": 1875291,
+    "source_sha256": "727654ff79fac2bdd22252232e9cefa92a165a687abd28b58a346b98a785ffbe",
+    "status": "PASS"
+  },
+  "evidence_only_parent": "42ab8e761f42251364cdc337636d4bbb3cb86a83"
 }
