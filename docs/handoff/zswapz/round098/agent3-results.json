@@ -2,7 +2,7 @@
   "round": "098",
   "agent": 3,
   "status": "PROGRESS",
-  "conclusion": "FAILURE",
+  "conclusion": "PASS_SCOPED_TARGET_ACTUAL_ACCESSOR_RECORDER_HOST_ONLY_WITH_RETAINED_INITIAL_FAIL",
   "AUTH": 0,
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -116,5 +116,95 @@
   "vm": false,
   "module_load": false,
   "manual_duplicate_ci": 0,
-  "same_round_dependencies": false
+  "same_round_dependencies": false,
+  "first_run_artifact_digest_log_api_agree": true,
+  "artifact_independent_download": false,
+  "correction": {
+    "commit": "bd5b2573adc31ea1e58c6094faf616964cbfafff",
+    "parent": "88e485625d7e9c44a614d7abf11844b0d3350f35",
+    "runner_blob": "b19aab41ca58332fb96215e0a342daa86d24d348",
+    "scope": "Three double-escaped raw regex literals corrected; no DM change.",
+    "standards_before": "7e1f11bef82d1214b96234e84d1a2065a5864ec3",
+    "standards_before_bytes": 1879120,
+    "standards_after": "4bc31dfed3ffb2db9cee73c267bf6e1ac2ab7d51",
+    "standards_after_bytes": 1879787,
+    "complete_prefix_verified": true,
+    "ci": {
+      "run": 45871228934,
+      "job": 140086855765,
+      "status": "completed",
+      "conclusion": "success",
+      "first_error": null,
+      "artifact": {
+        "id": 15141444720,
+        "size_in_bytes": 827,
+        "digest": "sha256:dfc948ba3cdc5da889198a52b8782962c7618afaeee8977708a3b40da2d5eb81"
+      },
+      "artifact_digest_log_api_agree": true,
+      "artifact_independently_downloaded": false,
+      "compilers": {
+        "gcc": {
+          "standard": "-std=c2x",
+          "checks": 130,
+          "scenarios": {
+            "connected": {
+              "checks": 67,
+              "claims": 1,
+              "fallbacks": 0,
+              "events": 12,
+              "loss": 0
+            },
+            "revoked": {
+              "checks": 63,
+              "claims": 0,
+              "fallbacks": 1,
+              "events": 10,
+              "loss": 4
+            }
+          },
+          "mutants": [
+            {
+              "name": "ignore_mm_scope_revocation",
+              "witness": "R098_SEMANTIC_FAIL line=440 handled == !revoked"
+            },
+            {
+              "name": "ignore_producer_slot",
+              "witness": "R098_SEMANTIC_FAIL line=414 !swapz_scope_observation_bind(&entry, &wrong, &key)"
+            }
+          ]
+        },
+        "clang": {
+          "standard": "-std=c23",
+          "checks": 130,
+          "scenarios": {
+            "connected": {
+              "checks": 67,
+              "claims": 1,
+              "fallbacks": 0,
+              "events": 12,
+              "loss": 0
+            },
+            "revoked": {
+              "checks": 63,
+              "claims": 0,
+              "fallbacks": 1,
+              "events": 10,
+              "loss": 4
+            }
+          },
+          "mutants": [
+            {
+              "name": "ignore_mm_scope_revocation",
+              "witness": "R098_SEMANTIC_FAIL line=440 handled == !revoked"
+            },
+            {
+              "name": "ignore_producer_slot",
+              "witness": "R098_SEMANTIC_FAIL line=414 !swapz_scope_observation_bind(&entry, &wrong, &key)"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "followup_evidence_changes_standards": false
 }
