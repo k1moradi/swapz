@@ -1,0 +1,297 @@
+{
+  "round": "100",
+  "agent": 3,
+  "status": "PROGRESS_CONNECTED_CANDIDATE_BLOCKED",
+  "conclusion": "MAP_REGRESSION_PARTIAL_PASS_TYPED_VERIFIER_CI_PENDING_CONTROLLER_NOT_CONNECTED",
+  "task": "f480021d5d0e10f679a6efbbdc0bda1df64054fc",
+  "freeze": "78d5a7e5231669cd9c1213e3a2682e3b01dcd79d",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "78d1884f353d995ff630226212ca4e0f32ab4272",
+  "source_parent": "f480021d5d0e10f679a6efbbdc0bda1df64054fc",
+  "source_tree": "2aee064b0f6b702c5b93b67302f52d1eaf985d7c",
+  "evidence_parent": "2d524047dd759e5435179d7166ca9eb884edd3a0",
+  "dm": {
+    "pre": "0f53224a43ef8aec58b2627904c5204e67a6a295",
+    "post": "40f502cd3ca3b9f48b1178995fd3f922bfcbfc01",
+    "single_lookup": true,
+    "default_off_early_return": true,
+    "scoped_refusal_reset": true
+  },
+  "typed_verifier": {
+    "post": "fcfaf16d7e4647fde1a3303674f5a09b0b7f95dd",
+    "legacy_controls_retained": 24,
+    "typed_controls_retained": 6,
+    "scoped_controls_added": 4,
+    "execution": "see exact-source jobs; local source anchor checks only"
+  },
+  "standards": {
+    "parent": "ce56f56ac3095eebe60ba56c38f72898f729e645",
+    "parent_bytes": 1885685,
+    "post": "188ea3b9fb825e1f6489693280c0bb872699de9d",
+    "post_bytes": 1886704,
+    "complete_prefix_verified": true,
+    "actual_evidence_parent_blob": "2e93de743e4babedd627b892879576b15b40824c",
+    "actual_evidence_parent_bytes": 1888031,
+    "evidence_changes_standards": false
+  },
+  "local_map_prefix": {
+    "status": "PASS_EXACT_SOURCE_PREFIX_WITH_HOST_STUBS",
+    "git_blob": "aa444d4aefa6d5b4ec3788624a250aa8439fc7d4",
+    "bytes": 4888,
+    "sha256": "0c7b3171bd8ec86d492ff113f0f921feac53272771cf203e96fd1ee27036f269",
+    "fixture_sha256": "ce8369d0fc4f3a7b16de6a4672710e6e3503c1ef50d51b727a1cf558281ad016",
+    "compilers": [
+      "GCC 14.2.0",
+      "Clang 17.0.0"
+    ],
+    "modes": [
+      "default",
+      "scoped",
+      "default-witness",
+      "scoped-witness"
+    ],
+    "cases_per_compiler_mode": 18,
+    "total_cases": 144,
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ],
+    "scope": "actual map prefix up to FIFO initialization; synthetic kernel types, per-BIO lookup, observers, sentinel return; no actual FIFO or native concurrency"
+  },
+  "ci": {
+    "census": {
+      "queued": 11,
+      "success": 6,
+      "in_progress": 10,
+      "failure": 2
+    },
+    "total": 29,
+    "focus": [
+      {
+        "run": 45910833802,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218507134,
+            "name": "original-dm-source-and-current-product-negatives",
+            "status": "queued",
+            "conclusion": null
+          }
+        ]
+      },
+      {
+        "run": 45910833722,
+        "name": "Round043 production swapz_map original GPL v1 synchronous read-only ingress NO_AUTH Kbuild",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218506718,
+            "name": "Native x86_64 actual DM module default and old guard",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 140218507044,
+            "name": "repository-policy",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 140218507057,
+            "name": "original-same-kernel-dm",
+            "status": "in_progress",
+            "conclusion": null
+          },
+          {
+            "id": 140218507200,
+            "name": "Native arm64 actual DM module default and old guard",
+            "status": "in_progress",
+            "conclusion": null
+          }
+        ]
+      },
+      {
+        "run": 45910833749,
+        "name": "Round094 guarded target owner and generation host NO_AUTH",
+        "status": "completed",
+        "conclusion": "failure",
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218506550,
+            "name": "target-owner-source-host",
+            "status": "completed",
+            "conclusion": "failure"
+          }
+        ]
+      },
+      {
+        "run": 45910833723,
+        "name": "Round046 rootless real product DM map/table/GC/dtr lifetime 90 NO_AUTH GCC Clang",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218506748,
+            "name": "real-product-source-extracted-negative",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "run": 45910833852,
+        "name": "Round092 selected-DM ordered owner host",
+        "status": "completed",
+        "conclusion": "failure",
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218507205,
+            "name": "selected-dm-source-host",
+            "status": "completed",
+            "conclusion": "failure"
+          }
+        ]
+      },
+      {
+        "run": 45910833710,
+        "name": "Experimental swapz production C qualification",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218506716,
+            "name": "exact-c (ubuntu-24.04-arm, arm64)",
+            "status": "in_progress",
+            "conclusion": null
+          },
+          {
+            "id": 140218507089,
+            "name": "compile-only (ubuntu-24.04-arm, arm64)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 140218507110,
+            "name": "exact-c (ubuntu-24.04, x86_64)",
+            "status": "in_progress",
+            "conclusion": null
+          },
+          {
+            "id": 140218507204,
+            "name": "compile-only (ubuntu-24.04, x86_64)",
+            "status": "in_progress",
+            "conclusion": null
+          }
+        ]
+      },
+      {
+        "run": 45910833862,
+        "name": "Phase A pinned Linux zswap provenance source prototype",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218507158,
+            "name": "Modified pinned Linux CONFIG_ZSWAP=y/n and matched dm-swapz module Kbuild",
+            "status": "in_progress",
+            "conclusion": null
+          }
+        ]
+      },
+      {
+        "run": 45910833261,
+        "name": "Round057 Agent5 actual product transaction no-auth source proof",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "78d1884f353d995ff630226212ca4e0f32ab4272",
+        "attempt": 1,
+        "jobs": [
+          {
+            "id": 140218505269,
+            "name": "exact-product-transaction-noauth",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ],
+    "round057": {
+      "run": 45910833261,
+      "job": 140218505269,
+      "status": "success",
+      "checks_per_compiler": 7,
+      "semantic_mutants_per_compiler": 5,
+      "artifact": null,
+      "first_error": null
+    },
+    "round046": {
+      "run": 45910833723,
+      "job": 140218506748,
+      "status": "success",
+      "source_mutants": 12,
+      "sanitizers": "GCC/Clang ASan/UBSan",
+      "artifact": null,
+      "first_error": null
+    },
+    "round094": {
+      "run": 45910833749,
+      "job": 140218506550,
+      "status": "failure",
+      "first_error": "target.c:201: error: unterminated #if",
+      "lane": "A11 frozen host extraction"
+    },
+    "round092": {
+      "run": 45910833852,
+      "job": 140218507205,
+      "status": "failure",
+      "first_error": "registry.c:76: error: unterminated #if",
+      "lane": "A11 frozen host extraction"
+    }
+  },
+  "prior_failures": {
+    "round043": "R099 140115828225 tests/tools/round043-dm-real-ingress-verify.py:58 geometry validation assertion",
+    "round057": "R099 140115828605 FIRST_ERROR round057-transaction: source drift: real target map return DM_MAPIO_KILL;",
+    "typed": "R099 140115828371/140115828896/140115828725 and 140115368449/140115368574 FAIL: typed claimed publication success before accounting: expected one source occurrence, got 0"
+  },
+  "connected_product": {
+    "complete": false,
+    "trusted_controller": false,
+    "split_capture_observation": false,
+    "core_original_ack": false,
+    "independent_byte_collection": false,
+    "authoritative_retirement": false
+  },
+  "full_smp": {
+    "status": "NOT_RUN_SOURCE_NOT_CONNECTED",
+    "attempts": 0,
+    "lease_unspent": true
+  },
+  "same_round_peer_inputs": false,
+  "manual_dispatches": 0,
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw": "OFF",
+  "import": "OFF",
+  "activation": false,
+  "vm": false,
+  "module_load": false,
+  "physical_mutation": false
+}
