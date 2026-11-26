@@ -118,5 +118,35 @@
   "import": false,
   "vm": false,
   "module_loaded": false,
-  "physical": false
+  "physical": false,
+  "native_followup": {
+    "status": "IN_PROGRESS",
+    "source_commit": "3e7566fded10f4fe932903afa7501a9711adfd95",
+    "source_parent": "34cce4d9bbde1d78e2f8b055dcb58399146cd80e",
+    "owner_source": "40b52f8e7a80680dcb6b074df5be897f57eae1b9",
+    "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "run_id": 45761387727,
+    "job_id": 139711962592,
+    "job_url": "https://github.com/k1moradi/swapz/actions/runs/45761387727/job/139711962592",
+    "job_conclusion": null,
+    "planned_directed_objects": 1,
+    "planned_broker_gpl_exports": 8,
+    "actual_directed_objects": null,
+    "actual_broker_gpl_exports": null,
+    "first_error": null,
+    "artifact": null,
+    "full_build": false,
+    "module_link": false,
+    "modpost": false,
+    "host_replay": false,
+    "manual_dispatch": false,
+    "standards": {
+      "parent_blob": "8afa6a105b48e33f43590c891a48ce96d6f53e29",
+      "new_blob": "2ec021d8838d65b0602a5a95d4850884b63693f0",
+      "parent_bytes": 1836075,
+      "append_bytes": 1051,
+      "new_bytes": 1837126,
+      "complete_prefix_verified": true
+    }
+  }
 }
