@@ -1,0 +1,73 @@
+{
+  "round": "097",
+  "agent": 11,
+  "kind": "actual-staged-mm-producer-source-linked-host-only",
+  "conclusion": "QUEUED",
+  "tested_commit": "23979a8e43ff0796018d0bb63675a63d1c52be8e",
+  "source_parent": "f15e3682c87444dde69c1ee75b6e4f3ad146493f",
+  "engineering_freeze": "f7cb6969db189c03d592a89cae43e5464946c716",
+  "task_commit": "25bf051dbb7ff4496075238f614611f16f37dc51",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_published": true,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45856892403",
+  "run_id": 45856892403,
+  "jobs": [
+    {
+      "id": 140037517664,
+      "name": "mm-producer-host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45856892403/job/140037517664"
+    }
+  ],
+  "artifact": null,
+  "checks_per_compiler": null,
+  "retries_per_compiler": null,
+  "events_per_compiler": null,
+  "mutants_per_compiler": null,
+  "configured_mutants_per_compiler": 2,
+  "first_error": null,
+  "native": "NOT_RUN",
+  "physical": "NOT_RUN",
+  "actual_physical_io": false,
+  "source_mapped_authenticated": false,
+  "source_authentication": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw": "DISABLED",
+  "import": 0,
+  "scope_publication": "NOT_IMPLEMENTED_HARD_OFF",
+  "scope_cookie_bytes": 8,
+  "carrier_observation_record_bytes": 296,
+  "standards": {
+    "parent_blob": "411cebf374af8a8b8f730016f9bab57de5629daf",
+    "parent_bytes": 1872507,
+    "blob": "dff61588713f8ceeecb5e406cab8788e12990147",
+    "bytes": 1874135,
+    "complete_prefix_readback": true,
+    "ci_prefix_check": "QUEUED"
+  },
+  "pins": {
+    "overlay": "c35b35c18cc11f9b86c0b65856dbc0cd2a0bd2c8",
+    "mm_capture_off_patch": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+    "mm_pre": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+    "mm_predicted_post": "128495cf9b35d37b93db1b165dc1562de94b5b89",
+    "page_io_pre": "c3bd481117dbd29edd821df452f74990d6d5f00a",
+    "page_io_predicted_post": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+    "carrier_pre": "da1e7a367f4f5d16dc6854f33064631251acb153",
+    "carrier_predicted_post": "7083f7acdb439022a073c22261b7541d15806e5e",
+    "r096_retry": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+    "ticket_post": "70109f2c2ce9f60681649bd4807382248d0a41a2",
+    "owner_post": "278a93a3fd3fd260444aebc55d4a87112e56f704",
+    "ticket_header_post": "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea",
+    "selected_adapter_header": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "dm": "c60433fd6c482df9b80376ebd6326db3e56977fa"
+  },
+  "limitations": [
+    "Hard false gate and absent scope publication; no native positive runtime admission",
+    "Host RCU/module/geometry/digest/observation wrappers/workqueue substitutes; no native retry scheduling or target detach proof",
+    "Original callback status anchor precedes normal redirty/writeback; actual native execution not observed",
+    "No same-round recorder or DM consumption; additional guarded correlation accessor requires future integration",
+    "Focused CI queued, no compiled result or artifact yet"
+  ]
+}
