@@ -1,0 +1,31 @@
+# Round096 Agent2 evidence — source published, CI QUEUED
+
+**Verdict: PROGRESS / QUEUED (not PASS).** Source published directly to main. No standalone native build, VM, module load, capture activation or physical mutation. AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF.
+
+## Immutable identity
+
+- [Engineering freeze](https://github.com/k1moradi/swapz/commit/cb38c5de310edc4842e77099b92fc709e1934322); [task publication](https://github.com/k1moradi/swapz/commit/d756136217332fe03bce41e57328473fa4505220); original Linux c339f4010dea8b0d754f84ace70cd1b089878ef8.
+- [Agent2 source](https://github.com/k1moradi/swapz/commit/eec8cbdc856c4d9b26da5c342c234a041b3ce727), sole actual parent [588d4de2bd1b86ed969493594babd70264de89be](https://github.com/k1moradi/swapz/commit/588d4de2bd1b86ed969493594babd70264de89be). Main expected-head update was non-force and verified; two stale-parent preparations stopped before ref update. No peer implementation used.
+- [Adapter C](https://github.com/k1moradi/swapz/blob/eec8cbdc856c4d9b26da5c342c234a041b3ce727/src/kernel/native-observation-recorder.c), blob 3a9b9040b4f87a13d31361f4467809d82fc52da3; [H](https://github.com/k1moradi/swapz/blob/eec8cbdc856c4d9b26da5c342c234a041b3ce727/src/kernel/native-observation-recorder.h), blob f1959c40d58854fd9e2e2264c882db9a8b8dfe62.
+- [Host fixture](https://github.com/k1moradi/swapz/blob/eec8cbdc856c4d9b26da5c342c234a041b3ce727/tests/runtime/native/fixtures/native-observation-kernel-adapter.c), blob 87b9a543d4edb33652c5bc9871031cd7aa6fc81c; [shim](https://github.com/k1moradi/swapz/blob/eec8cbdc856c4d9b26da5c342c234a041b3ce727/tests/runtime/native/fixtures/native-observation-kernel-shim.h), blob 59ae3fe45ec64e96fd5b02aa33e7e8f3f8c7b55f.
+- [Frozen event map and physical admission checklist](https://github.com/k1moradi/swapz/blob/eec8cbdc856c4d9b26da5c342c234a041b3ce727/docs/handoff/zswapz/round096/agent2-native-recorder-admission-map.md), blob 2e2496818ef2db1d36e0fd818de5bd84e49181aa. Complete exact dependency pins in companion JSON.
+- Standards freeze blob 4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e (1,856,114 bytes); actual parent blob 1e4befccf27e96238c8ce6c1fb55f561d19ba602 (1,862,494 bytes) round-tripped to identical Git blob, verified entire freeze prefix, appended meaningful applicable standards only; new blob 855b4e5a533f60ff5dcf72fb048d6eebea1ee9bf re-fetched and matched exact concatenation. Commit diff +27/-0 standards lines.
+
+## Changed engineering and bounds
+
+Separate kernel-compatible C/H only, no core or Kbuild edits. Actual Linux atomic_t/atomic_try_cmpxchg_relaxed/atomic_or, one 32-bit smp_store_release marker per slot with smp_load_acquire at seal, bounded 8192 slots and 64 reservation attempts, token space capacity*8, sticky saturating loss flags. Explicit disabled init, one-shot start, stop, external revoke/join, seal and cold sink. Disabled adapter entry performs one acquire read, no counter or input access; no claim of end-to-end zero overhead. Caller provides disjoint storage and external lifetime starting before the enabled check. Callback must synchronously revoke/join all native entrants; no actual native caller exists. False callback retains owner and storage; no seal/export. Reservation order not causal completion; actual transition points/partial orders and no inferred upper ACK. Fixed SWZOBS2 104/296/24 byte framing preserved, including historical mapping-source lineage tag (not current-source authentication). No allocation/hash/I/O in append.
+
+R095 accepted 1,027,438 checks / 14 scenarios / 98,304 full-capacity records each, 72 B owner and 296 B wire (prior host prototype); not replayed. New host fixture targets paused writer/stop and later publication, join refusal, quiescent unpublished slot, fixed retry exhaustion and disabled entry overhead, sink refusal, overflow/sticky loss and selected wire bytes. Separate host shim substitutes for kernel primitives and deliberately injects failed CAS/pause. No original Linux execution, no native KTAP or capture, no physical data, no mutations claimed.
+
+## Actual CI
+
+- [Focused exact-source push run 45827930586](https://github.com/k1moradi/swapz/actions/runs/45827930586), attempt 1, head eec8cbdc856c4d9b26da5c342c234a041b3ce727.
+- [adapter-host job 139936814544](https://github.com/k1moradi/swapz/actions/runs/45827930586/job/139936814544): **queued** on last direct lookup. No compiler output, native or host scenario count, artifact ID/hash or first CI error yet; null rather than fabricated evidence. GCC/Clang ASan/UBSan planned in committed workflow, not executed as of this snapshot.
+- Seven static source predicates checked true by exact-SHA retrieval (Linux atomic primitives, release/acquire slot publication, explicit external drain, one-shot start, unchanged framing constants, parent-prefix workflow gate, no standalone native build command). These are source checks only, not compiler or concurrency results.
+- Local git transport failed DNS resolution for github.com; no local compile was executed. GitHub connector source publication succeeded. Existing automatic main source-path workflows also triggered; no independent native dispatch, rerun, VM or accepted-corpus replay initiated.
+
+## Remaining admission blockers
+
+No actual native producer/upper ACK witness, external revoke/join integration, scoped default-off positive gate, pin-through-final-upper-copy, or proven complete built-in owner drainage at freeze. Shared adapter/provider not the current target's bridge. The old ordinary primary physical helper disables zswap, so it cannot qualify integrated natural-pressure flow. The map names actual frozen call sites and limitations; it is not installed instrumentation. First trial requires reviewed current integrated source/compile, independently source-bound full-page/opaque-compressed oracle, protected page0/UUID/table and exact owner-approved inactive partition scope, bounded natural pressure and safe recovery. No circular requirement for successful trial evidence before first authorized trial, and no authorization now.
+
+Inspect the existing exact-source job when terminal; publish a separate evidence-only update with actual counts, first failure and artifact integrity. No owner make test/fast_test now.
