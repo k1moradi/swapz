@@ -2,8 +2,8 @@
   "round": "096",
   "agent": 7,
   "kind": "frozen-real-gate-broker-host-test-and-source-audit",
-  "conclusion": "QUEUED",
-  "message": "PROGRESS",
+  "conclusion": "PASS_FROZEN_GATE_BROKER_HOST_ONLY",
+  "message": "REPORT_READY",
   "engineering_freeze": "cb38c5de310edc4842e77099b92fc709e1934322",
   "task_commit": "d756136217332fe03bce41e57328473fa4505220",
   "tested_commit": "588d4de2bd1b86ed969493594babd70264de89be",
@@ -43,7 +43,7 @@
     "parent_exact_blob_roundtrip": true,
     "full_prefix_verified": true,
     "remote_readback_exact": true,
-    "hosted_prefix_check": "QUEUED"
+    "hosted_prefix_check": "PASS"
   },
   "source_commit_url": "https://github.com/k1moradi/swapz/commit/588d4de2bd1b86ed969493594babd70264de89be",
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45827821204",
@@ -54,18 +54,52 @@
       "id": 139936425051,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45827821204/job/139936425051",
       "name": "actual-provider-broker-lifetime-host",
-      "status": "QUEUED",
-      "conclusion": null,
-      "actual_checks": null,
-      "actual_mutants": null
+      "status": "COMPLETED",
+      "conclusion": "success",
+      "actual_checks": {
+        "gcc": 63,
+        "clang": 63
+      },
+      "actual_mutants": {
+        "gcc": 0,
+        "clang": 0
+      }
     }
   ],
-  "artifact": null,
+  "artifact": {
+    "id": 15121910036,
+    "name": "round096-agent7-actual-provider-broker-host",
+    "size_bytes": 3725,
+    "sha256": "46f931b3ed25b320fd35fa844ecc068986d3b82386c012699829a8a2468dd17d",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45827821204/artifacts/15121910036",
+    "digest_upload_log_matches_metadata": true,
+    "independent_zip_extraction": false
+  },
   "first_error": null,
   "local_blocker": "git ls-remote could not resolve host github.com; local compile not run; GitHub connector publication successful",
   "actual_compilers": {
-    "gcc": null,
-    "clang": null
+    "gcc": {
+      "broker_sessions": 3,
+      "checks": 63,
+      "codecs": 2,
+      "external_pauses": 2,
+      "first_error": null,
+      "mutants": 0,
+      "stage": "complete",
+      "standard": "-std=c2x",
+      "status": "PASS"
+    },
+    "clang": {
+      "broker_sessions": 3,
+      "checks": 63,
+      "codecs": 2,
+      "external_pauses": 2,
+      "first_error": null,
+      "mutants": 0,
+      "stage": "complete",
+      "standard": "-std=c23",
+      "status": "PASS"
+    }
   },
   "historical_r095": {
     "run_id": 45770634552,
@@ -104,5 +138,11 @@
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
-  "import_active": false
+  "import_active": false,
+  "workflow_census_at_observation": {
+    "success": 1,
+    "queued": 8,
+    "in_progress": 1
+  },
+  "previous_evidence_commit": "e33ab5c3cd83a397feb0e9d0d97ccc100a308d9c"
 }
