@@ -2,38 +2,30 @@
   "round": "094",
   "agent": 5,
   "kind": "host-codec-config-correction-and-frozen-real-decoder-storage-join",
-  "conclusion": "QUEUED",
+  "conclusion": "REMEDIATION_PUBLISHED_CI_PENDING",
   "source_published": true,
-  "tested_commit": "7ece3ea3709ccce932467f27a1e9cdc86fde0d30",
-  "parent": "3aa7757db12e2f910ec73c3dc62a806711a46f9e",
+  "tested_commit": "f8cac65c8adc76c13fd14b664f8f850b188e91b4",
+  "parent": "f2f0a3ec0450352e5b70338b21710029c892fd31",
   "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
-  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45757096760",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45763614607",
   "jobs": [
     {
-      "run_id": 45757096760,
-      "job_id": 139698173485,
-      "provider": "MODELED",
+      "run_id": 45763614607,
+      "job_id": 139719164506,
+      "provider": "MODELED_FROZEN_VALUE_ABI",
       "status": "queued",
       "conclusion": null,
       "actual_checks": null,
-      "planned_mutants_per_compiler": 13,
-      "executed_mutants": 0
+      "actual_mutants": null
     },
     {
-      "run_id": 45757096760,
-      "job_id": 139698173850,
+      "run_id": 45763614607,
+      "job_id": 139719165135,
       "provider": "ACTUAL_FROZEN_BOUNDED_DECODER",
       "status": "queued",
       "conclusion": null,
       "actual_checks": null,
-      "actual_record_gets": null,
-      "actual_transient_gets": null,
-      "actual_transient_puts": null,
-      "planned_codecs": [
-        1,
-        2
-      ],
-      "planned_reads_per_codec": 5
+      "actual_mutants": null
     }
   ],
   "artifacts": [],
@@ -51,9 +43,10 @@
     "mutants": 0
   },
   "source_blobs": {
-    "tests/tools/round092-shared-storage-value-verify.py": "db1b01812451f45a766d74872d40983a0141052a",
-    "tests/runtime/native/fixtures/round094-shared-storage-real-decoder.c": "b5c1a61e9f1f40b321673c7fe3befbe35631ee50",
-    "tests/tools/round094-shared-storage-real-decoder-verify.py": "eb9cfd4d72a795548b4100a0f836dc22ee2e87fe",
+    "tests/runtime/native/fixtures/round092-shared-storage-value.c": "29b119160361d4791946d84a0375ef4719e58d1b",
+    "tests/runtime/native/fixtures/round094-shared-storage-real-decoder.c": "fd7f1f7155d6b5d2015d45f734ee6020b108abf1",
+    "tests/tools/round092-shared-storage-value-verify.py": "4dff860176f889507ed7ebb69358186c76fb7e9f",
+    "tests/tools/round094-shared-storage-real-decoder-verify.py": "973979880cf3504cdcc28577b44c0f6bf8658162",
     ".github/workflows/phase-a-round092-shared-storage-value-host-noauth.yml": "5e6fda02dbfea2e0c41b90d7aba503b9119fba45"
   },
   "frozen_inputs": {
@@ -66,21 +59,19 @@
     "lz4_decoder_postimage": "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f"
   },
   "standards": {
-    "parent_blob": "f4951b7cc7bb63f71b7b3f3b8f3d05349803b46c",
-    "parent_bytes": 1834574,
-    "source_blob": "8afa6a105b48e33f43590c891a48ce96d6f53e29",
-    "source_bytes": 1836075,
-    "append_bytes": 1501,
+    "parent_blob": "19c38b30cc013c227d6048b3e8ce2fe7ccd76d95",
+    "parent_bytes": 1839146,
+    "source_blob": "48c8fd42e507d04be37b46302bf0292fc9abf7de",
+    "source_bytes": 1840110,
+    "append_bytes": 964,
     "full_prefix_verified": true
   },
   "preflight": {
-    "remote_compare": "5 paths, 2 added, 3 modified",
-    "local_git": "DNS unavailable",
+    "remote_compare": "5 modified paths, standards append only",
     "local_compile": "NOT_RUN",
-    "git_diff_check": "NOT_RUN",
-    "policy": "NOT_RUN",
-    "remote_static_pins": 22,
-    "publication_error": "GitHub GraphQL DFD3:1478ED:35E3227:4F21538:6B07B8C9; reconciled fresh head and successful nonforce update"
+    "git_diff_check": "NOT_RUN_NEW_SOURCE",
+    "policy": "NOT_RUN_NEW_SOURCE",
+    "publication_error": "GraphQL F50F:271345:3E1F3F0:5BA8227:6B07C739; peer advanced; reconciled fresh parent and nonforce expected-head succeeded"
   },
   "limitations": {
     "lower": "MODELED_RAM_ONLY",
@@ -99,5 +90,73 @@
   "physical_io": false,
   "vm": false,
   "module_load": false,
-  "manual_dispatch": false
+  "manual_dispatch": false,
+  "prior_r094_attempt": {
+    "tested_commit": "7ece3ea3709ccce932467f27a1e9cdc86fde0d30",
+    "parent": "3aa7757db12e2f910ec73c3dc62a806711a46f9e",
+    "run_id": 45757096760,
+    "conclusion": "FAIL_BOTH_HOST_COMPILES",
+    "jobs": [
+      {
+        "job_id": 139698173485,
+        "first_error": "round092-shared-storage-value.c:30:35: error: ‘puts’ redeclared as different kind of symbol",
+        "stage": "gcc/baseline/compile",
+        "checks": 0,
+        "mutants": 0,
+        "preflight": "PASS"
+      },
+      {
+        "job_id": 139698173850,
+        "first_error": "round094-shared-storage-real-decoder.c:26:35: error: ‘puts’ redeclared as different kind of symbol",
+        "stage": "gcc/candidate/round094-shared-storage-real-decoder.c",
+        "checks": 0,
+        "mutants": 0,
+        "original_pins_and_gcc_codec_compilation": "PASS"
+      }
+    ],
+    "artifacts": [
+      {
+        "id": 15088417715,
+        "job_id": 139698173485,
+        "bytes": 1620,
+        "sha256": "873919f103b094c82b3c484351bdf6a2cca0c318f77b2e6cd1671314e20ac5dc",
+        "zip_crc": "PASS",
+        "entries": [
+          "first-child-error.log",
+          "results.json"
+        ],
+        "independently_downloaded": true,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45757096760/artifacts/15088417715"
+      },
+      {
+        "id": 15089025808,
+        "job_id": 139698173850,
+        "bytes": 2322,
+        "sha256": "7eb39724c2f4a915baa19be710dff5fe9320df7e0296931139f5566d1dcd2908",
+        "zip_crc": "PASS",
+        "entries": [
+          "first-child-error.log",
+          "results.json"
+        ],
+        "independently_downloaded": true,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45757096760/artifacts/15089025808"
+      }
+    ],
+    "initial_evidence_commit": "76d8ae149302a4988dfa47fcc776f1d2c6d8d375",
+    "standards": {
+      "parent_blob": "f4951b7cc7bb63f71b7b3f3b8f3d05349803b46c",
+      "parent_bytes": 1834574,
+      "source_blob": "8afa6a105b48e33f43590c891a48ce96d6f53e29",
+      "source_bytes": 1836075,
+      "append_bytes": 1501,
+      "full_prefix_verified": true
+    },
+    "source_blobs": {
+      "tests/tools/round092-shared-storage-value-verify.py": "db1b01812451f45a766d74872d40983a0141052a",
+      "tests/runtime/native/fixtures/round094-shared-storage-real-decoder.c": "b5c1a61e9f1f40b321673c7fe3befbe35631ee50",
+      "tests/tools/round094-shared-storage-real-decoder-verify.py": "eb9cfd4d72a795548b4100a0f836dc22ee2e87fe",
+      ".github/workflows/phase-a-round092-shared-storage-value-host-noauth.yml": "5e6fda02dbfea2e0c41b90d7aba503b9119fba45"
+    }
+  },
+  "report_ready": false
 }
