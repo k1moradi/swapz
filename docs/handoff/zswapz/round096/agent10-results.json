@@ -1,0 +1,129 @@
+{
+  "round": "096",
+  "agent": 10,
+  "kind": "changed-frozen-native-composition-compile-link-only",
+  "tested_commit": "e166a63140cf19f360061511824918744ed36389",
+  "source_parent": "d756136217332fe03bce41e57328473fa4505220",
+  "engineering_freeze": "cb38c5de310edc4842e77099b92fc709e1934322",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "verifier_blob": "600c3da9a56b6358aded80767b86a71c119a9a5c",
+  "workflow_blob": "820f57265afc56e1b46e351084af4daa5b039c2d",
+  "standards_parent_blob": "4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e",
+  "standards_new_blob": "7900f5e4b4d9c99ffe986c512afc5c65f4c339b1",
+  "standards_complete_prefix_verified": true,
+  "raw_capture_off": {
+    "blob": "fee3d20b8ef872528b1301597eb33e0e0282da52",
+    "preimage": "98a8a6a66858204b61875ad9b2e8cfb0ecf8980a",
+    "postimage": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
+    "alternative_stacked": false,
+    "actual_application": "PENDING"
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45827297021",
+  "jobs": [
+    {
+      "id": 139934629800,
+      "run_id": 45827297021,
+      "attempt": 1,
+      "name": "integrated-r095-x86-compile-link",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Canonical exact source and parent before scratch checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Provision compiler, ELF and kernel build prerequisites (runner packages only)",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 4
+        },
+        {
+          "name": "Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout",
+          "status": "pending",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Raw immutable stage, directed objects, full x86 kernel and actual product module link",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Preserve exact compile logs and manifest even on failure",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 18
+        }
+      ]
+    }
+  ],
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_error_status": "NOT_OBSERVED_YET",
+  "artifact": null,
+  "actual_compile_link_counts": null,
+  "exact_source_automatic_workflows": {
+    "in_progress": 9,
+    "success": 1
+  },
+  "exact_source_automatic_run_ids": [
+    45827297068,
+    45827297189,
+    45827297041,
+    45827296817,
+    45827297057,
+    45827297021,
+    45827297044,
+    45827297014,
+    45827296919,
+    45827297087
+  ],
+  "native_recorder": "EXCLUDED_HOST_ATOMICS_NOT_KERNEL_READY",
+  "native_positive_path": "ABSENT_FROZEN_ORDERED_CLAIM_HARD_OFF",
+  "native_runtime": "NOT_RUN",
+  "production_kbuild_changed": false,
+  "same_round_peer_code": false,
+  "extra_native_dispatches": 0,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "actual_physical_io": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false
+}
