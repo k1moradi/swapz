@@ -1,0 +1,145 @@
+{
+  "round": "099",
+  "agent": 2,
+  "kind": "independent-private-byte-oracle-offline-only",
+  "conclusion": "QUEUED",
+  "engineering_freeze": "eea7c4308bbd7a34af4c5a3f933d6ec695e011a1",
+  "task_commit": "77f79801940b63457fc2a34f7c729c9791f4ead7",
+  "tested_commit": "9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6",
+  "source_commit": "9c0a2dd8069269a300d62ef5e4dca3a2f85a83f6",
+  "source_parent": "c5b360e750f42383585043a91d4f6ddd8252b95b",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45879877815",
+  "workflow_run_id": 45879877815,
+  "job_id": 140116224719,
+  "jobs": [
+    {
+      "id": 140116224719,
+      "name": "byte-oracle",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45879877815/job/140116224719"
+    }
+  ],
+  "first_error": null,
+  "first_error_scope": "not executed; no error or pass established",
+  "actual_checks": null,
+  "actual_byte_mutants": null,
+  "actual_semantic_refusals": null,
+  "actual_clean_operations": null,
+  "actual_claimed_error_operations": null,
+  "artifact": null,
+  "planned_fixture_not_actual": {
+    "byte_positions": 4096,
+    "explicit_rejection_cases": 39,
+    "clean_operations": 7,
+    "clean_full_pages": 8,
+    "clean_bytes": 32768,
+    "claimed_error_operations": 8,
+    "claimed_error_full_pages": 9,
+    "claimed_error_bytes": 36864,
+    "cli_cases": 6
+  },
+  "owned_blobs": {
+    "tests/tools/native-observation-byte-oracle.py": "f57adf23bb76305f88a20bf54f2702e6c00c7ddd",
+    "tests/runtime/native/independent-byte-oracle-test.py": "6df63e5c5236a0570c916c95c2e68414349cea4d",
+    "docs/handoff/zswapz/round099/agent2-private-byte-oracle.md": "b4fa4f0c2d7b06e34d92c367cc0c60fac0dcaa70",
+    ".github/workflows/phase-a-independent-byte-oracle-noauth.yml": "940ae8055f9a2bfbde8bfa3aa1ef1dfb4f11c469"
+  },
+  "standards": {
+    "frozen_blob": "7e7d607601b38f5ceebaed1fcbc5e943d0a195e9",
+    "frozen_bytes": 1881523,
+    "actual_parent_blob": "1631ff27fcff372ddbe02a7bee1a26af835e01da",
+    "actual_parent_bytes": 1883776,
+    "new_blob": "ce56f56ac3095eebe60ba56c38f72898f729e645",
+    "new_bytes": 1885685,
+    "append_bytes": 1909,
+    "actual_parent_roundtrip_verified": true,
+    "complete_prefix_readback_verified": true,
+    "ci_prefix_status": "QUEUED"
+  },
+  "frozen_inputs": {
+    "selected_adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "selected_adapter_h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "owner_c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+    "owner_h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+    "legacy_parser": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+    "current_parser": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+    "dm_target": "aaff4d782323f9f17046cb2ba4fabcc0069e51e6",
+    "mm_scope_patch": "3832b6aa76b783f3790b869cf40512b114d66cd6",
+    "dm_upper_patch": "5b0b0a3582b16e54046f1f11355e6814c9ca4e1f",
+    "retry_patch": "6ee63e6515dd2f0337c49d1a868f39435b93119c"
+  },
+  "accepted_r098": {
+    "source": "13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2",
+    "run": 45870066080,
+    "job": 140082863894,
+    "checks_each": 130,
+    "malformed_refusals_each": 7,
+    "replayed": false
+  },
+  "automatic_source_push_census": {
+    "total": 10,
+    "counts": {
+      "queued": 10
+    },
+    "scope": "snapshot before evidence publication; not whole-main qualified"
+  },
+  "schema": "swapz-independent-byte-oracle-v1",
+  "limits": {
+    "pages": 16,
+    "operations": 64,
+    "page_bytes": 4096,
+    "plan_bytes": 65536,
+    "sidecar_bytes": 2097152
+  },
+  "supported_offline_shapes": [
+    "typed write/read codecs1/2",
+    "raw ordinary write",
+    "raw preclaim fallback",
+    "discard",
+    "terminal claimed error (blocked)"
+  ],
+  "unsupported": [
+    "ordinary reads",
+    "compressed ordinary write",
+    "GC",
+    "capture drop",
+    "overlapping/split/merged BIO",
+    "multi-extent",
+    "nonempty initial map"
+  ],
+  "decisions": [
+    "Independent preheld canonical plan commitment as scope workload hash; private additive sidecar binds unchanged v2 wire.",
+    "Require single-flight and every successful typed write read before overwrite/discard/end. Ordinary/discard v2 key absent; never fabricate key.",
+    "Publication parent advanced before first attempt; refreshed current parent, verified existing own files absent and complete historical prefix."
+  ],
+  "limitations": [
+    "Synthetic fixture only, reference and mock witnesses not native collection; no real native independent workload or final BIO bytes proven.",
+    "Actual original ACK, two-phase capture stop, exact old-session retry retirement witness, native full linkage and trusted collection provenance remain blockers.",
+    "No CI test count credited until exact source job terminal. No actual independent native oracle or semantic qualification."
+  ],
+  "native_kunit_ktap": null,
+  "native_kunit_executed": false,
+  "compiler_tests": "NOT_APPLICABLE_PYTHON_OFFLINE_ONLY",
+  "source_mapped_authenticated": false,
+  "native_capture": false,
+  "actual_physical_io": false,
+  "live_admission": false,
+  "phase_a": "BLOCKED",
+  "auth": 0,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "vm": false,
+  "module_load": false,
+  "actual_activation": false,
+  "normal_kbuild_changed": false,
+  "dm_mm_core_edits": false,
+  "controller_edits": false,
+  "recorder_edits": false,
+  "overlapping_implementation": false,
+  "same_round_peer_dependency": false,
+  "manual_duplicate_dispatch": false,
+  "physical_admission": "NO_GO",
+  "next_action": "Reconcile existing run only when terminal; publish terminal evidence with actual log/artifact digest and first error if any. Agent3 owns actual connected source, no dependency on this oracle."
+}
