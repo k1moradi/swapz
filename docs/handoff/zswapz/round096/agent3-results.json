@@ -92,7 +92,8 @@
     "job": 139936146060,
     "first_error": "ROUND091_FIRST_ERROR substring not found",
     "diagnosis": "round091-selected-dm-ordered-verify.py:133-134 searches old typed read call; new pinned helper renamed native call",
-    "corrected": false
+    "corrected": false,
+    "correction_published": true
   },
   "standards": {
     "freeze_blob": "4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e",
@@ -117,5 +118,32 @@
   "vm": false,
   "module_load": false,
   "manual_ci_reruns": 0,
-  "local_clone": "BLOCKED_DNS"
+  "local_clone": "BLOCKED_DNS",
+  "legacy_correction": {
+    "commit": "6025956f8e2d97f6036eb22e7b80a94075e3d1d4",
+    "parent": "155686534737d58fe50380c9db490bfda67c9416",
+    "verifier_blob": "3fb54b0fd9135bb0fb0df1202a8502ac1acf5576",
+    "standards_before": "ef9dfb936a96af9789488b530e33a287e1ffd128",
+    "standards_before_bytes": 1865716,
+    "standards_after": "9c1ec8d4f8ac2b300c93fb07cff9f10e7f5e3046",
+    "standards_after_bytes": 1866457,
+    "complete_prefix_verified": true,
+    "scope": "Legacy source assertion follows current retained-pin call and verifies release follows copy; define kernel unused annotation in host compilation only. No DM or accepted fixture changes.",
+    "ci": {
+      "run": 45828552407,
+      "status": "queued",
+      "conclusion": null,
+      "jobs": [
+        {
+          "id": 139938953491,
+          "status": "queued",
+          "conclusion": null
+        }
+      ]
+    }
+  },
+  "followup_evidence_parent": "04fd4dbfe9ece9e2e7a89f399efb2d957d5bf736",
+  "followup_evidence_standards_blob": "9c1ec8d4f8ac2b300c93fb07cff9f10e7f5e3046",
+  "followup_evidence_changes_standards": false,
+  "initial_evidence_commit": "ab363a02ad6ba45ae08de19552b8966728777e6f"
 }
