@@ -158,5 +158,59 @@
       ".github/workflows/phase-a-round092-shared-storage-value-host-noauth.yml": "5e6fda02dbfea2e0c41b90d7aba503b9119fba45"
     }
   },
-  "report_ready": false
+  "report_ready": false,
+  "agent1_terminal_reconciliation": {
+    "source": "f8cac65c8adc76c13fd14b664f8f850b188e91b4",
+    "previous_source": "7ece3ea3709ccce932467f27a1e9cdc86fde0d30",
+    "previous_jobs": [
+      139698173485,
+      139698173850
+    ],
+    "previous_error": "puts conflicts with stdio",
+    "run": 45763614607,
+    "jobs": [
+      139719164506,
+      139719165135
+    ],
+    "conclusion": "PASS_MODELED_AND_REAL_FROZEN_DECODER_HOST_ONLY",
+    "artifacts": [
+      {
+        "id": 15090673470,
+        "sha256": "f164d1f5137b52c2123a62564e2bb754139886958c81127058a603fb0e80d640"
+      },
+      {
+        "id": 15091411797,
+        "sha256": "4b320f663c2de2e3878702cb5d1fa29a582ed25a51cef52d226fb1b277e0349c"
+      }
+    ],
+    "modeled_checks_each": 8972,
+    "mutants_each": 13,
+    "real_checks_per_compiler": {
+      "lz4": 8349,
+      "lzo1x": 8348
+    },
+    "real_read_calls_per_codec_per_compiler": 5,
+    "record_get_put_per_codec_per_compiler": [
+      5,
+      5
+    ],
+    "transient_get_put_per_codec_per_compiler": [
+      5,
+      5
+    ],
+    "storage_bytes": 15752,
+    "legacy_bytes": 14912,
+    "overhead_bytes": 840,
+    "map_bytes": 20,
+    "owner_bytes": 2304,
+    "handle_bytes": 24,
+    "sidecar_bytes": 1112,
+    "slot_bytes": 32,
+    "exact_census": {
+      "success": 7,
+      "in_progress": 2,
+      "queued": 1
+    },
+    "scope": "real original staged codec + bounded handle owner and storage; RAM lower; no native execution; scalable shared provider not connected"
+  }
 }

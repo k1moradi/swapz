@@ -223,5 +223,31 @@
     "new_bytes": 1830041,
     "new_sha256": "41c931630211cf955374e66f663f0ab14220d354cef2e11936d1dec875879409",
     "status": "PASS"
+  },
+  "agent1_terminal_reconciliation": {
+    "source": "1f8f7023d6fda5617ce021d65e44372cfb391c91",
+    "job": 139696357119,
+    "run": 45756538303,
+    "conclusion": "PASS_NATIVE_DIRECTED_COMPOSITE_ONLY",
+    "artifact": 15087284949,
+    "sha256": "814e42ef8b2942cecc8e8d863bab82c5a4737513ac1ec5e79711a873d4d74f0c",
+    "steps": 24,
+    "directed_objects": 12,
+    "object_hashes_verified": 12,
+    "composite_bytes": 414144,
+    "composite_sha256": "ba3a7f9f402e1467faf935abb156b7ea19e9f8a07bb5972103c524d2e71877bb",
+    "external_imports": 98,
+    "metadata_imports": [
+      "__this_module"
+    ],
+    "actual_boundary_imports": 8,
+    "missing_prior_export_rows": 0,
+    "required_internal_definitions": 22,
+    "config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+    "exact_census": {
+      "success": 9,
+      "cancelled": 1
+    },
+    "scope": "Frozen R093 rollback and value storage/decoder callback witness; genuine native relocatable composite, NOT new modpost or final ko. R094 owner and target not compiled."
   }
 }

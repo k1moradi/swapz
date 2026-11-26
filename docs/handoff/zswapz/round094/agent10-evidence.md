@@ -21,3 +21,34 @@ The explicit test-only Kbuild stages the actual native C components and a non-ex
 [Artifact 15087284949](https://github.com/k1moradi/swapz/actions/runs/45756538303/artifacts/15087284949), independent fresh extraction: 330467B, 42 ZIP entries, CRC PASS; SHA256 814e42ef8b2942cecc8e8d863bab82c5a4737513ac1ec5e79711a873d4d74f0c matches GitHub. All 12 retained directed objects match their own manifest size/hash. ELF64 little-endian x86-64 ET_REL dm-swapz.o 414144B SHA256 ba3a7f9f402e1467faf935abb156b7ea19e9f8a07bb5972103c524d2e71877bb independently checked. SHA256 results.json 7590a14aa3d76642021b38d0cba6af8e4d44607c986069810af468b63197844b, raw-stage-manifest.json 5b9921ec5df9c1f966fddf8e6117f938608e79139cdf960dbae8b52a264df9a2, stage-manifest.json bba0a666c5923d07acdb4ad3939b97a03d09c6b9febfc09294efc5eb93868192, effective.config 89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b. Independent nm: 196 global definitions, all 22 required internal definitions resolved; 99 strong undefined total = 98 actual external kernel imports + __this_module (future module metadata, not export). Witness object actually references frozen decoder get/put/read and value-storage init, composite resolves them. Eight actual cross-boundary imports all GPL exports in actual previous symvers; zero missing prior export rows. No new .ko or MODPOST.
 
 Independently downloaded [prior R093 artifact 15047232671](https://github.com/k1moradi/swapz/actions/runs/45666130617/artifacts/15047232671) as well: ZIP 3028538B, 36 entries, CRC PASS, SHA256 0187d57a98810d105a93dc728332c3c1720badc8fa82734c199acb509ed91a50; vmlinux and .ko hashes match previous checkpoint and actual config bytes identical to R094; actual kernel-Module.symvers SHA256 0e2de6fbc9aeb3217736424781db41fb3402c7587655b12bb69f90a8ccace4b3. Independently compared all 98 current external imports to that prior actual export inventory: zero missing. Prior symvers used read-only as comparison, never copied to Kbuild or represented as new MODPOST. Full prior accepted scope not repeated. R094 compile witness establishes native source/type and relocatable internal link only; static unused DM rollback may be optimized out, no live setup/callback execution/owner/target integration, no runtime, actual R094 native full module integration still deferred. All safety gates unchanged: AUTH0 Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF. No VM/boot/load/physical/privileged mutation, no branch/PR/force, no manual dispatch or duplicate build.
+
+
+## Agent1 focused terminal reconciliation
+```json
+{
+  "source": "1f8f7023d6fda5617ce021d65e44372cfb391c91",
+  "job": 139696357119,
+  "run": 45756538303,
+  "conclusion": "PASS_NATIVE_DIRECTED_COMPOSITE_ONLY",
+  "artifact": 15087284949,
+  "sha256": "814e42ef8b2942cecc8e8d863bab82c5a4737513ac1ec5e79711a873d4d74f0c",
+  "steps": 24,
+  "directed_objects": 12,
+  "object_hashes_verified": 12,
+  "composite_bytes": 414144,
+  "composite_sha256": "ba3a7f9f402e1467faf935abb156b7ea19e9f8a07bb5972103c524d2e71877bb",
+  "external_imports": 98,
+  "metadata_imports": [
+    "__this_module"
+  ],
+  "actual_boundary_imports": 8,
+  "missing_prior_export_rows": 0,
+  "required_internal_definitions": 22,
+  "config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+  "exact_census": {
+    "success": 9,
+    "cancelled": 1
+  },
+  "scope": "Frozen R093 rollback and value storage/decoder callback witness; genuine native relocatable composite, NOT new modpost or final ko. R094 owner and target not compiled."
+}
+```

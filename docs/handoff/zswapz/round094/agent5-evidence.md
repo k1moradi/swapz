@@ -28,3 +28,62 @@ The two initial R094 jobs completed **FAIL before execution**. Both private arti
 Corrected source [f8cac65c8adc76c13fd14b664f8f850b188e91b4](https://github.com/k1moradi/swapz/commit/f8cac65c8adc76c13fd14b664f8f850b188e91b4), sole parent `f2f0a3ec0450352e5b70338b21710029c892fd31`. Only rename fixture counters `gets`/`puts` to `record_gets`/`record_puts`, keep machine-readable output labels, repin both verifiers; no production changes or test-case/flag/mutant changes. Full parent standards blob `19c38b30cc013c227d6048b3e8ce2fe7ccd76d95` (1839146 bytes) plus 964 bytes gives `48c8fd42e507d04be37b46302bf0292fc9abf7de` (1840110 bytes), complete byte prefix verified by parent blob recreation and exact postimage readback. First publication GraphQL error `F50F:271345:3E1F3F0:5BA8227:6B07C739` reconciled against fresh peer-advanced main; nonforce expected-head publication and five-path compare verified. No local compiler/policy claim for changed source.
 
 Automatic changed-source [run 45763614607](https://github.com/k1moradi/swapz/actions/runs/45763614607) observed [139719164506](https://github.com/k1moradi/swapz/actions/runs/45763614607/job/139719164506) queued/no conclusion; [139719165135](https://github.com/k1moradi/swapz/actions/runs/45763614607/job/139719165135) queued/no conclusion. No manual dispatch, unchanged replay, branches, PR, force, VM, load or physical mutation. No peer implementation consumed. NOT REPORT_READY: terminal qualification not yet verified. AUTH=0, Phase A BLOCKED, direct compressed handoff, forced RAW bypass and import OFF.
+
+
+## Agent1 focused terminal reconciliation
+```json
+{
+  "source": "f8cac65c8adc76c13fd14b664f8f850b188e91b4",
+  "previous_source": "7ece3ea3709ccce932467f27a1e9cdc86fde0d30",
+  "previous_jobs": [
+    139698173485,
+    139698173850
+  ],
+  "previous_error": "puts conflicts with stdio",
+  "run": 45763614607,
+  "jobs": [
+    139719164506,
+    139719165135
+  ],
+  "conclusion": "PASS_MODELED_AND_REAL_FROZEN_DECODER_HOST_ONLY",
+  "artifacts": [
+    {
+      "id": 15090673470,
+      "sha256": "f164d1f5137b52c2123a62564e2bb754139886958c81127058a603fb0e80d640"
+    },
+    {
+      "id": 15091411797,
+      "sha256": "4b320f663c2de2e3878702cb5d1fa29a582ed25a51cef52d226fb1b277e0349c"
+    }
+  ],
+  "modeled_checks_each": 8972,
+  "mutants_each": 13,
+  "real_checks_per_compiler": {
+    "lz4": 8349,
+    "lzo1x": 8348
+  },
+  "real_read_calls_per_codec_per_compiler": 5,
+  "record_get_put_per_codec_per_compiler": [
+    5,
+    5
+  ],
+  "transient_get_put_per_codec_per_compiler": [
+    5,
+    5
+  ],
+  "storage_bytes": 15752,
+  "legacy_bytes": 14912,
+  "overhead_bytes": 840,
+  "map_bytes": 20,
+  "owner_bytes": 2304,
+  "handle_bytes": 24,
+  "sidecar_bytes": 1112,
+  "slot_bytes": 32,
+  "exact_census": {
+    "success": 7,
+    "in_progress": 2,
+    "queued": 1
+  },
+  "scope": "real original staged codec + bounded handle owner and storage; RAM lower; no native execution; scalable shared provider not connected"
+}
+```

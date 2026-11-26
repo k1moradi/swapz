@@ -52,5 +52,21 @@
   "forced_raw_bypass": false,
   "import_active": false,
   "duplicate_manual_ci": false,
-  "same_round_peer_dependency": false
+  "same_round_peer_dependency": false,
+  "agent1_terminal_reconciliation": {
+    "source": "9f0a2a7ec0d0cbd7f58abb74b83e423924b19076",
+    "job": 139719991043,
+    "run": 45763872508,
+    "conclusion": "PASS_OFFLINE_ONLY",
+    "artifact": 15090728833,
+    "sha256": "af29e68b822e5a861673cd04d8df1146a916c47e3fb31bcd463adc5730b51c80",
+    "tests": 4,
+    "semantic_negatives": 55,
+    "cli_negatives": 8,
+    "observed_failure_cases": 7,
+    "fabricated_records": 88,
+    "fabricated_accepted_bios": 9,
+    "fabricated_claims": 2,
+    "scope": "No actual native event production, source authentication or durability. Broader exact source 5 success,3 in progress,2 queued at inspection."
+  }
 }

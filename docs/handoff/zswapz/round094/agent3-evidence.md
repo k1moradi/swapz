@@ -29,3 +29,29 @@ Per-BIO observation mapping for future A2 parser: source slot/store/key and exac
 [Run45756808031/job139697238859](https://github.com/k1moradi/swapz/actions/runs/45756808031/job/139697238859) QUEUED, attempt pending, first error/artifact/counts not observed. New verifier compiles actual extracted register/revoke/match, setup/install, close-owner, storage lifecycle and generation helpers with explicit host allocator/owner/decoder/storage/lock adapters; no actual peer integration or modeled lower durability. GCC/Clang strict warnings ASan/UBSan, planned six semantic mutants no_generation_invalidate, ignore_pending_fifo, ignore_gc, ignore_route_epoch, no_install_rollback, erase_replacement_route. Actual counts unknown until execution. Tests planned for four allocation failures, decoder/storage/open refusal, late install failure/replacement, positive setup, duplicate refusal, range/overflow/stale/GC/FIFO/batch/inflight, begin refusal, EBUSY close/retry, storage close refusal, balanced frees/caps and monotonic reopen. Source callsite checks for canonical admission/worker/drain/resume. Local git ls-remote exit128 DNS could not resolve github.com; local compiler and diff-check NOT_RUN. Source-only CI must establish policy, diff check and actual host results.
 
 Other existing automatic source runs [ordered host45756807994/job139697238310](https://github.com/k1moradi/swapz/actions/runs/45756807994/job/139697238310), [product45756807998](https://github.com/k1moradi/swapz/actions/runs/45756807998) compile139697238165/139697238433 exact-C139697238527/139697238643, [prototype45756808068/job139697238295](https://github.com/k1moradi/swapz/actions/runs/45756808068/job/139697238295) QUEUED. Initial exact source census29 automatic workflows queued. No manual dispatch/duplicate rerun. No new R094 integrated native build, VM, load, privilege or physical mutation. AUTH=0 Phase A BLOCKED direct compressed handoff, forced RAW bypass, import OFF. PARTIAL_NATIVE_CONSUMER_SOURCE_PUBLISHED_HOST_CI_PENDING.
+
+
+## Agent1 focused terminal reconciliation
+```json
+{
+  "source": "d620a2533ae26f109921fdff48ce28b2b05116b5",
+  "previous_source": "e18e17021065cba3bb343d300b67cd1fdd20407c",
+  "previous_job": 139697238859,
+  "previous_failure": "puts fixture namespace collision; inherited R048 duplicate dtr detach",
+  "job": 139712711603,
+  "run": 45761622515,
+  "conclusion": "PASS_HOST_BOUNDARY_ONLY",
+  "artifact": 15090198553,
+  "sha256": "0400805b349c94d64d6ad4690fef95e3e3a2b194b9935eaa737b4e565b8cace1",
+  "checks_each": 50,
+  "mutants_each": 6,
+  "dm_blob": "2400ad0ccaf72c2586c4fd1488edb9a00246e213",
+  "product_run": 45761622451,
+  "product": "PASS",
+  "exact_census": {
+    "success": 28,
+    "queued": 1
+  },
+  "scope": "actual extracted target code; modeled broker/allocator/decoder. Null_blk-only guard, 8 tickets, 16 logical generations/64B, old bridge, speculative capture, claim hard false. Destructor quarantine is not proven leak-free. Corrected sole detach."
+}
+```

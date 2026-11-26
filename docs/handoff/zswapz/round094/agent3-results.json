@@ -146,5 +146,26 @@
   "privileged_tests": false,
   "branch_created": false,
   "pr_created": false,
-  "force_push": false
+  "force_push": false,
+  "agent1_terminal_reconciliation": {
+    "source": "d620a2533ae26f109921fdff48ce28b2b05116b5",
+    "previous_source": "e18e17021065cba3bb343d300b67cd1fdd20407c",
+    "previous_job": 139697238859,
+    "previous_failure": "puts fixture namespace collision; inherited R048 duplicate dtr detach",
+    "job": 139712711603,
+    "run": 45761622515,
+    "conclusion": "PASS_HOST_BOUNDARY_ONLY",
+    "artifact": 15090198553,
+    "sha256": "0400805b349c94d64d6ad4690fef95e3e3a2b194b9935eaa737b4e565b8cace1",
+    "checks_each": 50,
+    "mutants_each": 6,
+    "dm_blob": "2400ad0ccaf72c2586c4fd1488edb9a00246e213",
+    "product_run": 45761622451,
+    "product": "PASS",
+    "exact_census": {
+      "success": 28,
+      "queued": 1
+    },
+    "scope": "actual extracted target code; modeled broker/allocator/decoder. Null_blk-only guard, 8 tickets, 16 logical generations/64B, old bridge, speculative capture, claim hard false. Destructor quarantine is not proven leak-free. Corrected sole detach."
+  }
 }

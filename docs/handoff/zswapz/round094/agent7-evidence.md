@@ -10,3 +10,33 @@ Actual opt-in [provider C](https://github.com/k1moradi/swapz/blob/0bd024561b2b03
 
 ## Directed native continuation — separate from accepted host PASS
 [Source f2f0a3ec0450352e5b70338b21710029c892fd31](https://github.com/k1moradi/swapz/commit/f2f0a3ec0450352e5b70338b21710029c892fd31), sole parent 0f490355e1a414909b694ff20d9dc92486f1c16d, direct main FF verified. Actual shared provider source remains 0bd024561b2b03fa7837556cbd723f8f27d80b27 (unchanged); one directed native object only, exact seven source/header pins, original Linux c339f4010dea8b0d754f84ace70cd1b089878ef8, strict warnings, isolated Kbuild with dormant guards. No R093 composite or accepted host replay. Checks four provider API definitions and five decoder/owner call imports, no host/allocation/module-reference imports, actual ELF relocatable object; no full kernel/module link, modpost/load/runtime. Parent standards dad412d7e8f0b069538b3460420f90bd949f5e3d 1838245B +901B =1839146B post19c38b30cc013c227d6048b3e8ce2fe7ccd76d95 exact literal prefix and byte readback verified. [Run 45763547658/job 139718948300](https://github.com/k1moradi/swapz/actions/runs/45763547658/job/139718948300) attempt1 queued / pending at observation. No native compile PASS, object or symbol counts claimed yet. First error none observed. Prior actual-provider HOST PASS remains terminal. AUTH0 Phase A BLOCKED all activation OFF. No branch/PR/force/manual dispatch/VM/load/physical mutation.
+
+
+## Agent1 focused terminal reconciliation
+```json
+{
+  "source": "0bd024561b2b03fa7837556cbd723f8f27d80b27",
+  "job": 139696644377,
+  "run": 45756625253,
+  "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_HOST_ONLY",
+  "artifact": 15088755172,
+  "sha256": "910b12bd73da857472b6b194eeab646226b5b917afd640e71366dd0670871e44",
+  "checks_each": 2107,
+  "mutants_each": 5,
+  "owner_bytes": 312,
+  "host_sidecar_bytes": 16,
+  "handle_bytes": 24,
+  "records": 1024,
+  "exact_census": {
+    "success": 10
+  },
+  "native_source": "f2f0a3ec0450352e5b70338b21710029c892fd31",
+  "native_job": 139718948300,
+  "native_run": 45763547658,
+  "native_conclusion": "FAIL_PREREQUISITE_BEFORE_OBJECT",
+  "native_artifact": 15091117691,
+  "native_sha256": "d2de025e64bff12c0709412fca5ccaef38912275cc8e3ced72eb6ebaa14d25eb",
+  "native_first_error": "modules-prepare exit2; objtool/elf.h:10:10 fatal error: gelf.h: No such file or directory",
+  "scope": "Actual provider C/H, host authority model. Shared API requires trusted retained storage pin and external epoch authority surviving reload; current bounded storage callback lacks pin argument. Native compile not reached."
+}
+```

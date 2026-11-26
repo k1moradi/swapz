@@ -29,3 +29,30 @@ One new x86_64 Kbuild directed object attempt, exact Linux c339f4010dea8b0d754f8
 
 ### Native follow-up terminal failure
 Job 139711962592 completed FAILURE, first actual diagnostic: `tools/objtool/include/objtool/elf.h:10:10: fatal error: gelf.h: No such file or directory`. Kbuild preparation/objtool failed before a verified broker object; zero verified native objects/exports, no owner source diagnostic established. Artifact [15090136883](https://github.com/k1moradi/swapz/actions/runs/45761387727/artifacts/15090136883) 15,079 bytes SHA256 66887a242f49260e19d4c679b0824d120bc204eab8dd96f96ae52ed75f104e9d (metadata and upload log verified, not extracted). Host PASS remains unchanged. No unchanged rerun; native prerequisite correction must preserve the no-privilege restriction and use an explicitly changed build configuration or rootless dependency setup. AUTH0 and all activation gates remain OFF.
+
+
+## Agent1 focused terminal reconciliation
+```json
+{
+  "source": "40b52f8e7a80680dcb6b074df5be897f57eae1b9",
+  "job": 139696920288,
+  "run": 45756711070,
+  "conclusion": "PASS_ACTUAL_OWNER_HOST_ONLY",
+  "artifact": 15088525802,
+  "sha256": "95b76abea75dba611f3cf3840ad380ecdfdabe9aa3141800b5c4afcfd4e4d46f",
+  "checks_each": 78,
+  "scenarios_each": 5,
+  "mutants_each": 6,
+  "exact_census": {
+    "success": 10
+  },
+  "native_source": "3e7566fded10f4fe932903afa7501a9711adfd95",
+  "native_job": 139711962592,
+  "native_run": 45761387727,
+  "native_conclusion": "FAIL_PREREQUISITE_BEFORE_OBJECT",
+  "native_artifact": 15090136883,
+  "native_sha256": "66887a242f49260e19d4c679b0824d120bc204eab8dd96f96ae52ed75f104e9d",
+  "native_first_error": "directed-native-object exit2; objtool/elf.h:10:10 fatal error: gelf.h: No such file or directory",
+  "scope": "actual owner staged, permanent gate and broker, host primitives. Native full linkage and actual target/RCU lifetime unqualified. No duplicate broker."
+}
+```

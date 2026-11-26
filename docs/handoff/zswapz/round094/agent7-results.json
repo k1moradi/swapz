@@ -178,5 +178,30 @@
     "native_link": "NOT_RUN",
     "native_runtime": "NOT_RUN",
     "manual_dispatches": 0
+  },
+  "agent1_terminal_reconciliation": {
+    "source": "0bd024561b2b03fa7837556cbd723f8f27d80b27",
+    "job": 139696644377,
+    "run": 45756625253,
+    "conclusion": "PASS_ACTUAL_SHARED_PROVIDER_HOST_ONLY",
+    "artifact": 15088755172,
+    "sha256": "910b12bd73da857472b6b194eeab646226b5b917afd640e71366dd0670871e44",
+    "checks_each": 2107,
+    "mutants_each": 5,
+    "owner_bytes": 312,
+    "host_sidecar_bytes": 16,
+    "handle_bytes": 24,
+    "records": 1024,
+    "exact_census": {
+      "success": 10
+    },
+    "native_source": "f2f0a3ec0450352e5b70338b21710029c892fd31",
+    "native_job": 139718948300,
+    "native_run": 45763547658,
+    "native_conclusion": "FAIL_PREREQUISITE_BEFORE_OBJECT",
+    "native_artifact": 15091117691,
+    "native_sha256": "d2de025e64bff12c0709412fca5ccaef38912275cc8e3ced72eb6ebaa14d25eb",
+    "native_first_error": "modules-prepare exit2; objtool/elf.h:10:10 fatal error: gelf.h: No such file or directory",
+    "scope": "Actual provider C/H, host authority model. Shared API requires trusted retained storage pin and external epoch authority surviving reload; current bounded storage callback lacks pin argument. Native compile not reached."
   }
 }
