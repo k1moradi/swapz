@@ -2,7 +2,7 @@
   "round": "096",
   "agent": 2,
   "kind": "guarded-kernel-compatible-recorder-source-plus-host-substitute-only",
-  "conclusion": "QUEUED",
+  "conclusion": "PASS_HOST_SUBSTITUTES_ONLY_ADAPTER_SELECTION_REQUIRED",
   "source_commit": "eec8cbdc856c4d9b26da5c342c234a041b3ce727",
   "tested_commit": "eec8cbdc856c4d9b26da5c342c234a041b3ce727",
   "source_parent": "588d4de2bd1b86ed969493594babd70264de89be",
@@ -46,7 +46,11 @@
     "complete_prefix_verified": true,
     "parent_blob_roundtrip_exact": true,
     "git_diff_additions": 27,
-    "git_diff_deletions": 0
+    "git_diff_deletions": 0,
+    "new_bytes": 1864270,
+    "appended_bytes": 1776,
+    "actual_parent_sha256": "2149096f5e84e354e443d297ba0f3a72abca3e204c16b698d24abf7581ca471a",
+    "ci_prefix_status": "PASS"
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45827930586",
   "workflow_run_id": 45827930586,
@@ -56,18 +60,42 @@
       "id": 139936814544,
       "name": "adapter-host",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45827930586/job/139936814544",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "compiler_results": {
-        "gcc": "NOT_RUN",
-        "clang": "NOT_RUN"
+        "gcc": {
+          "version": "13.3.0",
+          "checks": 61,
+          "scenarios": 3,
+          "compile_log_bytes": 0,
+          "exit": 0
+        },
+        "clang": {
+          "version": "18.1.3",
+          "checks": 61,
+          "scenarios": 3,
+          "compile_log_bytes": 0,
+          "exit": 0
+        }
       },
-      "actual_checks": null,
-      "actual_scenarios": null,
+      "actual_checks": 61,
+      "actual_scenarios": 3,
       "mutation_count": null,
-      "artifact_id": null,
-      "artifact_sha256": null,
-      "first_error": null
+      "artifact_id": 15121222759,
+      "artifact_sha256": "d846f636597b22b904246162b52a441c972b57eca264365b9f46ebb6e2f560bb",
+      "first_error": null,
+      "steps_success": 7,
+      "counts_scope": "each compiler",
+      "artifact_bytes": 674,
+      "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45827930586/artifacts/15121222759",
+      "artifact_independently_downloaded": true,
+      "artifact_crc_ok": true,
+      "artifact_members": {
+        "clang-adapter.log": 80,
+        "gcc-adapter.log": 80,
+        "clang-compile.log": 0,
+        "gcc-compile.log": 0
+      }
     }
   ],
   "static_source_predicates_checked": 7,
@@ -113,5 +141,283 @@
     "Hosted host substitutes are not native atomic/barrier or physical validation.",
     "Other preexisting automatically triggered source workflows are not Agent2's focused test; no extra dispatch, rerun or standalone native build initiated."
   ],
-  "next_action": "Inspect the existing exact-source workflow when terminal; report actual compiler/test/artifact results separately. No new native build or physical activation."
+  "next_action": "Agent1 select exactly one guarded adapter before future actual producer integration; no same-round native build, no duplicate replay and no physical activation. Existing focused jobs both terminal success with independently checked artifacts; no native runtime evidence.",
+  "historical_pending_evidence_commit": "e0474cb732651fe10c01e3214c0a29ad21494961",
+  "earlier_source_census": {
+    "total": 10,
+    "counts": {
+      "success": 10
+    },
+    "runs": [
+      {
+        "id": 45827930667,
+        "name": "Private kernel debug and static contracts",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930667"
+      },
+      {
+        "id": 45827930328,
+        "name": "Rootless physical evidence adversarial audit",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930328"
+      },
+      {
+        "id": 45827930391,
+        "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930391"
+      },
+      {
+        "id": 45827930598,
+        "name": "Experimental swapz production C qualification",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930598"
+      },
+      {
+        "id": 45827930389,
+        "name": "Systemd/package eec8cbdc856c4d9b26da5c342c234a041b3ce727 (run 45827930389)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930389"
+      },
+      {
+        "id": 45827930586,
+        "name": "Kernel observation adapter host NO_AUTH",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930586"
+      },
+      {
+        "id": 45827930388,
+        "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930388"
+      },
+      {
+        "id": 45827930285,
+        "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930285"
+      },
+      {
+        "id": 45827930418,
+        "name": "Native kernel-C project-goal regressions",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930418"
+      },
+      {
+        "id": 45827930426,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45827930426"
+      }
+    ],
+    "scope": "snapshot, not whole-main qualification"
+  },
+  "reconciliation": {
+    "status": "TWO_UNLINKED_ALTERNATIVES_SELECT_ONE_BEFORE_NATIVE_COMPOSITION",
+    "earlier_source": "eec8cbdc856c4d9b26da5c342c234a041b3ce727",
+    "additional_source": "fa03b9f09cc4e6892f09282157f044edd694f073",
+    "overlap_disclosure": "A second Agent2 invocation independently implemented a different one-shot RCU gate from the same frozen inputs before checking the earlier Agent2 issue comment/evidence. The two adapter implementations overlap; do not combine or count as two independent accepted qualifications. No R095 corpus replay; no manual duplicate CI dispatch. Preserve both histories and obtain Agent1 selection before any native composition.",
+    "native_capture": false
+  },
+  "additional_rcu_adapter": {
+    "conclusion": "PASS_CHANGED_ADAPTER_HOST_SUBSTITUTES_ONLY",
+    "source_commit": "fa03b9f09cc4e6892f09282157f044edd694f073",
+    "tested_commit": "fa03b9f09cc4e6892f09282157f044edd694f073",
+    "source_parent": "26d4e980d64674aad465c042628c8faf4276a757",
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45849741037",
+    "workflow_run_id": 45849741037,
+    "job_id": 140012676393,
+    "job_url": "https://github.com/k1moradi/swapz/actions/runs/45849741037/job/140012676393",
+    "job_steps_success": 7,
+    "first_error": null,
+    "artifact": {
+      "id": 15133880782,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45849741037/artifacts/15133880782",
+      "bytes": 847,
+      "sha256": "deccf2324bc455065e2d8a89eca0c621732bfe482d663c76d83b7850553f04b0",
+      "independently_downloaded": true,
+      "crc_ok": true,
+      "members": {
+        "clang-adapter.log": 246,
+        "gcc-adapter.log": 246,
+        "clang-compile.log": 0,
+        "gcc-compile.log": 0
+      },
+      "matches_job_upload_digest": true
+    },
+    "compiler_results": {
+      "gcc": {
+        "version": "13.3.0",
+        "checks": 200092,
+        "scenarios": 5,
+        "disabled_calls": 200000,
+        "disabled_rcu_entries": 0,
+        "disabled_cas_attempts": 0,
+        "owner_bytes": 72,
+        "gate_bytes": 24,
+        "record_bytes": 296,
+        "wire_record_bytes": 296,
+        "disabled_elapsed_ns": 517518,
+        "compile_log_bytes": 0,
+        "exit": 0
+      },
+      "clang": {
+        "version": "18.1.3",
+        "checks": 200092,
+        "scenarios": 5,
+        "disabled_calls": 200000,
+        "disabled_rcu_entries": 0,
+        "disabled_cas_attempts": 0,
+        "owner_bytes": 72,
+        "gate_bytes": 24,
+        "record_bytes": 296,
+        "wire_record_bytes": 296,
+        "disabled_elapsed_ns": 749779,
+        "compile_log_bytes": 0,
+        "exit": 0
+      }
+    },
+    "sanitizers": [
+      "address",
+      "undefined"
+    ],
+    "compiler_standard": "c2x",
+    "actual_checks_per_compiler": 200092,
+    "actual_scenarios_per_compiler": 5,
+    "output_blobs": {
+      "src/kernel/native-observation-adapter.c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+      "src/kernel/native-observation-adapter.h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+      "tests/runtime/native/fixtures/native-observation-adapter-host.c": "5b378c2060d6948df161070f0277b9e8bef92231",
+      "tests/runtime/native/fixtures/native-observation-adapter-host-model.h": "3dac25d2edb2d7475af3231c98af753f09e4063f",
+      ".github/workflows/phase-a-native-observation-adapter-host-noauth.yml": "cbc5a84dffa4a96f2a060d7518375aa71673beda",
+      "docs/handoff/zswapz/round096/agent2-native-adapter-readiness.md": "c6fab414f7e8eade429e0f84f5a65ca03f988292"
+    },
+    "standards": {
+      "frozen_blob": "4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e",
+      "frozen_bytes": 1856114,
+      "actual_parent_blob": "9c1ec8d4f8ac2b300c93fb07cff9f10e7f5e3046",
+      "actual_parent_bytes": 1866457,
+      "new_blob": "f699ab78cc8cd0a11a8b557b572ee9eeb7c82bb7",
+      "new_bytes": 1868056,
+      "appended_bytes": 1599,
+      "actual_parent_sha256": "923b7eb99f0c4883558520afed073a36fbb579353f5690bbee636804fc9715c7",
+      "connector_actual_parent_roundtrip_verified": true,
+      "complete_prefix_readback_verified": true,
+      "ci_prefix_status": "PASS"
+    },
+    "scenarios": [
+      "stop versus paused reserved writer with late loss",
+      "stop versus paused pre-RCU caller",
+      "hole seal/export refusal",
+      "forced 64-attempt retry exhaustion on mint/append and sticky overflow",
+      "wire byte equality, sink refusal, disabled 200000 calls no modeled RCU/CAS"
+    ],
+    "reservation_attempts": 64,
+    "wire_record_bytes": 296,
+    "record_capacity_max": 8192,
+    "token_limit_max": 65536,
+    "actual_linux_rcu_execution": false,
+    "native_compile_performed": false,
+    "native_capture": false,
+    "source_mapped_authenticated": false,
+    "actual_physical_io": false,
+    "automatic_source_push_census": {
+      "total": 10,
+      "counts": {
+        "in_progress": 4,
+        "success": 6
+      },
+      "runs": [
+        {
+          "id": 45849740818,
+          "name": "Native kernel-C project-goal regressions",
+          "status": "in_progress",
+          "conclusion": null,
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740818"
+        },
+        {
+          "id": 45849740891,
+          "name": "Rootless physical evidence adversarial audit",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740891"
+        },
+        {
+          "id": 45849741174,
+          "name": "Systemd/package fa03b9f09cc4e6892f09282157f044edd694f073 (run 45849741174)",
+          "status": "in_progress",
+          "conclusion": null,
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849741174"
+        },
+        {
+          "id": 45849741037,
+          "name": "Native observation adapter host NO_AUTH",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849741037"
+        },
+        {
+          "id": 45849740740,
+          "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+          "status": "in_progress",
+          "conclusion": null,
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740740"
+        },
+        {
+          "id": 45849740728,
+          "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+          "status": "in_progress",
+          "conclusion": null,
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740728"
+        },
+        {
+          "id": 45849740814,
+          "name": "Private kernel debug and static contracts",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740814"
+        },
+        {
+          "id": 45849741028,
+          "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849741028"
+        },
+        {
+          "id": 45849740810,
+          "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740810"
+        },
+        {
+          "id": 45849740948,
+          "name": "Experimental swapz production C qualification",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/45849740948"
+        }
+      ],
+      "scope": "snapshot, not whole-main qualification"
+    },
+    "manual_duplicate_dispatch": false,
+    "limitations": [
+      "Actual adapter source tested with host substitutes, no Linux RCU/LKMM/IRQ or native compile proof",
+      "External gate lifetime and authoritative producer event construction remain integration obligations",
+      "Frozen MM capture-off and DM hard-false claim; pin released before final BIO copy in frozen DM; independent owner retry unresolved",
+      "Existing source-path-triggered broad workflows run automatically; no manual dispatch",
+      "Physical workload bounds proposed, not owner-authorized; no device access"
+    ]
+  }
 }
