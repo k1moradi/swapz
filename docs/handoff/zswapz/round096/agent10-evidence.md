@@ -1,4 +1,4 @@
-# Round096 Agent10 — one changed frozen native composition (IN_PROGRESS)
+# Round096 Agent10 — PASS_CHANGED_FROZEN_NATIVE_KERNEL_MODULE_COMPILE_LINK_ONLY
 
 ## Exact source and scope
 
@@ -8,8 +8,20 @@ One focused changed native lane. Prior R095 [job139741479810](https://github.com
 
 Early real ELF/OpenSSL header/link/execute probes before Linux checkout; real scratch Kbuild, directed objects, full vmlinux, kernel and external MODPOST and final ko. Require real GPL boundary of 15, single owner definitions, no extra old scratch exports, actual resolved module imports and target/adapter relocations. Retain directed objects, composite, final ELF/config/symvers and hashes within bounded artifact. No source repair/retry or fake symbols/symvers, no separate A7/A11 native retry or same-round peer code.
 
-## CI snapshot
+## Terminal CI and independent artifact audit
 
-[Run 45827297021/job 139934629800](https://github.com/k1moradi/swapz/actions/runs/45827297021/job/139934629800) attempt 1: IN_PROGRESS, conclusion pending. Actual step snapshot: Set up job=success; Run actions/checkout@v4=success; Canonical exact source and parent before scratch checkout=success; Provision compiler, ELF and kernel build prerequisites (runner packages only)=in_progress; Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout=pending; Run actions/checkout@v4=pending; Run actions/checkout@v4=pending; Raw immutable stage, directed objects, full x86 kernel and actual product module link=pending; Preserve exact compile logs and manifest even on failure=pending; Post Run actions/checkout@v4=pending. First real error not observed yet; artifacts, actual object/import/relocation counts and full native verdict pending, no local native build claimed. Exact-source automatic push run census {"in_progress":9,"success":1} (10 runs); no extra manual dispatch. No claim other automatic runs pass.
+[Exact-source run 45827297021/job 139934629800](https://github.com/k1moradi/swapz/actions/runs/45827297021/job/139934629800), attempt 1, terminal SUCCESS; no first error. All 10 automatic exact-source runs completed success (not a claim about later main). GCC 13.3.0, GNU ld 2.42. Early ELF and OpenSSL real header/link/execute probes passed. Actual R092/R094 overlays and the single qualified R095 capture-off patch passed check/apply/reverse/diff and pinned postimage checks. Full vmlinux and kernel MODPOST, external module MODPOST and final dm-swapz.ko all PASS. One build attempt, 42 completed verifier steps, 50 exact product pins. No source repair or redispatch.
 
-AUTH0, Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF. No VM, boot, loading, physical mutation or owner privileged action. PROGRESS, not REPORT_READY. Terminal evidence requires existing exact job completion, first error if any, actual artifact verification and evidence-only follow-up; no polling automation.
+[Artifact 15119944864](https://github.com/k1moradi/swapz/actions/runs/45827297021/artifacts/15119944864): independently downloaded 3,497,194 bytes; ZIP CRC PASS, 76 entries, SHA256 3d675cf25a574a9eb8f0838f6eddf598cee2a618f92a54fafccddb96312c7abe agrees with API and upload log. Recomputed binary/config/symvers hashes, composite and all 19 directed-object hashes and git blob identities. Independently inspected actual retained ELFs with nm/readelf, never executed or loaded them. Both actual Kbuild logs contain MODPOST Module.symvers.
+
+| Retained file | Bytes | SHA256 |
+|---|---:|---|
+| vmlinux | 12,558,632 | 54e665e7f223ce98fdcd974a362309535eef109a5b36efb4c6ad1c0fa7d4b33c |
+| dm-swapz.ko | 438,512 | c06018667cd04d63d9122de5479ec2807c8b979f4588957e43c288b06a3bdf49 |
+| dm-swapz.o | 438,640 | 53c46b82f3688ff7b3d90622303f1e3d384c879ce4e03adb62988bb1e4f1ff26 |
+| effective.config | 44,765 | 89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b |
+| kernel-Module.symvers | 207,384 | 5e431e6bce36e1518fc01a289d7b422e77a078c76512c730e07642fed11c8cf4 |
+
+97 real strong module imports all resolve against 3,803 actual symvers rows; 208 global module definitions; 15 exact GPL boundary exports, 7 actual boundary imports including 3 broker owner APIs. One global built-in definition per owner API and none in module; no unresolved strong kernel/module import, no forbidden internal exports or old scratch exports. Target relocations independently establish bounded bridge init/read/close and legacy shared storage init/close/read_pinned/relocate, each once, and owner open/finish once, begin twice. Zero target references to shared value/provider/gate APIs. Adapter object references the four direct shared provider APIs once each; zero gate references. Gate and adapter definitions are linked but not evidence of active target integration. The source's ordered claim remains hard-off; no safe positive native transaction path, native recorder or physical qualification.
+
+Hosted standards prefix check PASS: complete 1,856,114-byte parent SHA256 d074640d210e15adb693304669f837790ce6a19517c553d9be726b267a50f986 retained, source 1,857,558 bytes SHA256 e6c63cab99a0dbce03720642d2b41c1cbbff316815bb24efa1b616682799c89c. Terminal evidence-only publication parent 43650a6b3d14af6e03463119952e06dc77c3411c; no change to standards or source, no same-round peer code consumed. No separate A7/A11 native build, duplicate corpus, VM, boot, load, physical mutation, authorization or activation. AUTH0, Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF. Compile/link only, not bootable/physical-ready. Next engineering prerequisite remains real gated target/adapter integration and independent safe owner drain; no owner test requested.

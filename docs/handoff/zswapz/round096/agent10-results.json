@@ -16,7 +16,9 @@
     "preimage": "98a8a6a66858204b61875ad9b2e8cfb0ecf8980a",
     "postimage": "9278abca17077bf9c0e94885eb4d46cdbd9202bd",
     "alternative_stacked": false,
-    "actual_application": "PENDING"
+    "actual_application": "PASS_CHECK_APPLY_REVERSE_CHECK_EXACT_POSTIMAGE",
+    "actual_mm_preimage_sha256": "f0ccc10b6f2f2620b373e034aa936266a1ab5f9c710ab57a6e6f0a845a707077",
+    "actual_mm_postimage_sha256": "98a19c1b099ee4c7fe2b74107d097673afe560bf09f6afbc39be54a61247301b"
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45827297021",
   "jobs": [
@@ -25,8 +27,8 @@
       "run_id": 45827297021,
       "attempt": 1,
       "name": "integrated-r095-x86-compile-link",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "steps": [
         {
           "name": "Set up job",
@@ -48,57 +50,100 @@
         },
         {
           "name": "Provision compiler, ELF and kernel build prerequisites (runner packages only)",
-          "status": "in_progress",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 4
         },
         {
           "name": "Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 5
         },
         {
           "name": "Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 6
         },
         {
           "name": "Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 7
         },
         {
           "name": "Raw immutable stage, directed objects, full x86 kernel and actual product module link",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 8
         },
         {
           "name": "Preserve exact compile logs and manifest even on failure",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 9
         },
         {
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
           "number": 18
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19
         }
       ]
     }
   ],
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_CHANGED_FROZEN_NATIVE_KERNEL_MODULE_COMPILE_LINK_ONLY",
   "first_error": null,
-  "first_error_status": "NOT_OBSERVED_YET",
-  "artifact": null,
-  "actual_compile_link_counts": null,
+  "first_error_status": "NONE",
+  "artifact": {
+    "id": 15119944864,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45827297021/artifacts/15119944864",
+    "bytes": 3497194,
+    "sha256": "3d675cf25a574a9eb8f0838f6eddf598cee2a618f92a54fafccddb96312c7abe",
+    "entries": 76,
+    "independent_download": true,
+    "zip_crc": "PASS",
+    "upload_log_api_local_sha256_match": true
+  },
+  "actual_compile_link_counts": {
+    "build_attempts": 1,
+    "completed_steps": 42,
+    "product_pins": 50,
+    "directed_objects_retained": 19,
+    "kernel_symvers_rows": 3803,
+    "module_strong_imports": 97,
+    "module_global_definitions": 208,
+    "required_gpl_boundary_exports": 15,
+    "actual_boundary_imports": 7,
+    "owner_imports": 3,
+    "forbidden_internal_exports": 0,
+    "unresolved_strong_imports": 0,
+    "duplicate_owner_definitions": 0,
+    "target_direct_shared_value_provider_imports": 0,
+    "adapter_direct_provider_imports": 4,
+    "adapter_gate_imports": 0
+  },
   "exact_source_automatic_workflows": {
-    "in_progress": 9,
-    "success": 1
+    "success": 10
   },
   "exact_source_automatic_run_ids": [
     45827297068,
@@ -125,5 +170,68 @@
   "module_loaded": false,
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
-  "import_active": false
+  "import_active": false,
+  "native_link": {
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+    "elf_prerequisite": "PASS",
+    "openssl_prerequisite": "PASS",
+    "full_kernel_link": "PASS",
+    "kernel_modpost": "PASS",
+    "module_modpost": "PASS",
+    "product_module_link": "PASS",
+    "vmlinux": {
+      "bytes": 12558632,
+      "sha256": "54e665e7f223ce98fdcd974a362309535eef109a5b36efb4c6ad1c0fa7d4b33c"
+    },
+    "module": {
+      "bytes": 438512,
+      "sha256": "c06018667cd04d63d9122de5479ec2807c8b979f4588957e43c288b06a3bdf49"
+    },
+    "composite": {
+      "bytes": 438640,
+      "sha256": "53c46b82f3688ff7b3d90622303f1e3d384c879ce4e03adb62988bb1e4f1ff26"
+    },
+    "config": {
+      "bytes": 44765,
+      "sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b"
+    },
+    "symvers": {
+      "bytes": 207384,
+      "sha256": "5e431e6bce36e1518fc01a289d7b422e77a078c76512c730e07642fed11c8cf4"
+    },
+    "independent_binary_hashes_and_nm_readelf": "PASS",
+    "directed_object_hashes": "PASS",
+    "owner_definitions_per_api_in_vmlinux": 1,
+    "owner_definitions_in_module": 0
+  },
+  "target_relocations": {
+    "swapz_original_decoder_bridge_read": 1,
+    "swapz_original_decoder_bridge_close": 1,
+    "swapz_original_decoder_bridge_init": 1,
+    "swapz_shared_storage_read_pinned": 1,
+    "swapz_shared_storage_close": 1,
+    "swapz_shared_storage_init": 1,
+    "swapz_shared_storage_relocate": 1,
+    "swapz_mm_broker_owner_open": 1,
+    "swapz_mm_broker_owner_begin_close": 2,
+    "swapz_mm_broker_owner_finish_close": 1
+  },
+  "adapter_relocations": {
+    "swapz_original_decoder_shared_init": 1,
+    "swapz_original_decoder_shared_read": 1,
+    "swapz_original_decoder_shared_begin_close": 1,
+    "swapz_original_decoder_shared_finish_close": 1,
+    "swapz_shared_storage_init": 1,
+    "swapz_shared_storage_close": 2,
+    "swapz_shared_storage_read": 1
+  },
+  "standards_prefix_ci": {
+    "parent_bytes": 1856114,
+    "parent_sha256": "d074640d210e15adb693304669f837790ce6a19517c553d9be726b267a50f986",
+    "source_bytes": 1857558,
+    "source_sha256": "e6c63cab99a0dbce03720642d2b41c1cbbff316815bb24efa1b616682799c89c",
+    "status": "PASS"
+  },
+  "evidence_only_parent": "43650a6b3d14af6e03463119952e06dc77c3411c"
 }
