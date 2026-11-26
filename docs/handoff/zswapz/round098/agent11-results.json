@@ -2,7 +2,7 @@
   "round": "098",
   "agent": 11,
   "kind": "actual-staged-mm-scope-event-core-source-linked-host-only",
-  "conclusion": "QUEUED",
+  "conclusion": "FAIL_HOST_BROKER_COMPILE",
   "tested_commit": "f209e51d6cb874cec736d224851b0f8c8282601a",
   "source_parent": "bd5b2573adc31ea1e58c6094faf616964cbfafff",
   "engineering_freeze": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
@@ -15,16 +15,21 @@
     {
       "id": 140087429484,
       "name": "mm-scope-events-host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "failure",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45871396136/job/140087429484"
     }
   ],
-  "artifact": null,
+  "artifact": {
+    "id": 15143272836,
+    "bytes": 790,
+    "sha256": "245a9856914c5a4eeddcd46afa8218f346db1c459b68d92e43915cfa7a32562f",
+    "archive_independently_verified": false
+  },
   "checks_per_compiler": null,
   "events_per_compiler": null,
   "mutants_per_compiler": null,
-  "first_error": null,
+  "first_error": "gcc broker compile: zswap-original-broker-owner.inc:368:13: owner_retry_run defined but not used [-Werror=unused-function]",
   "native": "NOT_RUN",
   "physical": "NOT_RUN",
   "actual_physical_io": false,
@@ -58,7 +63,8 @@
     "blob": "7e7d607601b38f5ceebaed1fcbc5e943d0a195e9",
     "bytes": 1881523,
     "complete_prefix_readback": true,
-    "ci_prefix_check": "QUEUED"
+    "ci_prefix_check": "PASS",
+    "parent_sha256": "c699e0d52ed02c9f2fe4ef4181130d1bb997bd3471d7342f32142a693881a423"
   },
   "pins": {
     "mm_overlay": "3832b6aa76b783f3790b869cf40512b114d66cd6",
@@ -79,6 +85,8 @@
     "Actual recorder/owner/broker linked host fixture configured; kernel/file/geometry/RCU substitutes, no native or threaded scope race",
     "Core origin helper actual source only; read/discard acceptance and full native end-to-end events not proven",
     "Consumer discard records explicitly fixture assertions; bound case intentionally incomplete",
-    "CI queued, no actual counts, artifact or first error"
-  ]
+    "CI queued, no actual counts, artifact or first error",
+    "No fixture execution: GCC broker translation unit failed before link; no compiler/event counts credited."
+  ],
+  "stage": "PASS"
 }

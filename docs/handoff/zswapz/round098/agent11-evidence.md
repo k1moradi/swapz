@@ -40,3 +40,7 @@ Core additive proposed GPL bool dm_swapz_trial_observation_origin(struct dm_targ
 ## Standards / safety
 
 Actual-parent standards 4bc31dfed3ffb2db9cee73c267bf6e1ac2ab7d51 (1,879,787 bytes) reconstructed as exact Git blob and complete raw prefix readback; append 1,736 bytes; new 7e7d607601b38f5ceebaed1fcbc5e943d0a195e9 (1,881,523 bytes), independent CI prefix check pending. No truncation. AUTH=0 Phase A BLOCKED, direct compressed handoff/forced RAW/import OFF. No branches/PR/force, VM/load/boot/physical mutation/device use, real tracing or activation. No standalone native build or accepted test replay. Next: reconcile exact hosted result, freeze actual connected target/recorder/controller/producer/core interfaces, require native linkage and external owner-approved scoped physical preflight before live use.
+
+## Terminal first attempt — FAIL
+
+Exact job 140087429484 completed failure, staging passed and standards prefix independently passed (SHA256 c699e0d52ed02c9f2fe4ef4181130d1bb997bd3471d7342f32142a693881a423). First error: gcc broker compile: zswap-original-broker-owner.inc:368:13: owner_retry_run defined but not used [-Werror=unused-function]. No fixture execution or event counts. Artifact 15143272836, 790 bytes, SHA256 245a9856914c5a4eeddcd46afa8218f346db1c459b68d92e43915cfa7a32562f (metadata only). No rerun. A narrowly changed host fixture may connect actual retry execution to scope-cap final release without changing frozen owner or MM/core overlays.
