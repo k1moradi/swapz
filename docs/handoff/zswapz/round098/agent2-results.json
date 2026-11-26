@@ -1,0 +1,373 @@
+{
+  "round": "098",
+  "agent": 2,
+  "kind": "actual-selected-adapter-owner-frozen-event-construction-host-conformance",
+  "conclusion": "PASS_ACTUAL_SELECTED_RECORDER_EVENT_CONFORMANCE_HOST_ONLY",
+  "engineering_freeze": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+  "task_commit": "d3b7896bdc63bff8e5d84b50319aea55657c908f",
+  "tested_commit": "13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2",
+  "source_commit": "13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2",
+  "source_parent": "da19176ae71c0c1b0ae8e5a55fdb41fdeec1038d",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45870066080",
+  "workflow_run_id": 45870066080,
+  "job_id": 140082863894,
+  "jobs": [
+    {
+      "id": 140082863894,
+      "name": "event-conformance",
+      "status": "completed",
+      "conclusion": "success",
+      "steps_success": 7,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45870066080/job/140082863894"
+    }
+  ],
+  "first_error": null,
+  "first_error_scope": "focused CI; expected defect rejection is not test failure",
+  "compiler_standard": "c2x",
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "compiler_results": {
+    "gcc": {
+      "version": "13.3.0",
+      "checks": 130,
+      "scenarios": 8,
+      "mode_checks": {
+        "frozen-preparation": 8,
+        "frozen-bind": 10,
+        "frozen-upper": 12,
+        "frozen-drop": 10,
+        "frozen-release": 12,
+        "frozen-dm": 8,
+        "clean": 53,
+        "terminal-overflow": 17
+      },
+      "compile_log_bytes": 0,
+      "allocation_attempts": 8,
+      "frees": 8,
+      "join_callbacks": 9,
+      "frame_and_validation_checks": 23,
+      "clean_records": 30,
+      "actual_frozen_rejected_appends": 7,
+      "frozen_defect_modes": 6,
+      "terminal_overflow_modes": 1,
+      "semantic_refusals": 7,
+      "exit": 0
+    },
+    "clang": {
+      "version": "18.1.3",
+      "checks": 130,
+      "scenarios": 8,
+      "mode_checks": {
+        "frozen-preparation": 8,
+        "frozen-bind": 10,
+        "frozen-upper": 12,
+        "frozen-drop": 10,
+        "frozen-release": 12,
+        "frozen-dm": 8,
+        "clean": 53,
+        "terminal-overflow": 17
+      },
+      "compile_log_bytes": 0,
+      "allocation_attempts": 8,
+      "frees": 8,
+      "join_callbacks": 9,
+      "frame_and_validation_checks": 23,
+      "clean_records": 30,
+      "actual_frozen_rejected_appends": 7,
+      "frozen_defect_modes": 6,
+      "terminal_overflow_modes": 1,
+      "semantic_refusals": 7,
+      "exit": 0
+    }
+  },
+  "actual_checks_per_compiler": 130,
+  "actual_scenarios_per_compiler": 8,
+  "actual_frozen_rejected_appends_per_compiler": 7,
+  "actual_frame_and_validation_checks_total": 46,
+  "actual_semantic_refusals_each": 7,
+  "actual_clean_trace_records_each": 30,
+  "native_kunit_ktap": null,
+  "native_kunit_executed": false,
+  "artifact": {
+    "id": 15141643001,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45870066080/artifacts/15141643001",
+    "bytes": 4411,
+    "sha256": "bb7bcfb87a006a147502f973218d98d15fa700a5532672070462efa768b8ebdb",
+    "independently_downloaded": true,
+    "crc_ok": true,
+    "members": 20,
+    "compiler_logs_bytes": 0,
+    "validator_log_bytes": 449,
+    "extraction_log_bytes": 533,
+    "matches_api_digest": true
+  },
+  "frozen_inputs": {
+    "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "selected_adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "selected_adapter_h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "owner_c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+    "owner_h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+    "legacy_parser": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+    "current_parser": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+    "adapter_shim": "3dac25d2edb2d7475af3231c98af753f09e4063f",
+    "owner_shim": "47042c1c9f388f29e2989492c15ef479573b1019",
+    "owner_host_support": "0ad7332910fed9e385171c20f3250014c411a4b8",
+    "dm_target": "f1922cc26caf7bfa097c1f561f8719744c3a4e75",
+    "mm_producer_patch": "c35b35c18cc11f9b86c0b65856dbc0cd2a0bd2c8",
+    "owner_retry": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+    "gated_storage_c": "c59cdf4d4e203a9a40d09e9048d3eba786d2e0cc"
+  },
+  "extracted_actual_functions": {
+    "frozen-mm-events.inc": {
+      "bytes": 3028,
+      "sha256": "447db0b6ea868c7ab56a4201746ea9a7bfdd5e74f8241a391bec0bca04c5bac6"
+    },
+    "frozen-dm-missing.inc": {
+      "bytes": 146,
+      "sha256": "caab60dc0492ba77c2bcd6728cc536acdc82ac00a7273b484bb803e066f2a57f"
+    },
+    "frozen-owner-support.inc": {
+      "bytes": 2128,
+      "sha256": "d99759b037ae8031d489708e1b4edd041c310a496c1af63499226af84bc68434"
+    }
+  },
+  "owned_blobs": {
+    "tests/runtime/native/round098-observation-extract.py": "4d77cefeceadb0165e7533995f9fbf05bc0f2dab",
+    "tests/runtime/native/fixtures/round098-observation-conformance.c": "484bd63a233596a5a0009a5a7d7d0b629d643ce9",
+    "tests/runtime/native/round098-observation-conformance-test.py": "9bd09be625f0bb48dd2bb5692caee43889d9dfa9",
+    ".github/workflows/phase-a-round098-observation-conformance-noauth.yml": "c3b8c9f48ae9634003abe2e5e2096e61df764bb2",
+    "docs/handoff/zswapz/round098/agent2-controller-readiness.md": "adaa49a0d45d7c935d3d820c82a78bab535bc188"
+  },
+  "standards": {
+    "frozen_blob": "dff61588713f8ceeecb5e406cab8788e12990147",
+    "frozen_bytes": 1874135,
+    "actual_parent_blob": "b681c3997a733ba40ae85cbd9c90f238c057e1d7",
+    "actual_parent_bytes": 1875291,
+    "new_blob": "de0c920b51294c8d3311836d227e5e71d3a89c69",
+    "new_bytes": 1877087,
+    "appended_bytes": 1796,
+    "actual_parent_sha256": "727654ff79fac2bdd22252232e9cefa92a165a687abd28b58a346b98a785ffbe",
+    "connector_actual_parent_roundtrip_verified": true,
+    "complete_prefix_readback_verified": true,
+    "ci_prefix_status": "PASS",
+    "ci_frozen_adapter_owner_parser_shim_pins": 8
+  },
+  "accepted_r097": {
+    "source": "be44c51e132593c81f2d1ba773767efecea6792b",
+    "run": 45856564834,
+    "job": 140036377176,
+    "checks_each": 481,
+    "source_cases_each": 11,
+    "replayed": false
+  },
+  "frozen_defect_modes": [
+    {
+      "mode": "frozen-preparation",
+      "retained_events": [
+        "capture"
+      ],
+      "invalid_appends": 1,
+      "loss": 4,
+      "parser_first": "recorder_loss"
+    },
+    {
+      "mode": "frozen-bind",
+      "retained_events": [
+        "capture"
+      ],
+      "invalid_appends": 1,
+      "loss": 4,
+      "parser_first": "recorder_loss"
+    },
+    {
+      "mode": "frozen-upper",
+      "retained_events": [
+        "capture",
+        "bind"
+      ],
+      "invalid_appends": 1,
+      "loss": 4,
+      "parser_first": "recorder_loss"
+    },
+    {
+      "mode": "frozen-drop",
+      "retained_events": [
+        "capture"
+      ],
+      "invalid_appends": 2,
+      "loss": 4,
+      "parser_first": "recorder_loss"
+    },
+    {
+      "mode": "frozen-release",
+      "retained_events": [
+        "capture",
+        "bind"
+      ],
+      "invalid_appends": 1,
+      "loss": 4,
+      "parser_first": "recorder_loss"
+    },
+    {
+      "mode": "frozen-dm",
+      "retained_events": [],
+      "invalid_appends": 1,
+      "loss": 4,
+      "parser_first": "header_bounds"
+    }
+  ],
+  "terminal_overflow": {
+    "retained_events": [
+      "capture",
+      "capture_drop"
+    ],
+    "loss": 10,
+    "first_parser_error": "recorder_loss",
+    "failed_join_retains_allocation": true
+  },
+  "synthetic_clean_trace": {
+    "records": 30,
+    "mm_decode": 1,
+    "ordinary_prepared": 1,
+    "preparation_discarded": 1,
+    "claims": 1,
+    "publications": 1,
+    "clone_acks": 2,
+    "upper_acks": 2,
+    "verified_oracles": 1,
+    "capture_drops": 1,
+    "candidate_releases": 1,
+    "carrier_releases": 2,
+    "host_oracle_compared_bytes": 4096,
+    "actual_native_bio": false,
+    "actual_codec_decode": false
+  },
+  "semantic_mutants": [
+    "wrong store key",
+    "ordinary prep before accept",
+    "publish before flush",
+    "pin release before oracle",
+    "missing candidate release",
+    "missing carrier release",
+    "missing capture drop"
+  ],
+  "same_round_existing_lane_checked_before_coding": true,
+  "overlapping_implementation": false,
+  "same_round_peer_dependency": false,
+  "local_compilation": false,
+  "native_compile_performed": false,
+  "native_capture": false,
+  "native_kernel_execution": false,
+  "source_mapped_authenticated": false,
+  "actual_physical_io": false,
+  "phase_a": "BLOCKED",
+  "auth": 0,
+  "compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "vm": false,
+  "module_load": false,
+  "normal_kbuild_changed": false,
+  "dm_mm_core_edits": false,
+  "physical_admission": "NO_GO",
+  "controller": {
+    "design_only": true,
+    "actual_scope_publication": false,
+    "actual_external_native_join": false,
+    "actual_independent_upper_ack_all_paths": false,
+    "actual_exact_builtin_retry_idle_witness": false,
+    "actual_independent_workload_oracle_binding": false,
+    "cleanup_requirements": "actual zero caps/tickets/pins/reservations/bios/maps; exact quarantine count; old retry identity retired; no synthetic debt zeros"
+  },
+  "automatic_source_push_census": {
+    "total": 10,
+    "counts": {
+      "queued": 3,
+      "success": 3,
+      "in_progress": 4
+    },
+    "runs": [
+      {
+        "id": 45870066065,
+        "name": "Native kernel-C project-goal regressions",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066065"
+      },
+      {
+        "id": 45870065962,
+        "name": "Rootless physical evidence adversarial audit",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870065962"
+      },
+      {
+        "id": 45870066175,
+        "name": "Systemd/package 13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2 (run 45870066175)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066175"
+      },
+      {
+        "id": 45870066080,
+        "name": "R098 actual selected recorder event conformance NO_AUTH",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066080"
+      },
+      {
+        "id": 45870066055,
+        "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066055"
+      },
+      {
+        "id": 45870066050,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066050"
+      },
+      {
+        "id": 45870065956,
+        "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870065956"
+      },
+      {
+        "id": 45870066087,
+        "name": "Experimental swapz production C qualification",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066087"
+      },
+      {
+        "id": 45870065928,
+        "name": "Private kernel debug and static contracts",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870065928"
+      },
+      {
+        "id": 45870066172,
+        "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45870066172"
+      }
+    ],
+    "scope": "snapshot, not whole-main qualification"
+  },
+  "manual_duplicate_dispatch": false,
+  "limitations": [
+    "Frozen actual added MM functions extracted unchanged from raw patch, not applied/native executed postimages; minimal carrier and primitive host substitutes only, actual append/owner/parser",
+    "Clean positive fixture constructs fresh event-specific records with synthetic I/O, digest and host page inputs, not corrected peer code/native event or independent native workload oracle",
+    "Controller readiness is source-mapped design, not actual external control implementation; exact scope, upper ACK, built-in retry retirement witness, workload reference binding and native full linkage remain blockers",
+    "Existing broad automatic source-push jobs not qualified as whole-main; no manual rerun"
+  ],
+  "next_action": "Agent1 integrate independently corrected A3/A11 producer/consumer with selected recorder, qualify actual native SMP connected composition and controller/debt/oracle boundaries before separate bounded approval."
+}
