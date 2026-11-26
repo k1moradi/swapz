@@ -20882,3 +20882,25 @@ pressure (not circular prior runtime proof); independent exact compressed
 stream and full 4096-byte oracle, protected page0/UUID/table, normal swapoff
 and debt drain; failed cleanup never force-removes. AUTH0, Phase A BLOCKED,
 direct compressed handoff, forced RAW bypass and import OFF.
+
+### R096 Agent11 — independent built-in owner close retry (host boundary)
+
+The frozen R095 capture-off MM postimage remains byte-identical. Stage only the
+new producer overlay after R092 and R094; do not consume same-round peer
+changes or start an independent native build. Exact-session begin_close fences
+entry and broker claim; finish_close arms permanent built-in work ownership
+before inspecting entrant and broker debt. Last entrant and last broker debt
+transitions queue at most one identity-bound item; no polling, target pointer,
+module self-pin, or sleepable lifecycle lock on release. EBUSY retains closed
+arrays; retry may still see other debt and must await another release. Explicit
+success destroys arrays, and pending old work retires before reopen; stale
+notifications cannot affect a new session. Invariant failures quarantine.
+
+The new rootless source-linked lane checks the actual staged owner and MM route,
+candidate and release functions with modeled Linux RCU, module and workqueue
+primitives, a paused pthread entrant, late cap/ticket releases and explicit
+finish versus queued work. GCC/Clang strict warnings, ASan/UBSan, baseline leak
+checks and release/entrant semantic mutants are required; no repeat of R095
+accepted guard corpus. Host results do not prove native workqueue progress,
+module unload, target detach or physical admission. AUTH0, Phase A BLOCKED;
+compressed handoff, forced RAW and import remain OFF.

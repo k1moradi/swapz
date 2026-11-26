@@ -1,0 +1,226 @@
+diff --git a/src/kernel/zswap-original-ticket.c b/src/kernel/zswap-original-ticket.c
+--- a/src/kernel/zswap-original-ticket.c
++++ b/src/kernel/zswap-original-ticket.c
+@@ -12,0 +13,7 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++/* Notification uses only the permanent address and captured session, never
++ * session storage after the final unlock. */
++static void owner_release_event(struct swapz_ticket_broker *broker,
++	swapz_u64 session);
++#endif
++
+@@ -363,0 +371,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++	swapz_u64 drained_session = 0;
++#endif
+@@ -373,0 +384,5 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++		if (broker->closing && !broker->capability_refs &&
++		    broker->free_count == broker->capacity)
++			drained_session = broker->session;
++#endif
+@@ -376,0 +392,4 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++	if (drained_session)
++		owner_release_event(broker, drained_session);
++#endif
+@@ -429,0 +449,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++	swapz_u64 drained_session = 0;
++#endif
+@@ -453,0 +476,5 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++		if (broker->closing && !broker->capability_refs &&
++		    broker->free_count == broker->capacity)
++			drained_session = broker->session;
++#endif
+@@ -458,0 +486,4 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++	if (drained_session)
++		owner_release_event(broker, drained_session);
++#endif
+diff --git a/src/kernel/zswap-original-broker-owner.inc b/src/kernel/zswap-original-broker-owner.inc
+--- a/src/kernel/zswap-original-broker-owner.inc
++++ b/src/kernel/zswap-original-broker-owner.inc
+@@ -11,0 +12,2 @@
++#include <linux/workqueue.h>
++#include <linux/printk.h>
+@@ -46,0 +49,12 @@
++/* Gate-protected permanent work identity. The lifecycle mutex serializes
++ * destruction, explicit finish and the worker; the gate is never held
++ * while acquiring the broker lock. No target or module reference here. */
++static bool owner_retry_armed, owner_retry_pending;
++static swapz_u64 owner_retry_session, owner_retry_epoch;
++#ifdef __KERNEL__
++static void owner_retry_workfn(struct work_struct *work);
++static DECLARE_WORK(owner_retry_work, owner_retry_workfn);
++#else
++/* The host scheduler only marks work pending; it must not run inline. */
++extern void r096_owner_schedule_retry(void);
++#endif
+@@ -47,0 +62,31 @@
++/* Called with the gate held. At most one pending work item; the worker
++ * may be requeued by a distinct final-debt transition while it runs. */
++static void owner_queue_retry_locked(void)
++{
++	if (!owner_retry_armed || owner_retry_pending)
++		return;
++	owner_retry_session = owner_session;
++	owner_retry_epoch = owner_epoch;
++	owner_retry_pending = true;
++#ifdef __KERNEL__
++	schedule_work(&owner_retry_work);
++#else
++	r096_owner_schedule_retry();
++#endif
++}
++
++/* Last broker debt is captured under the broker lock, then notified after
++ * unlock. A late notifier cannot address freed arrays or a fresh session. */
++static void owner_release_event(struct swapz_ticket_broker *broker,
++	swapz_u64 session)
++{
++	unsigned long flags = 0;
++
++	if (broker != &owner_broker)
++		return;
++	gate_lock(flags);
++	if (session == owner_session)
++		owner_queue_retry_locked();
++	gate_unlock(flags);
++}
++
+@@ -75,0 +121,2 @@
++	if (!owner_entrants)
++		owner_queue_retry_locked();
+@@ -137,0 +185,9 @@
++	/* If an explicit finish won against queued work, let that exact old
++	 * work retire before reusing its permanent scheduling slot. */
++	gate_lock(flags);
++	if (owner_retry_pending) {
++		gate_unlock(flags);
++		error = -EBUSY;
++		goto unlock;
++	}
++	gate_unlock(flags);
+@@ -225,1 +281,4 @@
+-int swapz_mm_broker_owner_finish_close(swapz_u64 session, swapz_u64 epoch)
++/* Called with the lifecycle mutex. Arm before observing either debt so
++ * racing last releases cannot be missed. Only releases queue work, never
++ * a busy worker itself; an invalid invariant quarantines without polling. */
++static int owner_finish_locked(swapz_u64 session, swapz_u64 epoch)
+@@ -231,13 +290,6 @@
+-	owner_lock();
+-	if (!owner_broker.initialized || session != owner_session || epoch != owner_epoch) {
+-		error = -ESTALE;
+-		goto unlock;
+-	}
+-	if (owner_quarantined) {
+-		error = -EIO;
+-		goto unlock;
+-	}
+-	if (!owner_draining) {
+-		error = -EBUSY;
+-		goto unlock;
+-	}
++	if (!owner_broker.initialized || session != owner_session || epoch != owner_epoch)
++		return -ESTALE;
++	if (owner_quarantined)
++		return -EIO;
++	if (!owner_draining)
++		return -EBUSY;
+@@ -244,0 +297,1 @@
++	owner_retry_armed = true;
+@@ -247,4 +300,3 @@
+-	if (!quiescent) {
+-		error = -EBUSY;
+-		goto unlock;
+-	}
++	if (!quiescent)
++		return -EBUSY;
++
+@@ -255,0 +308,17 @@
++	/* No new gate entry, reserve, retain or claim can succeed after
++	 * close. Inspect debt under the broker lock; a late put can only
++	 * reduce it. Distinguish invariant failure from legitimate debt. */
++	error = ticket_lock(&owner_broker, &flags, false);
++	if (error)
++		goto quarantine;
++	if (!owner_broker.closing || owner_broker.free_count > owner_broker.capacity ||
++	    (owner_broker.free_count == owner_broker.capacity && owner_broker.used_bytes))
++		error = -EIO;
++	else if (owner_broker.free_count != owner_broker.capacity || owner_broker.capability_refs)
++		error = -EBUSY;
++	ticket_unlock(&owner_broker, flags);
++	if (error == -EBUSY)
++		return error;
++	if (error)
++		goto quarantine;
++
+@@ -258,3 +327,5 @@
+-		if (error != -EBUSY)
+-			owner_quarantined = true;
+-		goto unlock;
++		/* Debt was already zero and cannot grow; unexpected busy is an
++		 * invariant failure, not a reason for an unbounded retry. */
++		if (error == -EBUSY)
++			error = -EIO;
++		goto quarantine;
+@@ -261,0 +333,3 @@
++	gate_lock(flags);
++	owner_retry_armed = false;
++	gate_unlock(flags);
+@@ -274,1 +348,16 @@
+-unlock:
++	return 0;
++
++quarantine:
++	owner_quarantined = true;
++	gate_lock(flags);
++	owner_retry_armed = false;
++	gate_unlock(flags);
++	return error;
++}
++
++int swapz_mm_broker_owner_finish_close(swapz_u64 session, swapz_u64 epoch)
++{
++	int error;
++
++	owner_lock();
++	error = owner_finish_locked(session, epoch);
+@@ -278,0 +368,18 @@
++static void owner_retry_run(void)
++{
++	unsigned long flags = 0;
++	swapz_u64 session, epoch;
++	bool retry_current;
++	int error = 0;
++
++	owner_lock();
++	gate_lock(flags);
++	session = owner_retry_session;
++	epoch = owner_retry_epoch;
++	retry_current = owner_retry_pending && owner_retry_armed &&
++		session == owner_session && epoch == owner_epoch;
++	owner_retry_pending = false;
++	gate_unlock(flags);
++	if (retry_current)
++		error = owner_finish_locked(session, epoch);
++	owner_unlock();
+@@ -279,0 +387,16 @@
++	if (error && error != -EBUSY)
++		pr_err("swapz: built-in broker close retry failed: %d\n", error);
++#else
++	(void)error;
++#endif
++}
++
++#ifdef __KERNEL__
++static void owner_retry_workfn(struct work_struct *work)
++{
++	(void)work;
++	owner_retry_run();
++}
++#endif
++
++#ifdef __KERNEL__

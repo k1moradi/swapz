@@ -1,0 +1,63 @@
+name: Round096 Agent11 MM owner retry host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round096-original-owner-retry.patch'
+      - 'tests/tools/round096-mm-owner-retry-verify.py'
+      - 'tests/runtime/native/fixtures/round096-mm-owner-retry.c'
+      - '.github/workflows/phase-a-round096-mm-owner-retry-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  mm-owner-retry-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and complete standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import subprocess
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(previous) and len(current) > len(previous)
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: frozen-linux
+          sparse-checkout: mm/zswap.c
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Stage actual sources and exercise built-in retry only
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B tests/tools/round096-mm-owner-retry-verify.py --linux frozen-linux --output "$RUNNER_TEMP/round096-agent11"
+      - name: Retain bounded source diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round096-agent11-mm-owner-retry
+          path: ${{ runner.temp }}/round096-agent11/
+          if-no-files-found: warn
+          retention-days: 14
