@@ -1,0 +1,107 @@
+name: Round094 actual shared decoder provider HOST ONLY NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-original-decoder-shared.c'
+      - 'src/kernel/zswap-original-decoder-shared.h'
+      - 'tests/runtime/native/fixtures/round094-decoder-shared-provider.c'
+      - 'tests/tools/round094-decoder-shared-provider-verify.py'
+      - '.github/workflows/phase-a-round094-decoder-shared-provider-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  actual-shared-decoder-provider-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Fresh actual main parent and guarded new value-only ABI
+        shell: bash
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          trap 'echo "::error::ROUND094_AGENT7_FIRST_ERROR source preflight line=$LINENO" >&2' ERR
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test "$(git rev-parse HEAD^1)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          test "$(head -n 1 docs/testing_standards.md)" = "# Testing Standards"
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          test "$(grep -Fc '#define SWAPZ_ORIGINAL_DECODER_HANDLES_ACTIVE 0U' src/kernel/zswap-original-decoder-handles.h)" -eq 1
+          test "$(git hash-object src/kernel/zswap-original-decoder-handles.h)" = 0f103783aee10d18df5c502fdf553f7ac6a0035d
+          test "$(grep -Fc '#define SWAPZ_ORIGINAL_DECODER_SHARED_ACTIVE 0U' src/kernel/zswap-original-decoder-shared.h)" -eq 1
+          test "$(grep -Fc '#define SWAPZ_ORIGINAL_DECODER_BRIDGE_ACTIVE 0U' src/kernel/zswap-original-decoder-bridge.h)" -eq 1
+          test "$(grep -Fc '#define SWAPZ_ZSWAP_IMPORT_ACTIVE 0U' src/kernel/zswap-import-codec.h)" -eq 1
+          test "$(git hash-object src/kernel/zswap-original-decoder-bridge.c)" = 9324a581e27bad62d4e2d9c90192f6ad8b96faca
+          test "$(git hash-object src/kernel/zswap-original-decoder-bridge.h)" = 507b25debe0ca7b30b57ed6a350dab4868dced51
+          test "$(git hash-object src/kernel/zswap-original-decode.c)" = eb1cd7f90d5edade9640e1ffe9dac3c8fe774644
+          test "$(git hash-object src/kernel/zswap-original-decode.h)" = a247d1aaf9865de71f97cd980be806b8d8c7c20e
+          test "$(git hash-object src/kernel/zswap-import-decoder-owner.c)" = 8e0c8f4d2085af7f2e17df412f3a1af654063571
+          test "$(git hash-object src/kernel/zswap-import-decoder-owner.h)" = e1b4b903567070e2307f7d05f8e48c14e0bb3768
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: original-linux
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            mm/zswap.c
+            crypto/lzo.c
+            crypto/lz4.c
+            include/linux/lzo.h
+            include/linux/lz4.h
+            lib/lzo/lzo1x_compress.c
+            lib/lzo/lzo1x_compress_safe.c
+            lib/lzo/lzo1x_decompress_safe.c
+            lib/lzo/lzodefs.h
+            lib/lz4/lz4_compress.c
+            lib/lz4/lz4_decompress.c
+            lib/lz4/lz4defs.h
+      - name: Exact pinned stage and actual shared provider compiled regression
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/round094-agent7"
+          mkdir -p "$evidence"
+          for tool in gcc clang python3; do
+            command -v "$tool" >/dev/null || {
+              echo "::error::ROUND094_AGENT7_FIRST_ERROR missing compiler or verifier" >&2
+              exit 1
+            }
+          done
+          test -f /usr/include/openssl/sha.h
+          if python3 -B swapz/tests/tools/round094-decoder-shared-provider-verify.py \
+              --linux-root original-linux --evidence-dir "$evidence" \
+              >"$evidence/console.json" 2>"$evidence/console.log"; then
+            grep -E '^PASS ROUND094_AGENT7 ' "$evidence/console.log"
+            cat "$evidence/results.json"
+          else
+            exit_code=$?
+            echo "::error::ROUND094_AGENT7_FIRST_ERROR source-linked strict qualification exit=$exit_code" >&2
+            grep -E '^(FIRST_ERROR|PASS ROUND094_AGENT7)' "$evidence/console.log" >&2 || true
+            test ! -s "$evidence/results.json" || cat "$evidence/results.json"
+            exit "$exit_code"
+          fi
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test -z "$(git -C original-linux status --porcelain --untracked-files=all)"
+      - name: Retain bounded source-linked results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round094-agent7-actual-shared-provider-host
+          path: ${{ runner.temp }}/round094-agent7/
+          if-no-files-found: warn
+          retention-days: 14
