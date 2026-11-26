@@ -1,0 +1,174 @@
+{
+  "round": "095",
+  "agent": 7,
+  "status": "PASS_ACTUAL_SHARED_PROVIDER_LIFETIME_HOST_ONLY_NO_GO_LIVE",
+  "task_commit": "20122e158beef6266bd01bb545951a2a4f77d9d5",
+  "engineering_freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+  "tested_commit": "21e8533bfdbdc8e09ee86e2a8e8c63f0a36a7cdd",
+  "tested_parent": "771340dc5f568bf853c433636a36024f5ea75794",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_blobs": {
+    "src/kernel/zswap-original-decoder-shared.c": "3b48a4f6f31ef9c45034db7e0509efe92583e404",
+    "src/kernel/zswap-original-decoder-shared.h": "19bce03addcee7a2eeb0983ea360d4e2a5df0912",
+    "tests/runtime/native/fixtures/round095-decoder-shared-lifetime.c": "e6a3d3adcf758560463d1d61ef394159bd7a8f25",
+    "tests/tools/round095-decoder-shared-lifetime-verify.py": "7784483cc66e883bc18aa739fb29df5cb0dc295b"
+  },
+  "standards": {
+    "parent_blob": "7480c39dc8983e83c3f41d21f145e69cdd05d734",
+    "parent_bytes": 1843426,
+    "post_blob": "f2d115f932ba471599840bced09ea1f616d486e0",
+    "post_bytes": 1844928,
+    "append_bytes": 1502,
+    "exact_prefix": true,
+    "remote_readback": true,
+    "host_preflight": true
+  },
+  "ci": {
+    "run_id": 45770634552,
+    "job_id": 139742145865,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "first_error": null,
+    "raw_results": {
+      "agent": 7,
+      "compilers": {
+        "clang": {
+          "checks": 81,
+          "codecs": 2,
+          "first_error": null,
+          "gate_bytes": 88,
+          "handle_bytes": 24,
+          "mutants_compiled": 5,
+          "mutants_executed": 5,
+          "mutants_killed": [
+            "copy_count",
+            "epoch_match",
+            "burned_session",
+            "entrant_fence",
+            "close_preflight"
+          ],
+          "owner_bytes": 312,
+          "stage": "complete",
+          "standard": "-std=c23",
+          "status": "PASS"
+        },
+        "gcc": {
+          "checks": 81,
+          "codecs": 2,
+          "first_error": null,
+          "gate_bytes": 88,
+          "handle_bytes": 24,
+          "mutants_compiled": 5,
+          "mutants_executed": 5,
+          "mutants_killed": [
+            "copy_count",
+            "epoch_match",
+            "burned_session",
+            "entrant_fence",
+            "close_preflight"
+          ],
+          "owner_bytes": 312,
+          "stage": "complete",
+          "standard": "-std=c2x",
+          "status": "PASS"
+        }
+      },
+      "direct_compressed_handoff": false,
+      "first_error": null,
+      "forced_raw_bypass": false,
+      "import_active": false,
+      "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+      "native": "NOT_RUN",
+      "phase_a": "BLOCKED",
+      "round": "094",
+      "source_authenticated": 0,
+      "source_blobs": {
+        "src/kernel/zswap-original-decoder-shared.c": "3b48a4f6f31ef9c45034db7e0509efe92583e404",
+        "src/kernel/zswap-original-decoder-shared.h": "19bce03addcee7a2eeb0983ea360d4e2a5df0912",
+        "tests/runtime/native/fixtures/round095-decoder-shared-lifetime.c": "e6a3d3adcf758560463d1d61ef394159bd7a8f25",
+        "tests/tools/round095-decoder-shared-lifetime-verify.py": "7784483cc66e883bc18aa739fb29df5cb0dc295b"
+      },
+      "standards": {
+        "current_blob": "f2d115f932ba471599840bced09ea1f616d486e0",
+        "current_bytes": 1844928,
+        "parent_blob": "7480c39dc8983e83c3f41d21f145e69cdd05d734",
+        "parent_bytes": 1843426
+      },
+      "status": "PASS_ACTUAL_SHARED_PROVIDER_LIFETIME_HOST_ONLY"
+    },
+    "artifact": {
+      "id": 15093757410,
+      "bytes": 1170,
+      "digest": "sha256:b6281fc8eb17be9345af38a853c2537152a9ebe3eb2efa617d43111037ba719f",
+      "digest_confirmed_in_log": true,
+      "independent_zip_download": false
+    }
+  },
+  "reporting_defects": {
+    "legacy_workflow": {
+      "run_id": 45770632922,
+      "status": "completed",
+      "conclusion": "failure",
+      "jobs": 0,
+      "first_error": "Workflow rejected before job creation; unquoted colon in YAML if plain scalar identified by source inspection; GitHub job diagnostic unavailable."
+    },
+    "raw_round_label": {
+      "raw": "094",
+      "correct": "095",
+      "qualification_source_verified": true
+    },
+    "correction": {
+      "commit": "68479945f382bfcce2f882b484cbdd6bb48cd414",
+      "parent": "85139fdd0ca87541cef2cdd24f8bf0c0e1546301",
+      "paths": {
+        ".github/workflows/phase-a-round094-decoder-shared-provider-host-noauth.yml": "16a88359faed5c070732ed26107065e8371ecdfe",
+        ".github/workflows/phase-a-round095-decoder-shared-lifetime-host-noauth.yml": "9023dc9462abcd3f9da18477c84937475293cdf8",
+        "tests/tools/round095-decoder-shared-lifetime-verify.py": "649733489d5440109523402f9058daedef1a6940"
+      },
+      "standards": {
+        "parent_blob": "cd43d40604b820a28e4f9e19906408ad2c3a607a",
+        "parent_bytes": 1847695,
+        "post_blob": "90bf941e697651c6433561d23d90ddc0c1780e48",
+        "post_bytes": 1848465,
+        "append_bytes": 770,
+        "exact_prefix": true
+      },
+      "focused_runs": [
+        {
+          "run_id": 45771115565,
+          "conclusion": "skipped"
+        },
+        {
+          "run_id": 45771115671,
+          "conclusion": "skipped"
+        }
+      ],
+      "source_c_h_unchanged": true,
+      "accepted_corpus_replayed": false
+    }
+  },
+  "prior_native_failure": {
+    "run_id": 45763547658,
+    "job_id": 139718948300,
+    "conclusion": "FAIL_PREREQUISITE_BEFORE_OBJECT",
+    "first_error": "objtool/elf.h:10:10 fatal error: gelf.h: No such file or directory",
+    "retried": false,
+    "combined_native_owner": "Agent10"
+  },
+  "scope": {
+    "actual_provider": "atomic read count through copy, stable external counted gate, one-shot fresh session, failed init burn, unwind both codecs, prevalidate both retained refs, quarantine",
+    "external": "host fresh broker cap/session and independently retained storage pin adapter; native caller must exclusively acquire a new built-in broker session per provider lifetime, never reuse after module reload, keep gate alive until pre-gate entrants quiesced; no actual native integration or authentication claim",
+    "native": "NOT_RUN",
+    "additional_per_page_bytes": 0
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "vm": false,
+  "module_loaded": false,
+  "physical": false,
+  "manual_ci_dispatches": 0
+}
