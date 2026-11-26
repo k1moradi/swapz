@@ -20774,3 +20774,27 @@ Apply the separate R095 MM-only overlay after exact frozen R089/R090/R091/R092 L
 
 R095 Agent7 legacy workflow exclusion correction: the first exact-message R094 skip expression contained a YAML plain-scalar colon and GitHub rejected the workflow before creating a job (run 45770632922). Use a folded scalar with explicit exclusions for the lifetime-source commit and this syntax-only correction; all other existing R094 triggers remain. No accepted host corpus re-executed and no native lane retried; the failed historical workflow remains recorded.
 R095 raw focused CI JSON retained an inherited round=094 literal despite the exact R095 source and PASS sentinels; correct that metadata label for future runs, skip only this metadata/workflow-only commit in the R095 job, retain raw historical evidence unchanged. No accepted lifetime corpus replay.
+
+## R095 Agent2 — bounded native observation recorder prototype (NO AUTH)
+
+Keep R094 offline parser evidence; do not replay its accepted corpus. The
+separate host recorder uses caller-owned contiguous 1..8192 fixed records,
+monotonic minted nonpointer tokens and append sequence, one nonblocking
+lock-free atomic trylock, no allocation/hash/format/log/I/O in append.
+Disabled entry checks enabled only; contention, overflow, invalid fields
+or late entered writer set sticky loss. No overwrite, no sorting, no
+fabricated ACK. External producer revoke/join including paused entrants
+precedes stop/seal/export and storage lifetime ends only after all entrants.
+Export fixed LE records, field allowlists, independently supplied scope
+digest and loss/count footer; reject truncation, noncontiguous sequence,
+unknown fields or inconsistent lifetimes. Distinguish clone completion
+from actual original upper ACK; deferred candidate/carrier release and
+independent parallel lower completions retain observed order. Host
+fabricated producer and partial-order validator only, not kernel capture.
+Measure sizeof, host append/disabled timing and contention; no kernel or
+device performance inference. Separate future actual producer and exact
+physical-development checklist, automatic narrow current-source fast_test
+prerequisite only if no valid matching evidence, immutable SWAPSPACE2
+page0/UUID/table and independent full-page oracle. No ordinary zswap-off
+helper substitution, new VM, load, privilege, tracing or physical action.
+AUTH0 Phase A BLOCKED; compressed handoff, forced RAW and import OFF.
