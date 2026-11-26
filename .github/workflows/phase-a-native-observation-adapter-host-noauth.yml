@@ -1,0 +1,73 @@
+name: Native observation adapter host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/native-observation-adapter.c'
+      - 'src/kernel/native-observation-adapter.h'
+      - 'tests/runtime/native/fixtures/native-observation-adapter-host.c'
+      - 'tests/runtime/native/fixtures/native-observation-adapter-host-model.h'
+      - '.github/workflows/phase-a-native-observation-adapter-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  adapter-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Source and complete standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          freeze = "cb38c5de310edc4842e77099b92fc709e1934322"
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          frozen = subprocess.check_output(["git", "show", freeze + ":docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert len(frozen) == 1856114 and previous.startswith(frozen)
+          assert current.startswith(previous) and len(current) > len(previous)
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          PY
+      - name: Source-linked adapter host substitutes only
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          out="$RUNNER_TEMP/native-observation-adapter"
+          mkdir -p "$out/include/linux"
+          for header in types atomic rcupdate build_bug limits string; do
+            printf '#include "native-observation-adapter-host-model.h"\n' > "$out/include/linux/$header.h"
+          done
+          for compiler in gcc clang; do
+            "$compiler" --version | head -1
+            "$compiler" -std=c2x -D_POSIX_C_SOURCE=200809L -DSWAPZ_NATIVE_OBSERVATION_ADAPTER \
+              -O2 -g -Wall -Wextra -Wconversion -Wsign-conversion -Wshadow -Wpedantic -Werror \
+              -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -pthread \
+              -I"$out/include" -Isrc/kernel -Itests/runtime/native/fixtures \
+              src/kernel/native-observation-adapter.c tests/runtime/native/fixtures/native-observation-adapter-host.c \
+              -o "$out/$compiler-adapter" 2>&1 | tee "$out/$compiler-compile.log"
+            ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+              timeout 30s "$out/$compiler-adapter" 2>&1 | tee "$out/$compiler-adapter.log"
+            rm "$out/$compiler-adapter"
+          done
+      - name: Retain bounded host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-observation-adapter-host
+          path: ${{ runner.temp }}/native-observation-adapter/*.log
+          if-no-files-found: warn
+          retention-days: 14
