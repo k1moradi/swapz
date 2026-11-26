@@ -1,0 +1,144 @@
+{
+  "round": "094",
+  "agent": 10,
+  "kind": "original-x86-native-directed-objects-relocatable-composite-only",
+  "tested_commit": "1f8f7023d6fda5617ce021d65e44372cfb391c91",
+  "source_parent": "e4de57c4e96669add5072290870ca199d17d8a04",
+  "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "overlay_blob": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+  "inherited_stager_blob": "2aa197fe2d22446f27e6af5777eb3daf5cbed620",
+  "frozen_changed_inputs": {
+    "src/kernel/dm-target.c": "27d3af6f4146bc62adfb091e0d4f1fbc9f1dd285",
+    "src/kernel/zswap-original-storage-value.c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+    "src/kernel/zswap-original-storage-value.h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+    "src/kernel/zswap-original-decoder-handles.c": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
+    "src/kernel/zswap-original-decoder-handles.h": "0f103783aee10d18df5c502fdf553f7ac6a0035d"
+  },
+  "owned_blobs": {
+    "tests/tools/round094-native-storage-composite-verify.py": "d93b095ac4b9897f20b9fbc9ec30c7954d55d8ba",
+    ".github/workflows/phase-a-round094-native-storage-composite-noauth.yml": "23bdb4212252dd75f9415a3a9f0fb4321d144e08",
+    "tests/runtime/native/fixtures/round094-native-value-decoder-link.c": "4b861621223356bc9e1a6fa5c96f377771f216f0",
+    "docs/testing_standards.md": "5488f1437c94559b94fe7f480e8d83557033afe6"
+  },
+  "standards_parent_blob": "517c1429a72362d67fc84f09e63827e35196cd20",
+  "standards_full_prefix_verified": true,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45756538303",
+  "run_id": 45756538303,
+  "jobs": [
+    {
+      "id": 139696357119,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45756538303/job/139696357119",
+      "attempt": 1,
+      "status": "in_progress",
+      "conclusion": null
+    }
+  ],
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_error_status": "PENDING_ACTUAL_TERMINAL_LOG",
+  "canonical_preflight": "PASS",
+  "steps": [
+    {
+      "name": "Set up job",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Canonical exact source and parent before scratch checkout",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Provision compiler, ELF and kernel build prerequisites (runner packages only)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Read only accepted R093 reference artifact (no rebuild)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Actual raw staging, directed native storage objects and relocatable composite",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "name": "Preserve exact compile logs and manifest even on failure",
+      "status": "pending",
+      "conclusion": null
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "pending",
+      "conclusion": null
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "pending",
+      "conclusion": null
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "pending",
+      "conclusion": null
+    }
+  ],
+  "artifact": null,
+  "raw_stage": "PENDING",
+  "directed_native_objects": "PENDING",
+  "composite_link": "PENDING",
+  "new_full_kernel_link": "NOT_RUN",
+  "new_modpost": "NOT_RUN",
+  "new_final_ko": "NOT_RUN",
+  "native_kunit": "NOT_RUN",
+  "mutation_count": null,
+  "prior_round093": {
+    "conclusion": "PASS_ACTUAL_RAW_R092_COMPILE_LINK_ONLY",
+    "tested_commit": "9f944f4e83762b846e02aade88d2c36574c8ac13",
+    "run_id": 45666130617,
+    "job_id": 139388647019,
+    "artifact_id": 15047232671,
+    "artifact_sha256": "0187d57a98810d105a93dc728332c3c1720badc8fa82734c199acb509ed91a50",
+    "first_error": null,
+    "full_kernel_link": true,
+    "modpost": true,
+    "final_ko": true,
+    "kernel_sha256": "6f2c6dc03232256884c4fbdb0e17ffdd6f229fc8819f528389cc1abca2af6438",
+    "module_sha256": "88add0aa34b6f86db24b7e9fb10b2945ed7936f35ac5220243ff07b14198bd56",
+    "config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+    "job_logs_reverified": true,
+    "new_archive_extraction": false,
+    "hashes_source": "Agent1 terminal checkpoint and GitHub artifact metadata"
+  },
+  "callback_scope": "compile-only actual decoder get/put/read wrappers plus real value-storage init; no runtime caller; lower callbacks forwarded, not synthesized",
+  "no_same_round_peer_inputs": true,
+  "manual_dispatches": 0,
+  "new_focused_runs": 1,
+  "duplicate_full_builds": 0,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "vm_build": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "actual_physical_io": false
+}
