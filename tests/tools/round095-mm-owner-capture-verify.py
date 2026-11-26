@@ -52,48 +52,77 @@ def ordered(source, tokens, label):
         cursor = index + len(token)
 
 
-def apply(directory, patch, paths):
-    command = ["git", "apply", "--unidiff-zero", *["--include=" + p for p in paths], str(patch)]
-    checked(command[:2] + ["--check"] + command[2:], directory)
-    checked(command, directory)
-    checked(command[:2] + ["--reverse", "--check"] + command[2:], directory)
+def git(args, cwd, label):
+    result = run(["git", *args], cwd)
+    if result.returncode:
+        diagnostic = result.stderr.decode(errors="replace").strip()
+        first = next((line for line in diagnostic.splitlines() if "error:" in line),
+                     diagnostic.splitlines()[0] if diagnostic else "no diagnostic")
+        raise RuntimeError(label + ": git exit " + str(result.returncode) + ": " + first[:220])
+    return result.stdout
+
+
+def apply(directory, patch, reverse=False):
+    # Use the accepted full raw patch sequence, not per-path filtering or
+    # a reverse check on early zero-context intermediate overlays.
+    command = ["apply", "--unidiff-zero", "--whitespace=error"]
+    git(command + ["--check", str(patch)], directory, patch.name + "/check")
+    git(command + [str(patch)], directory, patch.name + "/apply")
+    if reverse:
+        git(command + ["--reverse", "--check", str(patch)], directory, patch.name + "/reverse")
 
 
 def stage(directory, linux):
-    require(checked(["git", "rev-parse", "HEAD"], linux).decode().strip() == LINUX,
+    require(git(["rev-parse", "HEAD"], linux, "original Linux HEAD").decode().strip() == LINUX,
             "original Linux pin")
-    require(not checked(["git", "status", "--porcelain", "--untracked-files=all"], linux), "dirty Linux")
+    require(not git(["status", "--porcelain", "--untracked-files=all"], linux, "original Linux clean"), "dirty Linux")
     for path, expected in PINS.items():
         pin(ROOT / path, expected)
-    OWNER["stage"](directory)  # staging only; no accepted R094 corpus execution
-    for path in PATHS:
-        expected = MM["IMAGES"][path][0]
+    for path, expected in OWNER["PINS"].items():
+        pin(ROOT / path, expected)
+    # Reuse the complete, previously qualified raw R089->R092 staging
+    # geometry, but execute no historical test or native build.
+    for path, (expected, _) in MM["IMAGES"].items():
         if expected:
             pin(linux / path, expected)
             destination = directory / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes((linux / path).read_bytes())
+        else:
+            require(not (linux / path).exists(), "unexpected pristine header " + path)
     for name, expected in MM["PATCHES"].items():
-        if "selected-clone" in name:
-            continue
         pin(ROOT / name, expected)
-        images = MM["PATCH_STAGES"][name]
-        selected = [p for p in PATHS if p in images]
-        apply(directory, ROOT / name, selected)
-        for path in selected:
-            pin(directory / path, images[path])
+        apply(directory, ROOT / name)
+        for path, image in MM["PATCH_STAGES"][name].items():
+            pin(directory / path, image)
+    for path, (_, expected) in MM["IMAGES"].items():
+        pin(directory / path, expected)
+    # Original broker preimages, not the already-patched R094 postimages.
+    for path, expected in OWNER["PRIOR"]["PINS"].items():
+        if not path.startswith("src/kernel/"):
+            continue
+        destination = directory / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(git(["show", FREEZE + ":" + path], ROOT, "frozen " + path))
+        pin(destination, expected)
     name = MM["R092_OVERLAY"]
     pin(ROOT / name, MM["R092_OVERLAY_PIN"])
-    apply(directory, ROOT / name, [PATHS[0], PATHS[2]])
-    for path in PATHS:
-        pin(directory / path, MM["final_raw_pin"](path))
-    apply(directory, PATCH, [PATHS[0]])
+    apply(directory, ROOT / name, reverse=True)
+    for path, (_, expected) in MM["R092_IMAGES"].items():
+        pin(directory / path, expected)
+    owner_path = OWNER["OWNER"]
+    (directory / owner_path).write_bytes((ROOT / owner_path).read_bytes())
+    pin(directory / owner_path, OWNER["PINS"][owner_path])
+    apply(directory, ROOT / OWNER["PATCH"], reverse=True)
+    for path, expected in OWNER["POST"].items():
+        pin(directory / path, expected)
+    apply(directory, PATCH, reverse=True)
     pin(directory / PATHS[0], POST)
     source = (directory / PATHS[0]).read_text()
     header = (directory / PATHS[2]).read_text()
     page = (directory / PATHS[1]).read_text()
     dm_path = "src/kernel/dm-target.c"
-    dm = checked(["git", "show", FREEZE + ":" + dm_path]).decode()
+    dm = git(["show", FREEZE + ":" + dm_path], ROOT, "frozen target").decode()
     (directory / dm_path).write_text(dm)
     pin(directory / dm_path, "2400ad0ccaf72c2586c4fd1488edb9a00246e213")
     ordered(function(source, "zswap_writeback_entry"),

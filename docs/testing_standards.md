@@ -20798,3 +20798,6 @@ prerequisite only if no valid matching evidence, immutable SWAPSPACE2
 page0/UUID/table and independent full-page oracle. No ordinary zswap-off
 helper substitution, new VM, load, privilege, tracing or physical action.
 AUTH0 Phase A BLOCKED; compressed handoff, forced RAW and import OFF.
+
+### R095 Agent11 staging correction
+Initial focused run 45770837365/job139742818950 failed before execution with the staging helper's generic `command failed: git`; preserve red source and zero counts. Changed verifier stages the complete previously accepted raw R089/R090/R091/R088/R092 sequence (full pristine and intermediate postimage pins), then exact R094 broker and R095 MM overlays; reverse-check final overlays, retain precise patch/check/apply/reverse labels, exit and stderr. No per-path filtering/early intermediate reverse-check, no unchanged CI rerun, no accepted test corpus replay, actual MM overlay/fixture/owner unchanged. A10 sole native build. AUTH0 unchanged.
