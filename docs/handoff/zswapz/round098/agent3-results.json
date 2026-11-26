@@ -1,0 +1,120 @@
+{
+  "round": "098",
+  "agent": 3,
+  "status": "PROGRESS",
+  "conclusion": "FAILURE",
+  "AUTH": 0,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw_bypass": "OFF",
+  "import": "OFF",
+  "task": "d3b7896bdc63bff8e5d84b50319aea55657c908f",
+  "freeze": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "tested_commit": "fdb750848000b59a2ca18b64efdc3f81ee6ebc02",
+  "source_parent": "27d5750eadc847b7aa21be4db2d1f2a54b998532",
+  "evidence_parent": "fdb750848000b59a2ca18b64efdc3f81ee6ebc02",
+  "pins": {
+    "dm_pre": "f1922cc26caf7bfa097c1f561f8719744c3a4e75",
+    "dm_post": "aaff4d782323f9f17046cb2ba4fabcc0069e51e6",
+    "gated_storage_c": "c59cdf4d4e203a9a40d09e9048d3eba786d2e0cc",
+    "gated_storage_h": "6b1e3dc0230740be0d5f0e038b270d4984b5277d",
+    "provider_c": "3b48a4f6f31ef9c45034db7e0509efe92583e404",
+    "provider_h": "19bce03addcee7a2eeb0983ea360d4e2a5df0912",
+    "owner_retry_patch": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+    "ticket_post": "70109f2c2ce9f60681649bd4807382248d0a41a2",
+    "owner_post": "278a93a3fd3fd260444aebc55d4a87112e56f704",
+    "header_post": "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea",
+    "producer_patch": "c35b35c18cc11f9b86c0b65856dbc0cd2a0bd2c8",
+    "producer_mm_post_expected": "128495cf9b35d37b93db1b165dc1562de94b5b89",
+    "producer_carrier_post_expected": "7083f7acdb439022a073c22261b7541d15806e5e",
+    "producer_page_io_post_expected": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+    "producer_stage_runner": "dad98ce49b64ce7bb3f6d48ba4a9395299a2da5e",
+    "recorder_adapter_c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+    "recorder_adapter_h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+    "recorder_owner_c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+    "recorder_owner_h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+    "fixture": "b5e6cfc88236d2ba713bafd3dd6570c07d10f6aa",
+    "recorder_fixture": "8cc691fa72331881151061c80007a9a265823cb5",
+    "runner": "aee64a9ea3dd39a92ee0646413d7ec7d3598a4d1",
+    "workflow": "1de38f6c9abd7a230e137208a5db6eac7c04870e"
+  },
+  "focused": {
+    "run": 45870750218,
+    "job": 140085220786,
+    "head_sha": "fdb750848000b59a2ca18b64efdc3f81ee6ebc02",
+    "status": "completed",
+    "conclusion": "failure",
+    "artifacts": [
+      {
+        "id": 15142447528,
+        "name": "round098-agent3-composed-target",
+        "digest": "sha256:4de79976a1c4de9570167353ed610c443a23dfd918abcbdd3a1d89ae2de398b9",
+        "size_in_bytes": 484
+      }
+    ],
+    "actual_compilers": null,
+    "first_error": "2026-11-26T17:48:26.5244737Z R098_FIRST_ERROR carrier type swapz_mm_route"
+  },
+  "exact_source_census": {
+    "total": 30,
+    "queued": 26,
+    "failure": 2,
+    "in_progress": 2
+  },
+  "standards": {
+    "freeze_blob": "dff61588713f8ceeecb5e406cab8788e12990147",
+    "freeze_bytes": 1874135,
+    "source_parent_blob": "de0c920b51294c8d3311836d227e5e71d3a89c69",
+    "source_parent_bytes": 1877087,
+    "source_blob": "7e1f11bef82d1214b96234e84d1a2065a5864ec3",
+    "source_bytes": 1879120,
+    "source_append_bytes": 2033,
+    "complete_prefix_verified": true,
+    "evidence_parent_blob": "7e1f11bef82d1214b96234e84d1a2065a5864ec3",
+    "evidence_parent_bytes": 1879120,
+    "evidence_changes_standards": false
+  },
+  "prior_accepted": {
+    "source": "f15e3682c87444dde69c1ee75b6e4f3ad146493f",
+    "run": 45856728473,
+    "job": 140036956683,
+    "artifact": 15135319557,
+    "sha256": "81f61ec8f9389f56b181b7a4e6906745173e5cc0866eeb76f5ea1f87541bc8fe",
+    "checks_each": 453,
+    "mutants_each": 4,
+    "manual_replay": false
+  },
+  "native": "NOT_RUN_BY_A3",
+  "native_activation": false,
+  "scope": {
+    "default_off": true,
+    "private_installer_native_caller": false,
+    "exact_key_query_at_admission_and_claim": true,
+    "requires_one_scope_per_session": true,
+    "physical_target_supported": false,
+    "external_controller_complete": false
+  },
+  "correlation": {
+    "typed_write_candidate_source_accessor": true,
+    "actual_recorder_owner_test_intended": true,
+    "host_seeded_producer_events": true,
+    "clone_endio_only": true,
+    "original_upper_endio": false,
+    "read_ordinary_discard_fallback_complete": false,
+    "independent_full_page_oracle": false,
+    "actual_preparation_metrics": false
+  },
+  "preserved": {
+    "gated_storage": true,
+    "autonomous_retry": true,
+    "pin_through_copy": true,
+    "map_bytes": 20
+  },
+  "physical": false,
+  "vm": false,
+  "module_load": false,
+  "manual_duplicate_ci": 0,
+  "same_round_dependencies": false
+}
