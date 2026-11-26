@@ -1,0 +1,224 @@
+{
+  "round": "096",
+  "agent": 5,
+  "kind": "ACTUAL_FROZEN_SHARED_STORAGE_AND_PROVIDER_GATE_HOST_ONLY",
+  "conclusion": "PASS",
+  "qualification_scope": "changed focused host lane only",
+  "engineering_freeze": "cb38c5de310edc4842e77099b92fc709e1934322",
+  "task_commit": "d756136217332fe03bce41e57328473fa4505220",
+  "tested_commit": "eca2485f2c7bdf75f9075652a7da8ac7bbcfb752",
+  "parent": "c9acbf7e1f58e7fbdfceaac0ff69d177abf80fdc",
+  "source_url": "https://github.com/k1moradi/swapz/commit/eca2485f2c7bdf75f9075652a7da8ac7bbcfb752",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45827673414",
+  "run_id": 45827673414,
+  "job_id": 139935916808,
+  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45827673414/job/139935916808",
+  "job_conclusion": "success",
+  "first_error": null,
+  "artifact": {
+    "id": 15120518852,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45827673414/artifacts/15120518852",
+    "filename": "round096-agent5-shared-storage-gated-exact-stream.zip",
+    "bytes": 2565,
+    "sha256": "f2a59cf17f919b38cd4c80052185842451d82b10d904b9e567c8bac9eff7ec45",
+    "independent_download_sha256": "f2a59cf17f919b38cd4c80052185842451d82b10d904b9e567c8bac9eff7ec45",
+    "zip_crc": "PASS",
+    "entries": [
+      "results.json"
+    ],
+    "artifact_conclusion": "PASS"
+  },
+  "compilers": {
+    "gcc": {
+      "standard": "-std=c2x",
+      "codecs": {
+        "1": {
+          "checks": 12550,
+          "lower_reads": 14,
+          "lifecycle_gets": 2,
+          "lifecycle_puts": 2,
+          "transient_gets": 9,
+          "transient_puts": 9,
+          "exact_compressed_comparisons": 7,
+          "map_bytes": 20,
+          "storage_bytes": 15320,
+          "legacy_bytes": 14912,
+          "overhead_bytes": 408,
+          "provider_bytes": 312,
+          "sidecar_bytes": 1112,
+          "handle_bytes": 24,
+          "gate_bytes": 88,
+          "wrapper_plus_external_gate_overhead_bytes": 496
+        },
+        "2": {
+          "checks": 16646,
+          "lower_reads": 14,
+          "lifecycle_gets": 2,
+          "lifecycle_puts": 2,
+          "transient_gets": 9,
+          "transient_puts": 9,
+          "exact_compressed_comparisons": 7,
+          "map_bytes": 20,
+          "storage_bytes": 15320,
+          "legacy_bytes": 14912,
+          "overhead_bytes": 408,
+          "provider_bytes": 312,
+          "sidecar_bytes": 1112,
+          "handle_bytes": 24,
+          "gate_bytes": 88,
+          "wrapper_plus_external_gate_overhead_bytes": 496
+        }
+      },
+      "semantic_negatives": {
+        "direct_provider_bypass": "SEMANTIC_FAIL line=62 atomic_load(&gate.entrants) == 1U && gate.owner == &storage.provider",
+        "duplicate_lower_read": "SEMANTIC_FAIL line=255 lower_reads == before + 1U && transient_gets == previous_gets + 1U && transient_gets == transient_puts",
+        "gate_close_bypass": "SEMANTIC_FAIL line=144 host_session_live && host_session_consumed && !gate.owner && !atomic_load(&gate.entrants)"
+      }
+    },
+    "clang": {
+      "standard": "-std=c23",
+      "codecs": {
+        "1": {
+          "checks": 12550,
+          "lower_reads": 14,
+          "lifecycle_gets": 2,
+          "lifecycle_puts": 2,
+          "transient_gets": 9,
+          "transient_puts": 9,
+          "exact_compressed_comparisons": 7,
+          "map_bytes": 20,
+          "storage_bytes": 15320,
+          "legacy_bytes": 14912,
+          "overhead_bytes": 408,
+          "provider_bytes": 312,
+          "sidecar_bytes": 1112,
+          "handle_bytes": 24,
+          "gate_bytes": 88,
+          "wrapper_plus_external_gate_overhead_bytes": 496
+        },
+        "2": {
+          "checks": 16646,
+          "lower_reads": 14,
+          "lifecycle_gets": 2,
+          "lifecycle_puts": 2,
+          "transient_gets": 9,
+          "transient_puts": 9,
+          "exact_compressed_comparisons": 7,
+          "map_bytes": 20,
+          "storage_bytes": 15320,
+          "legacy_bytes": 14912,
+          "overhead_bytes": 408,
+          "provider_bytes": 312,
+          "sidecar_bytes": 1112,
+          "handle_bytes": 24,
+          "gate_bytes": 88,
+          "wrapper_plus_external_gate_overhead_bytes": 496
+        }
+      },
+      "semantic_negatives": {
+        "direct_provider_bypass": "SEMANTIC_FAIL line=62 atomic_load(&gate.entrants) == 1U && gate.owner == &storage.provider",
+        "duplicate_lower_read": "SEMANTIC_FAIL line=256 lower_reads == before + 1U && transient_gets == previous_gets + 1U && transient_gets == transient_puts",
+        "gate_close_bypass": "SEMANTIC_FAIL line=145 host_session_live && host_session_consumed && !gate.owner && !atomic_load(&gate.entrants)"
+      }
+    }
+  },
+  "checks_total": 58392,
+  "exact_compressed_comparisons_total": 28,
+  "semantic_negatives_killed_total": 6,
+  "source_preimages": {
+    "src/kernel/zswap-original-storage-shared-decoder.c": "05fa6a716dcd5b5fd6a531a63908b2e9bb53cb8f",
+    "src/kernel/zswap-original-storage-shared-decoder.h": "b18f05a0d326dfe594e6695f13f757e313a1c3d8",
+    ".github/workflows/phase-a-shared-storage-shared-decoder-host-noauth.yml": "f812f10c01258a8478bbc00b3e35c4d677e8ab65"
+  },
+  "source_postimages": {
+    "src/kernel/zswap-original-storage-shared-decoder.c": "c59cdf4d4e203a9a40d09e9048d3eba786d2e0cc",
+    "src/kernel/zswap-original-storage-shared-decoder.h": "6b1e3dc0230740be0d5f0e038b270d4984b5277d",
+    "tests/runtime/native/fixtures/round096-shared-storage-gated-decoder.c": "8b4d32092e335f444ee44b354f71ac39a210746c",
+    "tests/tools/round096-shared-storage-gated-decoder-verify.py": "00acb79d9abff8172332576f28855dcdd38a9019",
+    ".github/workflows/phase-a-shared-storage-shared-decoder-host-noauth.yml": "e9885d5328ccb83d2f4b6fb4e9dcfce2b76d3544"
+  },
+  "frozen_kernel_blobs": {
+    "authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
+    "codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "zswap-original-storage.c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+    "zswap-original-storage.h": "38924c3931419a93a7783de9ba622024a5e2e65c",
+    "zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "zswap-original-decoder-shared.c": "3b48a4f6f31ef9c45034db7e0509efe92583e404",
+    "zswap-original-decoder-shared.h": "19bce03addcee7a2eeb0983ea360d4e2a5df0912",
+    "zswap-original-storage-shared-decoder.c": "05fa6a716dcd5b5fd6a531a63908b2e9bb53cb8f",
+    "zswap-original-storage-shared-decoder.h": "b18f05a0d326dfe594e6695f13f757e313a1c3d8",
+    "zswap-original-decoder-handles.h": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+    "zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+    "zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+    "zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571",
+    "zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+    "zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6"
+  },
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+    "crypto/lz4.c": "57b713516aefac823f2af9481c828027b42490dd",
+    "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+    "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
+    "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
+    "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
+    "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc",
+    "include/linux/lz4.h": "ad6042a718b5428792b795db7a8d4ad44c24a985",
+    "lib/lz4/lz4_compress.c": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+    "lib/lz4/lz4_decompress.c": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+    "lib/lz4/lz4defs.h": "17277ec16919f3a554afc7d91ad515c493d745ca"
+  },
+  "staged_lz4": [
+    "63eb4be2e23caf770649af18f6a7b2b82d79a5e7",
+    "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f"
+  ],
+  "standards": {
+    "frozen_blob": "4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e",
+    "frozen_bytes": 1856114,
+    "actual_parent_blob": "7900f5e4b4d9c99ffe986c512afc5c65f4c339b1",
+    "source_blob": "adf7ec2fa261cd9c21edcbb179fdafad00621a56",
+    "complete_frozen_and_parent_prefix": true,
+    "append_only": true
+  },
+  "historical_r095": {
+    "source": "34ef333e5054f6428776dcfab63baa6309c1d4ac",
+    "run": 45770731713,
+    "job": 139742467480,
+    "artifact": 15093569167,
+    "accepted_checks": 58050,
+    "historical_failure_run": 45770729983,
+    "unchanged_corpus_replayed": false
+  },
+  "exact_source_run_census_snapshot": {
+    "success": 2,
+    "in_progress": 3,
+    "queued": 5,
+    "whole_main_qualified": false
+  },
+  "lower": "MODELED_RAM_ONLY",
+  "epoch": "MODELED_FRESH_EXTERNAL_BROKER_CAP_PAIR",
+  "external_entrant_lifetime": "caller-owned, single ordered host entrant; native concurrent pre-lock quiescence not proven",
+  "source_mapped_authenticated": 0,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "native": "NOT_RUN_BY_AGENT5",
+  "actual_physical_io": false,
+  "vm": false,
+  "module_loaded": false,
+  "physical_mutation": false,
+  "same_round_peer_dependency": false,
+  "limitations": [
+    "No real native broker binding or MM/DM target integration established by this lane.",
+    "External entrant retain/revoke/join remains an explicit caller contract; host fixture is ordered, not a concurrent native close-race proof.",
+    "No production capacity or physical persistence claim.",
+    "Other automatic existing workflows were not dispatched separately by Agent5 and are not represented as passed."
+  ]
+}
