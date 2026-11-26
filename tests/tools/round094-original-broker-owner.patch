@@ -1,0 +1,25 @@
+diff --git a/src/kernel/zswap-original-ticket.c b/src/kernel/zswap-original-ticket.c
+--- a/src/kernel/zswap-original-ticket.c
++++ b/src/kernel/zswap-original-ticket.c
+@@ -333,1 +333,5 @@
+-int swapz_ticket_broker_try_get(struct swapz_ticket_broker *broker,
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++static int ticket_broker_try_get_raw(struct swapz_ticket_broker *broker,
++#else
++int swapz_ticket_broker_try_get(struct swapz_ticket_broker *broker,
++#endif
+@@ -528,0 +533,1 @@
++#include "zswap-original-broker-owner.inc"
+diff --git a/src/kernel/zswap-original-ticket.h b/src/kernel/zswap-original-ticket.h
+--- a/src/kernel/zswap-original-ticket.h
++++ b/src/kernel/zswap-original-ticket.h
+@@ -117,0 +118,9 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_OWNER_HOST_TEST)
++/* Process context, outside target/broker locks. Open returns a counted
++ * owner cap. Stop route publication and drain all other users before finish.
++ * Failed open leaves out untouched; busy finish preserves closed storage. */
++int swapz_mm_broker_owner_open(swapz_u32 capacity, swapz_u32 max_length,
++	swapz_u64 byte_limit, struct swapz_ticket_cap *out);
++int swapz_mm_broker_owner_begin_close(swapz_u64 session, swapz_u64 epoch);
++int swapz_mm_broker_owner_finish_close(swapz_u64 session, swapz_u64 epoch);
++#endif
