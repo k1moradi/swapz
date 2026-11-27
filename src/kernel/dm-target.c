@@ -13574,6 +13574,81 @@ static __used noinline int swapz_scope_install(struct swapz_dm *ctx,
  */
 static struct target_type swapz_target;
 
+/* Cold pre-install query, independent of provider lookup (which requires
+ * an installed MM scope). Caller owns live table/mapper and lifecycle;
+ * registry pins this module. Queue lock snapshots the existing route/cap
+ * together; RCU validates the actual live DM mapping, not a caller hint.
+ * No capability is acquired or returned. */
+static int swapz_scope_query_controller(void *context, struct file *mapper_file,
+		const struct swapz_ticket_broker *expected_broker,
+		sector_t first_sector, sector_t sector_count,
+		struct swapz_trial_target_preflight *result)
+{
+	struct dm_target *ti = context;
+	struct swapz_dm *ctx;
+	struct block_device *bdev;
+	const struct swapz_round089_route *route;
+	sector_t end_sector, sector;
+	unsigned long flags;
+	int error = -ESTALE;
+
+	if (!result)
+		return -EINVAL;
+	*result = (struct swapz_trial_target_preflight){};
+	if (!ti || ti->type != &swapz_target || !ti->private || !mapper_file ||
+	    !S_ISBLK(file_inode(mapper_file)->i_mode))
+		return -EINVAL;
+	bdev = file_bdev(mapper_file);
+	if (!bdev || bdev_is_partition(bdev) ||
+	    !first_sector || first_sector % SWAPZ_SECTORS ||
+	    !sector_count || sector_count % SWAPZ_SECTORS ||
+	    first_sector > (sector_t)-1 - sector_count)
+		return -EINVAL;
+	end_sector = first_sector + sector_count;
+	ctx = ti->private;
+	if (end_sector > bdev_nr_sectors(bdev) ||
+	    end_sector / SWAPZ_SECTORS > ctx->logical_pages ||
+	    end_sector / SWAPZ_SECTORS > SWAPZ_ROUND094_GENERATION_PAGES + 1U)
+		return -ERANGE;
+
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	route = &ctx->original_route;
+	if (ctx->target != ti || !ctx->original_trial || !ctx->accepting ||
+	    ctx->failed || !ctx->original_listed || !ctx->original_storage_ready ||
+	    !ctx->original_storage || !ctx->original_cap.broker ||
+	    (expected_broker && expected_broker != ctx->original_cap.broker) ||
+	    ctx->original_scope.identity || ctx->original_retained_scope.identity ||
+	    ctx->original_scope_file || ctx->original_scope_capture_stopped ||
+	    !ctx->original_cap.session || !ctx->original_cap.epoch ||
+	    ctx->original_cap.session <= ctx->original_scope_used_session ||
+	    ctx->original_cap.session != ctx->original_owner_session ||
+	    ctx->original_cap.epoch != ctx->original_owner_epoch ||
+	    ctx->original_cap.session != route->broker_session ||
+	    ctx->original_cap.epoch != route->table_epoch ||
+	    !route->target_epoch || !route->registration_epoch ||
+	    route->registration_epoch != ctx->original_snapshot_epoch)
+		goto unlock;
+	/* Bounded to the frozen trial's sixteen pages. No provider lookup,
+	 * scope publication, reference acquisition or I/O on this path. */
+	rcu_read_lock();
+	for (sector = first_sector; sector < end_sector; sector += SWAPZ_SECTORS)
+		if (!dm_swapz_round090_route_live(ti, bdev, sector))
+			break;
+	rcu_read_unlock();
+	if (sector != end_sector)
+		goto unlock;
+	*result = (struct swapz_trial_target_preflight){
+		.session = route->broker_session, .table_epoch = route->table_epoch,
+		.target_epoch = route->target_epoch,
+		.registration_epoch = route->registration_epoch,
+		.first_sector = first_sector, .sector_count = sector_count,
+	};
+	error = 0;
+unlock:
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	return error;
+}
+
 static int swapz_scope_validate_controller(void *context,
 		const struct swapz_mm_trial_scope *scope, struct file *mapper_file,
 		u64 registration_epoch)
@@ -17738,6 +17813,7 @@ static int swapz_scope_retire_controller(void *context,
 
 static const struct swapz_trial_target_ops swapz_scope_target_ops = {
 	.owner = THIS_MODULE,
+	.query = swapz_scope_query_controller,
 	.validate = swapz_scope_validate_controller,
 	.install = swapz_scope_install_controller,
 	.validate_retire = swapz_scope_validate_retire_controller,

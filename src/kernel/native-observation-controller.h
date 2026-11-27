@@ -25,6 +25,16 @@ struct dm_target;
 struct swapz_mm_trial_scope;
 struct swapz_trial_observation_scope;
 struct swapz_observation_record;
+struct swapz_ticket_broker;
+
+/* Read-only route snapshot: no authority, pointer, reference or grant.
+ * Caller independently owns the live target/table, opened mapper, optional
+ * expected broker identity and lifecycle exclusion throughout the query.
+ * A later install must independently revalidate every identity. */
+struct swapz_trial_target_preflight {
+	u64 session, table_epoch, target_epoch, registration_epoch;
+	sector_t first_sector, sector_count;
+};
 
 /* Built-in private cold transaction, no exported positive control symbol.
  * Trusted caller must own the independent live mapper/table/target references
@@ -41,6 +51,10 @@ typedef int (*swapz_trial_target_install)(void *context,
 struct swapz_trial_target_ops {
 	struct module *owner;
 	/* Read-only local preflight before recorder/MM publication. */
+	int (*query)(void *context, struct file *mapper_file,
+		const struct swapz_ticket_broker *expected_broker,
+		sector_t first_sector, sector_t sector_count,
+		struct swapz_trial_target_preflight *result);
 	swapz_trial_target_install validate;
 	swapz_trial_target_install install;
 	/* Both callbacks run synchronously under the registry and live-table
@@ -52,6 +66,13 @@ struct swapz_trial_target_ops {
 };
 int swapz_trial_target_register(const struct swapz_trial_target_ops *ops);
 int swapz_trial_target_unregister(const struct swapz_trial_target_ops *ops);
+/* Private built-in cold query; clears non-NULL output on any failure.
+ * No caller is installed and neither query nor registration grants admission. */
+int swapz_trial_controller_query_registered(struct dm_target *target,
+		struct file *mapper_file,
+		const struct swapz_ticket_broker *expected_broker,
+		sector_t first_sector, sector_t sector_count,
+		struct swapz_trial_target_preflight *result);
 int swapz_trial_controller_begin_registered(const struct swapz_mm_trial_scope *scope,
 		const struct swapz_trial_observation_scope *observation,
 		struct file *mapper_file, size_t capacity, struct dm_target *target);

@@ -154,7 +154,8 @@ int swapz_trial_target_register(const struct swapz_trial_target_ops *ops)
 {
 	int error = -EBUSY;
 
-	if (!ops || !ops->validate || !ops->install || !ops->validate_retire || !ops->retire)
+	if (!ops || !ops->query || !ops->validate || !ops->install ||
+	    !ops->validate_retire || !ops->retire)
 		return -EINVAL;
 	mutex_lock(&swapz_target_ops_lock);
 	if (!swapz_target_ops) {
@@ -180,6 +181,40 @@ int swapz_trial_target_unregister(const struct swapz_trial_target_ops *ops)
 }
 EXPORT_SYMBOL_GPL(swapz_trial_target_unregister);
 
+/* Read-only synchronous query. The module pin and registration mutex
+ * protect the callback only; caller retains the live table and file.
+ * Stage output privately so a failed callback cannot leak partial values. */
+int swapz_trial_controller_query_registered(struct dm_target *target,
+		struct file *mapper_file,
+		const struct swapz_ticket_broker *expected_broker,
+		sector_t first_sector, sector_t sector_count,
+		struct swapz_trial_target_preflight *result)
+{
+	struct swapz_trial_target_preflight selected = {};
+	const struct swapz_trial_target_ops *ops;
+	struct module *owner = NULL;
+	int error = -ENODEV;
+
+	if (!result)
+		return -EINVAL;
+	*result = (struct swapz_trial_target_preflight){};
+	if (!target || !mapper_file)
+		return -EINVAL;
+	mutex_lock(&swapz_target_ops_lock);
+	ops = swapz_target_ops;
+	if (ops && try_module_get(ops->owner)) {
+		owner = ops->owner;
+		error = ops->query(target, mapper_file, expected_broker,
+				first_sector, sector_count, &selected);
+	}
+	mutex_unlock(&swapz_target_ops_lock);
+	if (owner)
+		module_put(owner);
+	if (!error)
+		*result = selected;
+	return error;
+}
+
 /* Private built-in rendezvous; no exported positive entry. The original
  * caller still must acquire independent admission and live target/table refs.
  */
@@ -191,6 +226,13 @@ int swapz_trial_controller_begin_registered(const struct swapz_mm_trial_scope *s
 	struct module *owner = NULL;
 	int error = -ENODEV;
 
+#ifdef SWAPZ_ROUND106_ADMITTED_OWNER_TEST
+	/* Match the frozen MM negative admission boundary. AUTH=0: no
+	 * independently admitted owner exists. Reject before inspecting even
+	 * the caller's objects, taking refs, or consuming either one-shot gate.
+	 * Read-only target query/registry presence is never admission. */
+	return -EACCES;
+#endif
 	if (!target || !scope || !observation || !mapper_file)
 		return -EINVAL;
 	mutex_lock(&swapz_target_ops_lock);
