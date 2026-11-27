@@ -1,0 +1,72 @@
+name: Round102 guarded controller capture stop directed NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/native-observation-controller.c'
+      - 'src/kernel/native-observation-controller.h'
+      - 'tests/tools/round102-controller-stop-verify.py'
+      - 'tests/runtime/native/fixtures/round102-controller-stop.c'
+      - '.github/workflows/phase-a-round102-controller-stop-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  actual-controller-stop-objects:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and complete standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          parent = subprocess.check_output(["git","show","HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(parent) and len(current)>len(parent)
+          print("complete standards prefix",len(parent),len(current))
+          PY
+      - name: Provision genuine compiler and kernel build prerequisites (runner only)
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config \
+            openssl perl python3 xz-utils cpio
+          dpkg-query -W libelf-dev libssl-dev gcc binutils
+      - uses: actions/checkout@v4
+        with:
+          ref: 5a36cabf0989dfffc75de52a6ab8cc021092ebf6
+          path: frozen-product
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: frozen-linux
+          persist-credentials: false
+      - name: Check exact R101 stage, serial stop cases and changed objects
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B tests/tools/round102-controller-stop-verify.py frozen-product frozen-linux "$RUNNER_TEMP/round102-agent3"
+      - name: Retain bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round102-agent3-controller-stop
+          path: ${{ runner.temp }}/round102-agent3/
+          if-no-files-found: warn
+          retention-days: 14

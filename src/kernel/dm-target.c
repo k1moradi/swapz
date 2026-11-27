@@ -124,6 +124,13 @@ extern bool dm_swapz_trial_observation_origin(struct dm_target *, struct bio *, 
 #endif
 #endif
 
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+#if !defined(SWAPZ_SCOPED_TARGET_OBSERVATION) || !defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST)
+#error "Controller stop requires the exact staged scoped producer and target"
+#endif
+#include "native-observation-controller.h"
+#endif
+
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
 #endif
@@ -1052,6 +1059,12 @@ struct swapz_dm {
 	 */
 	struct swapz_mm_trial_scope original_scope;
 	u64 original_scope_used_session;
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	/* queue_lock protects capture inhibition; lifecycle serializes stop.
+	 * Observation identity remains retained until a genuine external join. */
+	bool original_scope_capture_stopped;
+	int original_scope_stop_error;
+#endif
 #endif
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 	/* ordered_owner only during synchronous claimed commit; no BIO after
@@ -12998,7 +13011,11 @@ static bool swapz_scope_key_matches_locked(const struct swapz_dm *ctx,
 		.dm_generation = key->dm_generation,
 	};
 
-	if (!swapz_scope_route_ready_locked(ctx, bdev, sector) ||
+	if (
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	    ctx->original_scope_capture_stopped ||
+#endif
+	    !swapz_scope_route_ready_locked(ctx, bdev, sector) ||
 	    !identity || identity != scope->identity ||
 	    key->target_session != scope->session || key->table_epoch != scope->table_epoch ||
 	    key->target_epoch != scope->target_epoch || key->area_epoch != scope->area_epoch ||
@@ -16010,6 +16027,9 @@ static bool swapz_round090_provider_lookup(struct block_device *bdev,
 			return false;
 		if (
 #if defined(SWAPZ_ROUND098_SCOPED_TARGET_TEST)
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+		    !ctx->original_scope_capture_stopped &&
+#endif
 		    swapz_scope_route_ready_locked(ctx, bdev, sector) &&
 #endif
 		    ctx->accepting && !ctx->failed && ctx->original_cap.broker &&
@@ -16078,7 +16098,11 @@ static void swapz_round090_candidate_get(struct dm_target *ti, struct bio *bio,
 
 		if (!spin_trylock_irqsave(&ctx->queue_lock, flags))
 			return;
-		ready = swapz_scope_route_ready_locked(ctx, bio->bi_bdev, bio->bi_iter.bi_sector);
+		ready =
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+			!ctx->original_scope_capture_stopped &&
+#endif
+			swapz_scope_route_ready_locked(ctx, bio->bi_bdev, bio->bi_iter.bi_sector);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		if (!ready)
 			return;
@@ -16750,6 +16774,46 @@ map_entry:
 	return DM_MAPIO_SUBMITTED;
 }
 
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+/* Sleepable serialized DM lifecycle callback. Stop optional new capture and
+ * claim without closing ordinary BIO admission or the observation route.
+ * The MM grace period must run outside queue_lock and ordered_owner.
+ * A presuspend rollback cannot rearm this one-shot scope. */
+static void swapz_scope_stop_capture(struct swapz_dm *ctx)
+{
+	unsigned long flags;
+	u64 identity;
+	int error;
+
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	identity = ctx->original_scope.identity;
+	if (identity)
+		ctx->original_scope_capture_stopped = true;
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	if (!identity)
+		return;
+	error = swapz_trial_controller_stop_capture(identity);
+	if (error) {
+		if (!ctx->original_scope_stop_error)
+			ctx->original_scope_stop_error = error;
+		swapz_scope_observe_invalid();
+	}
+}
+
+static void swapz_presuspend(struct dm_target *ti)
+{
+	swapz_scope_stop_capture(ti->private);
+}
+
+/* The target drain alone is not the external swap-area/upper BIO join.
+ * Until a trusted controller proves that join and revokes the scope, never
+ * recycle the optional owner or release the target carrying its identity. */
+static bool swapz_scope_external_join_missing(const struct swapz_dm *ctx)
+{
+	return ctx->original_scope.identity != 0;
+}
+#endif
+
 static void swapz_drain(struct dm_target *ti)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -16762,6 +16826,10 @@ static void swapz_drain(struct dm_target *ti)
 	 * upper writer into the target while admission is false. The same helper
 	 * remains valid for dtr(), where the mapped device is already being removed.
 	 */
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	/* dtr may bypass presuspend; exact already-stopped is idempotent. */
+	swapz_scope_stop_capture(ctx);
+#endif
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
 #if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
@@ -16863,8 +16931,18 @@ static void swapz_drain(struct dm_target *ti)
 	WARN_ON_ONCE(atomic_read(&ctx->original_release_busy));
 #if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
 	if (ctx->original_trial) {
-		queue_work(system_unbound_wq, &ctx->original_teardown_work);
-		flush_work(&ctx->original_teardown_work);
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+		if (swapz_scope_external_join_missing(ctx)) {
+			/* Preserve scope ownership; no synthetic external join. */
+			ctx->original_teardown_error = ctx->original_scope_stop_error ?
+				ctx->original_scope_stop_error : -EBUSY;
+			swapz_scope_observe_invalid();
+		} else
+#endif
+		{
+			queue_work(system_unbound_wq, &ctx->original_teardown_work);
+			flush_work(&ctx->original_teardown_work);
+		}
 	}
 #endif
 #endif
@@ -16893,7 +16971,11 @@ static void swapz_resume(struct dm_target *ti)
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 #if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
-	if (ctx->original_trial && !READ_ONCE(ctx->failed)) {
+	if (ctx->original_trial && !READ_ONCE(ctx->failed)
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	    && !swapz_scope_external_join_missing(ctx)
+#endif
+	   ) {
 		queue_work(system_unbound_wq, &ctx->original_setup_work);
 		flush_work(&ctx->original_setup_work);
 		if (ctx->original_setup_error && ctx->original_setup_error != -EALREADY)
@@ -17011,7 +17093,11 @@ static bool swapz_round096_target_can_free(const struct swapz_dm *ctx,
 	 * substitute for it. Historical extraction below stays unchanged.
 	 */
 	(void)independent_retry;
-	return (!ctx->original_trial || ctx->original_target_drained) &&
+	return
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	       !ctx->original_scope.identity &&
+#endif
+	       (!ctx->original_trial || ctx->original_target_drained) &&
 	       swapz_round097_target_debt_free(ctx) &&
 	       !ctx->original_owner_session && !ctx->original_owner_epoch &&
 	       !ctx->original_owner_closing;
@@ -17044,7 +17130,11 @@ static void swapz_dtr(struct dm_target *ti)
 		return;
 	swapz_drain(ti);
 #if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
-	if (ctx->original_gated_storage && ctx->original_target_drained &&
+	if (
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	    !swapz_scope_external_join_missing(ctx) &&
+#endif
+	    ctx->original_gated_storage && ctx->original_target_drained &&
 	    !atomic_read(&ctx->original_release_busy)) {
 		int error;
 
@@ -18845,6 +18935,9 @@ static struct target_type swapz_target = {
 	 * ->postsuspend. Drain there rather than closing admission in ->presuspend
 	 * and guessing when the core suspension barrier has completed.
 	 */
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	.presuspend = swapz_presuspend,
+#endif
 	.postsuspend = swapz_drain,
 	.resume = swapz_resume,
 	.iterate_devices = swapz_iterate_devices,
