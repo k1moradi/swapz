@@ -1,6 +1,6 @@
 # Round 101 — Agent 11 evidence
 
-**SOURCE_PUBLISHED / QUALIFICATION_PENDING.** Not an acceptance or test-pass report. Agent 1 owns integration and final acceptance. Independent Agent 11 lane only; no Agent 3 Round 101 source was used.
+**PACKAGING_REPAIR_PUBLISHED / QUALIFICATION_PENDING.** Not an acceptance or test-pass report. Agent 1 owns integration and final acceptance. Independent Agent 11 lane only; no Agent 3 Round 101 source was used.
 
 ## Immutable identities
 
@@ -27,8 +27,25 @@ All five raw staged preimages reconstructed from frozen GitHub source and checke
 | `src/kernel/zswap-original-broker-owner.inc` | `278a93a3fd3fd260444aebc55d4a87112e56f704` | `a6a025b1d56513919ac83f4367e9c306fa12c933` |
 | `src/kernel/zswap-original-ticket.h` | `c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea` | `6c79e41cb18082b925311bf62d0cfbed45a9e53b` |
 
-Local clone blocked: `git ls-remote` exited 128, `Could not resolve host: github.com`. Local kernel headers are not the pinned Linux tree; no substitution attempted. Source push automatically triggered [focused run 45921709462, job 140253713602](https://github.com/k1moradi/swapz/actions/runs/45921709462/job/140253713602). Latest job snapshot: **QUEUED**. No verified native compiler outcome, exact hosted apply, host-test count, runtime outcome or artifact. No manual duplicate dispatch. Pending qualification remains a blocker; do not interpret source publication as test success.
+Local clone blocked: `git ls-remote` exited 128, `Could not resolve host: github.com`. Local kernel headers are not the pinned Linux tree; no substitution attempted. Source push automatically triggered [focused run 45921709462, job 140253713602](https://github.com/k1moradi/swapz/actions/runs/45921709462/job/140253713602). Initial snapshot was queued; the original job is now terminal FAIL as recorded below. No verified native compiler outcome, exact hosted apply, host-test count, runtime outcome or artifact. No manual duplicate dispatch. Pending qualification remains a blocker; do not interpret source publication as test success.
 
 ## Safety
 
 AUTH=0; Phase A BLOCKED; compressed handoff OFF, forced RAW OFF, import OFF. No VM, activation, load, device mutation, disconnected full build, or live operation. Agent 1 integration and acceptance remain outstanding.
+
+## Continuation: terminal original failure and packaging-only repair
+
+The [original job 140253713602](https://github.com/k1moradi/swapz/actions/runs/45921709462/job/140253713602) completed **FAILURE** during the exact direct-main source and standards prefix step. First diagnostic: `tests/tools/round101-original-mm-retirement.patch:17: space before tab in indent.`. The repository-level diff check rejected tab-indented unified-patch context; subsequent toolchain provisioning, Linux checkout, staged source application, GCC/Clang tests and directed compilation were skipped. No artifacts were uploaded. This is not a native compiler or behavioral failure, and no PASS can be inferred.
+
+Corrected source [1b2b3101c391398587e8725c1ca9afc48e89044a](https://github.com/k1moradi/swapz/commit/1b2b3101c391398587e8725c1ca9afc48e89044a), sole fresh parent `b49015bc13bef402a8a2a171628bddd7376d8f61`, tree `584f35aa9afbebc662f4cc5a320f3d581e3c3069`. New overlay blob `4d34b0d771789c09967b38fdf84b0f2b6513cd60`; verifier `4ead4211a1c33cb003cc75571c7d1e80d06828b8`. Repackaged to zero-context hunks, explicitly enabled --unidiff-zero in actual application, preserved strict --whitespace=error, outer repository diff check and actual staged-source diff check. All five complete frozen preimages and both initial/repackaged postimages reconstructed, hash-verified and byte-identical. No product semantics changed; original fixture unchanged. Full historical standards bytes preserved and append verified by blob readback. Direct-main nonforce expected-head publication verified. Local git DNS failure reconfirmed (exit 128).
+
+New automatic changed-source qualification: [run 45923165383, job 140258377460](https://github.com/k1moradi/swapz/actions/runs/45923165383/job/140258377460), latest **QUEUED**. No manual replay or duplicate dispatch; no terminal compiler/test result yet. Broad existing automatic workflows were also queued by main push, not manually launched by Agent 11.
+
+### Proposed controller interfaces (source-only)
+
+- `int swapz_mm_trial_scope_stop_capture(u64 identity)`: sleepable, exact identity, one-shot; -EALREADY exact stopped; -EBUSY in-progress; -ESTALE wrong/absent. No control mutex over RCU grace. Does not join admitted BIOs.
+- `int swapz_mm_trial_scope_revoke(u64 identity)`: existing ABI retained; stop then final revoke only after controller joins external area/map/accepted BIO/terminal ingress; retain file and cap while busy, fail closed on cap put failure. Ordinary observation survives stop, not final unpublication.
+- `bool swapz_mm_trial_scope_bind_permitted(const struct swapz_mm_carrier *carrier)`: guarded exact live capture-scope/area/file-backed route cap/lease geometry predicate; not claim or authorization. Already admitted original BIO/candidate correlation survives draining.
+- `int swapz_mm_broker_owner_retired(swapz_u64 session, swapz_u64 epoch)`: exact current retired identity; zero only after actual storage destruction and native work join. Busy/debt, wrong identity and quarantine error remain distinct. Controller must obtain witness before reopening and join non-broker provider debt. No lifetime mutex across flush_work. Broker lock may nest owner gate for last-debt scheduling; owner gate never nests broker lock.
+
+No acceptance claim. AUTH0; Phase A BLOCKED; all three switches OFF. No activation, VM, module loading or physical I/O.

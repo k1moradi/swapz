@@ -1,26 +1,26 @@
 {
   "round": 101,
   "agent": 11,
-  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "status": "PACKAGING_REPAIR_PUBLISHED_QUALIFICATION_PENDING",
   "issue": 219,
   "task_commit": "f3e2a20dd9b17feb677f732e6f5088ff263822fa",
   "engineering_freeze": "28ffacb0a50fede481d010c0b688271badbbae6e",
   "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "source_commit": "eb2e4d03f32510864886e78b2b50f110db048e95",
-  "source_parent": "e8815d5720289639271d7e2ecb7f6b418d41aeba",
-  "source_tree": "7fc5b688a7d9e0114ffdc2d3af3611f1129a8106",
+  "source_commit": "1b2b3101c391398587e8725c1ca9afc48e89044a",
+  "source_parent": "b49015bc13bef402a8a2a171628bddd7376d8f61",
+  "source_tree": "584f35aa9afbebc662f4cc5a320f3d581e3c3069",
   "publication": {
     "branch": "main",
     "force": false,
-    "expected_head": "e8815d5720289639271d7e2ecb7f6b418d41aeba",
+    "expected_head": "b49015bc13bef402a8a2a171628bddd7376d8f61",
     "verified": true
   },
   "source_blobs": {
-    "tests/tools/round101-original-mm-retirement.patch": "df8881c99dd38bff0e38f9678daf35abe603e91d",
-    "tests/tools/round101-mm-retirement-verify.py": "e5063fc66b8d87ee975965ca91967276d0763eaa",
+    "tests/tools/round101-original-mm-retirement.patch": "4d34b0d771789c09967b38fdf84b0f2b6513cd60",
+    "tests/tools/round101-mm-retirement-verify.py": "4ead4211a1c33cb003cc75571c7d1e80d06828b8",
     "tests/runtime/native/fixtures/round101-mm-retirement.c": "365f60d465ae8f9b65948aaabdd6b813bbcc05b4",
     ".github/workflows/phase-a-round101-mm-retirement-noauth.yml": "751623ab3bdfa9a82ca17c7899565601a3ee6a30",
-    "docs/testing_standards.md": "7a51b60e0dbb1f6d045f8b63b3244d4c216c8777"
+    "docs/testing_standards.md": "e549c90bdfa19bc1042ae99d6f08855960df709f"
   },
   "staged_pre_post_git_blobs": {
     "mm/zswap.c": [
@@ -46,7 +46,7 @@
   },
   "checks": {
     "pinned_preimages": "PASS reconstructed and hash-verified",
-    "patch_roundtrip": "PASS deterministic reconstruction; not git apply or compilation",
+    "patch_roundtrip": "PASS deterministic reconstruction of initial and zero-context patch; actual hosted git apply pending",
     "standards_prefix": "PASS exact previous content prefix",
     "local_clone": "BLOCKED DNS: git ls-remote exited 128, Could not resolve host: github.com",
     "hosted_checkout": "NOT_VERIFIED",
@@ -54,14 +54,16 @@
     "native_compile": "NOT_VERIFIED",
     "gcc_host": "NOT_VERIFIED",
     "clang_host": "NOT_VERIFIED",
-    "test_counts": null
+    "test_counts": null,
+    "repackaged_postimages": "PASS all five old/new reconstruction postimages identical, exact Git blob hashes",
+    "outer_patch_whitespace": "PASS connector-side line scan; actual CI repository diff check pending"
   },
   "ci": {
-    "run_id": 45921709462,
-    "job_id": 140253713602,
+    "run_id": 45923165383,
+    "job_id": 140258377460,
     "status": "queued",
     "conclusion": null,
-    "url": "https://github.com/k1moradi/swapz/actions/runs/45921709462/job/140253713602",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45923165383/job/140258377460",
     "artifacts_verified": false
   },
   "limitations": [
@@ -82,5 +84,36 @@
     "activation": false,
     "full_build": false,
     "manual_duplicate_tests": false
-  }
+  },
+  "initial_failed_source": {
+    "commit": "eb2e4d03f32510864886e78b2b50f110db048e95",
+    "parent": "e8815d5720289639271d7e2ecb7f6b418d41aeba",
+    "tree": "7fc5b688a7d9e0114ffdc2d3af3611f1129a8106",
+    "source_blobs": {
+      "tests/tools/round101-original-mm-retirement.patch": "df8881c99dd38bff0e38f9678daf35abe603e91d",
+      "tests/tools/round101-mm-retirement-verify.py": "e5063fc66b8d87ee975965ca91967276d0763eaa",
+      "tests/runtime/native/fixtures/round101-mm-retirement.c": "365f60d465ae8f9b65948aaabdd6b813bbcc05b4",
+      ".github/workflows/phase-a-round101-mm-retirement-noauth.yml": "751623ab3bdfa9a82ca17c7899565601a3ee6a30",
+      "docs/testing_standards.md": "7a51b60e0dbb1f6d045f8b63b3244d4c216c8777"
+    },
+    "ci": {
+      "run_id": 45921709462,
+      "job_id": 140253713602,
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45921709462/job/140253713602",
+      "artifacts_verified": false,
+      "first_error": "tests/tools/round101-original-mm-retirement.patch:17: space before tab in indent.",
+      "first_failed_step": "Exact direct-main source and standards prefix",
+      "artifacts": [],
+      "host": "NOT_RUN",
+      "native": "NOT_RUN"
+    }
+  },
+  "interfaces": [
+    "int swapz_mm_trial_scope_stop_capture(u64 identity)",
+    "int swapz_mm_trial_scope_revoke(u64 identity)",
+    "bool swapz_mm_trial_scope_bind_permitted(const struct swapz_mm_carrier *carrier)",
+    "int swapz_mm_broker_owner_retired(swapz_u64 session, swapz_u64 epoch)"
+  ]
 }
