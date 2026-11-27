@@ -132,6 +132,13 @@ extern bool dm_swapz_trial_observation_origin(struct dm_target *, struct bio *, 
 #include <linux/file.h>
 #include <linux/fs.h>
 #endif
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+#if !defined(SWAPZ_ROUND102_CONTROLLER_TEST) || !defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
+#error "Integrated target requires retained controller and external join stage"
+#endif
+#include "native-observation-integration.h"
+#include "native-observation-owner.h"
+#endif
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -703,6 +710,9 @@ struct swapz_bio_ref {
 	u64 observation_operation, observation_original;
 	u64 observation_clone, observation_descriptor, observation_extent;
 	u8 observation_compressed_sha256[32];
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	bool observation_read_selected;
+#endif
 #endif
 #endif
 #if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
@@ -1071,6 +1081,12 @@ struct swapz_dm {
 	 * install/stop; queue_lock publishes the retained identity with the route. */
 	struct swapz_trial_retained_scope original_retained_scope;
 	struct file *original_scope_file;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	/* Exact successful MM revoke permits the cap/storage close, not free
+	 * or reuse. Retained identity survives until actual old-owner witness. */
+	bool original_scope_mm_revoked;
+	int original_scope_finish_error;
+#endif
 #endif
 #endif
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
@@ -1079,6 +1095,21 @@ struct swapz_dm {
 	 */
 	struct swapz_bio_ref *observation_commit;
 	u64 observation_release_operation, observation_release_descriptor;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	/* ordered_owner only: run-local extent token from actual publication.
+	 * Never manufacture one for an older/unobserved map or relocation. */
+	struct {
+		u64 extent, gc_epoch;
+		u32 generation;
+		u8 compressed_sha256[32];
+	} observation_extent_by_page[SWAPZ_ROUND094_GENERATION_PAGES];
+	/* Synchronous lower-read hook, ordered_owner only. No BIO pointer or
+	 * borrowed storage record is retained across decoder return. */
+	u64 observation_read_operation, observation_read_extent;
+	u32 observation_read_block, observation_read_length;
+	u8 observation_read_sha256[32];
+	bool observation_read_seen;
+#endif
 #endif
 	int original_setup_error;
 	int original_teardown_error;
@@ -2473,8 +2504,30 @@ static bool swapz_scope_observation_live(const struct swapz_bio_ref *entry)
 
 static void swapz_scope_observe_invalid(void)
 {
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	/* One evidence loss, never a duplicate valid wire event. */
+	swapz_trial_byte_invalidate();
+#endif
 	if (swapz_trial_observation_active())
 		(void)swapz_trial_observation_append(NULL);
+}
+
+/* Synchronous byte ownership transfer only. The record and any mapped BIO
+ * bytes remain caller-owned through return; the bridge must copy them.
+ * One append, exact release-published ordinal, never infer from count. */
+static void swapz_scope_observe_event(const struct swapz_observation_record *record,
+		const void *bytes, size_t length)
+{
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	u64 sequence = swapz_trial_observation_append_sequence(record);
+
+	if (!sequence || !swapz_trial_byte_event(record, sequence, bytes, length))
+		swapz_scope_observe_invalid();
+#else
+	(void)bytes;
+	(void)length;
+	(void)swapz_trial_observation_append(record);
+#endif
 }
 
 static bool swapz_scope_observation_bind(struct swapz_bio_ref *entry,
@@ -2520,7 +2573,7 @@ static void swapz_scope_observe_accept(const struct swapz_bio_ref *entry)
 			.swap_type = key->swap_type, .generation = (u32)key->dm_generation,
 		};
 
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 }
 
@@ -2533,7 +2586,7 @@ static void swapz_scope_observe_simple(const struct swapz_bio_ref *entry,
 			.flags = flags, .status = swapz_scope_status(error),
 		};
 
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 }
 
@@ -2552,7 +2605,7 @@ static void swapz_scope_observe_credit(const struct swapz_bio_ref *entry,
 			record.descriptor = entry->observation_descriptor;
 		else if (event == SWAPZ_OBS_CANCEL)
 			record.flags = 1; /* exact never-issued tail cancelled */
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 }
 
@@ -2565,7 +2618,7 @@ static void swapz_scope_observe_clone(struct swapz_bio_ref *entry, int error)
 			.status = swapz_scope_status(error),
 		};
 
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 	entry->observation_operation = 0; /* exactly one clone terminal event */
 }
@@ -2578,7 +2631,7 @@ static void swapz_scope_observe_release(u64 operation, u64 descriptor, int error
 			.descriptor = descriptor, .status = swapz_scope_status(error),
 		};
 
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 }
 /* ROUND098_OBSERVATION_END */
@@ -2886,6 +2939,12 @@ static void swapz_round089_revoke_route_locked(struct swapz_dm *ctx)
 	lockdep_assert_held(&ctx->queue_lock);
 	ctx->original_route = (struct swapz_round089_route){};
 #if defined(SWAPZ_ROUND098_SCOPED_TARGET_TEST)
+	#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	/* Until retained terminal selection is connected, route invalidation
+	 * must poison an incomplete trace rather than hide outstanding events. */
+	if (ctx->original_retained_scope.identity && (ctx->failed || ctx->accepting))
+		swapz_scope_observe_invalid();
+#endif
 	ctx->original_scope = (struct swapz_mm_trial_scope){};
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 	if (ctx->original_retained_scope.identity)
@@ -4032,7 +4091,7 @@ static __maybe_unused int swapz_round090_storage_write(void *opaque,
 		if (!lower_token)
 			swapz_scope_observe_invalid();
 		else
-			(void)swapz_trial_observation_append(&record);
+			swapz_scope_observe_event(&record, NULL, 0);
 	}
 #endif
 	error = swapz_lower(opaque, REQ_OP_WRITE, block, 1, (u8 *)bytes);
@@ -4049,7 +4108,7 @@ static __maybe_unused int swapz_round090_storage_write(void *opaque,
 		 * independent decoded-byte verification remains a separate event. */
 		if (!error)
 			memcpy(record.observed_sha256, submitted_sha256, 32);
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 #endif
 	return error;
@@ -4060,13 +4119,54 @@ static __maybe_unused int swapz_round090_storage_read(void *opaque,
 		swapz_u32 *completed)
 {
 	int error;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	struct swapz_dm *ctx = opaque;
+	u64 lower = 0;
+#endif
 
 	*completed = 0;
 	if (length != SWAPZ_BLOCK_BYTES)
 		return -EINVAL;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (ctx->observation_read_operation) {
+		if (ctx->observation_read_seen || block != ctx->observation_read_block ||
+		    !ctx->observation_read_length || ctx->observation_read_length > length) {
+			swapz_scope_observe_invalid();
+		} else {
+			struct swapz_observation_record record = {
+				.event = SWAPZ_OBS_LOWER_SUBMIT,
+				.operation = ctx->observation_read_operation,
+				.extent = ctx->observation_read_extent, .flags = 1,
+				.requested = length, .compressed_length = ctx->observation_read_length,
+			};
+
+			ctx->observation_read_seen = true;
+			lower = swapz_trial_observation_mint();
+			record.lower = lower;
+			memcpy(record.compressed_sha256, ctx->observation_read_sha256, 32);
+			if (lower)
+				swapz_scope_observe_event(&record, NULL, 0);
+			else
+				swapz_scope_observe_invalid();
+		}
+	}
+#endif
 	error = swapz_lower_read(opaque, block, 1, bytes);
 	if (!error)
 		*completed = length;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (lower) {
+		struct swapz_observation_record record = {
+			.event = SWAPZ_OBS_LOWER_COMPLETE,
+			.operation = ctx->observation_read_operation, .lower = lower,
+			.completed = *completed, .status = swapz_scope_status(error),
+		};
+
+		if (!error)
+			sha256(bytes, ctx->observation_read_length, record.observed_sha256);
+		swapz_scope_observe_event(&record, NULL, 0);
+	}
+#endif
 	return error;
 }
 
@@ -4083,7 +4183,7 @@ static __maybe_unused int swapz_round090_storage_flush(void *opaque)
 			.extent = entry->observation_extent, .status = swapz_scope_status(error),
 		};
 
-		(void)swapz_trial_observation_append(&record);
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 #endif
 	return error;
@@ -11740,9 +11840,17 @@ static __maybe_unused int swapz_round091_read_original(struct swapz_authority *a
 /* One ordered owner, one authoritative pin and four disjoint pages.
  * Never refresh the captured epoch for an old pin or consult ordinary cache.
  */
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+static u64 swapz_scope_observe_read_pin(struct swapz_dm *, struct bio *, u32, u64, bool);
+static void swapz_scope_observe_read_release(struct bio *, u64, int);
+#endif
 static int swapz_round097_read_original_pinned(struct swapz_dm *ctx,
 		swapz_u32 logical, swapz_u8 *compressed, swapz_u8 *output,
-		swapz_u64 *retained_pin)
+		swapz_u64 *retained_pin
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		, struct bio *bio, u64 *observation_pin, bool independent
+#endif
+		)
 {
 	struct swapz_shared_storage_decoder *storage = ctx->original_gated_storage;
 	swapz_u64 pin, epoch;
@@ -11758,21 +11866,160 @@ static int swapz_round097_read_original_pinned(struct swapz_dm *ctx,
 	error = swapz_shared_original_pin(&ctx->authority, logical, &pin);
 	if (error)
 		return error;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	*observation_pin = swapz_scope_observe_read_pin(ctx, bio, logical, pin, independent);
+#endif
 	error = swapz_shared_storage_decoder_read(storage, epoch, pin, compressed,
 		ctx->original_decode_scratch, ctx->original_decode_verified,
 		output, SWAPZ_BLOCK_BYTES);
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (*observation_pin && !ctx->observation_read_seen)
+		swapz_scope_observe_invalid();
+	ctx->observation_read_operation = 0;
+	ctx->observation_read_extent = 0;
+	ctx->observation_read_seen = false;
+#endif
 	if (!error) {
 		*retained_pin = pin;
 		return 0;
 	}
 	release_error = swapz_shared_original_put(&ctx->authority, pin);
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	swapz_scope_observe_read_release(bio, *observation_pin, release_error);
+#endif
 	return release_error ? release_error : error;
 }
 #endif
 /* ROUND091_TYPED_READ_END */
 #endif
 
-static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+/* Ordered READ only; map-time classification would race preceding writes.
+ * The pin resolves the authoritative original record, not decoder scratch.
+ * Only exact single-page BIO shapes are witnessed by this bounded subset. */
+static u64 swapz_scope_observe_read_pin(struct swapz_dm *ctx, struct bio *bio,
+		u32 logical, u64 authority_pin, bool independent)
+{
+	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	const struct swapz_shared_original_record *pinned;
+	struct swapz_observation_record record = {};
+	swp_entry_t slot;
+	u64 operation = 0, original = 0, clone, descriptor, pin;
+	unsigned int index;
+
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!entry->observation_read_selected || !swapz_trial_observation_active())
+		return 0;
+	if (!swapz_trial_byte_active())
+		goto incomplete;
+	if (!logical || logical > SWAPZ_ROUND094_GENERATION_PAGES ||
+	    entry->observation_operation)
+		goto incomplete;
+	index = logical - 1U;
+	pinned = swapz_shared_original_view(&ctx->authority, authority_pin);
+	if (!pinned || !ctx->observation_extent_by_page[index].extent ||
+	    ctx->observation_extent_by_page[index].generation != ctx->maps[logical].generation ||
+	    ctx->observation_extent_by_page[index].gc_epoch != pinned->spec.gc_epoch ||
+	    pinned->spec.logical_page != logical || !pinned->spec.compressed_length ||
+	    pinned->spec.compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    pinned->map.payload_offset != 0 || ctx->observation_read_operation)
+		goto incomplete;
+	slot.val = pinned->spec.source_swap_slot;
+	clone = swapz_trial_observation_mint();
+	descriptor = swapz_trial_observation_mint();
+	pin = swapz_trial_observation_mint();
+	if (!clone || !descriptor || !pin ||
+	    !dm_swapz_trial_observation_origin(ctx->target, bio, &operation, &original))
+		goto incomplete;
+	entry->observation_operation = operation;
+	entry->observation_original = original;
+	entry->observation_clone = clone;
+	entry->observation_descriptor = descriptor;
+	record = (struct swapz_observation_record){
+		.event = SWAPZ_OBS_ACCEPT, .operation = operation,
+		.operation_kind = SWAPZ_OBS_TYPED_READ, .original = original,
+		.clone = clone, .descriptor = descriptor, .logical = logical,
+	};
+	swapz_scope_observe_event(&record, NULL, 0);
+	/* v2 noncapture ACCEPT has zero source fields. The actual pinned
+	 * authority supplies the source key at PIN, not at ACCEPT. */
+	swapz_scope_observe_simple(entry, SWAPZ_OBS_DISPATCH, independent ? 2U : 1U, 0);
+	record = (struct swapz_observation_record){
+		.event = SWAPZ_OBS_PIN, .operation = operation, .pin = pin,
+		.extent = ctx->observation_extent_by_page[index].extent,
+		.gc_epoch = pinned->spec.gc_epoch, .logical = logical,
+		.slot = swp_offset(slot), .swap_type = swp_type(slot),
+		.area_epoch = pinned->spec.source_entry_identity,
+		.store = pinned->spec.source_store_generation,
+		.generation = ctx->maps[logical].generation,
+	};
+	swapz_scope_observe_event(&record, NULL, 0);
+	ctx->observation_read_operation = operation;
+	ctx->observation_read_extent = record.extent;
+	ctx->observation_read_block = pinned->map.start_block;
+	ctx->observation_read_length = pinned->spec.compressed_length;
+	memcpy(ctx->observation_read_sha256,
+	       ctx->observation_extent_by_page[index].compressed_sha256, 32);
+	ctx->observation_read_seen = false;
+	return pin;
+incomplete:
+	swapz_scope_observe_invalid();
+	return 0;
+}
+
+static void swapz_scope_observe_read_release(struct bio *bio, u64 observation_pin, int error)
+{
+	const struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	const struct swapz_observation_record record = {
+		.event = SWAPZ_OBS_PIN_RELEASE, .operation = entry->observation_operation,
+		.pin = observation_pin, .status = swapz_scope_status(error),
+	};
+
+	if (observation_pin)
+		swapz_scope_observe_event(&record, NULL, 0);
+}
+
+static void swapz_scope_observe_read_copy(struct swapz_dm *ctx, struct bio *bio,
+		u64 authority_pin, u64 observation_pin, int error)
+{
+	const struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	const struct swapz_shared_original_record *pinned;
+	struct swapz_observation_record record = {};
+	void *mapped;
+	const u8 *bytes;
+
+	if (!observation_pin)
+		return;
+	lockdep_assert_held(&ctx->ordered_owner);
+	pinned = swapz_shared_original_view(&ctx->authority, authority_pin);
+	if (error || !pinned)
+		goto incomplete;
+	bytes = swapz_map_single_bio_input(bio, &mapped);
+	if (!bytes)
+		goto incomplete;
+	record = (struct swapz_observation_record){
+		.event = SWAPZ_OBS_ORACLE, .operation = entry->observation_operation,
+		.pin = observation_pin, .decoded_length = SWAPZ_BLOCK_BYTES,
+		.compared = SWAPZ_BLOCK_BYTES, .flags = 1,
+	};
+	memcpy(record.page_sha256, pinned->spec.original_sha256, 32);
+	sha256(bytes, SWAPZ_BLOCK_BYTES, record.observed_sha256);
+	if (memcmp(bytes, ctx->read_page, SWAPZ_BLOCK_BYTES) ||
+	    memcmp(record.page_sha256, record.observed_sha256, 32))
+		record.status = EBADMSG;
+	swapz_scope_observe_event(&record, bytes, SWAPZ_BLOCK_BYTES);
+	kunmap_local(mapped);
+	return;
+incomplete:
+	swapz_scope_observe_invalid();
+}
+#endif
+
+static int swapz_read(struct swapz_dm *ctx, struct bio *bio
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		, bool independent
+#endif
+		)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	const struct swapz_map *map = &ctx->maps[logical];
@@ -11782,6 +12029,9 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 	u64 original_pin = 0;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	u64 observation_pin = 0;
+#endif
 
 	/* Never interpret the typed original namespace as predictor/RAW/LZ4
 	 * or consult ordinary caches. Decode using the frozen pinned lease.
@@ -11789,7 +12039,11 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 	if (map->state & SWAPZ_MAP_ORIGINAL) {
 #if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
 		error = swapz_round097_read_original_pinned(ctx, logical,
-			ctx->read_compressed, ctx->read_page, &original_pin);
+			ctx->read_compressed, ctx->read_page, &original_pin
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+			, bio, &observation_pin, independent
+#endif
+			);
 #else
 		error = swapz_round096_read_original_pinned(&ctx->authority,
 			ctx->original_storage, ctx->original_decoder_bridge, logical,
@@ -11876,11 +12130,26 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 		 * never use the decoded scratch as a successful byte oracle.
 		 * Loss applies even when the final copy itself succeeded.
 		 */
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		swapz_scope_observe_read_copy(ctx, bio, original_pin, observation_pin, error);
+#else
 		swapz_scope_observe_invalid();
 #endif
+#endif
 		release_error = swapz_shared_original_put(&ctx->authority, original_pin);
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		swapz_scope_observe_read_release(bio, observation_pin, release_error);
+#endif
 		if (!error)
 			error = release_error;
+	}
+#endif
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (!original_pin && swapz_trial_observation_active()) {
+		const struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+		if (entry->observation_read_selected)
+			swapz_scope_observe_invalid(); /* v2 has no ordinary READ kind */
 	}
 #endif
 	if (!error)
@@ -13051,6 +13320,9 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
 		const struct swapz_mm_trial_scope *scope
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 		, struct file *mapper_file
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		, u64 registration_epoch
+#endif
 #endif
 		)
 {
@@ -13073,6 +13345,9 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 	    ctx->original_retained_scope.identity || ctx->original_scope_file ||
 	    ctx->original_scope_capture_stopped || !mapper_file ||
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	    registration_epoch != ctx->original_route.registration_epoch ||
+#endif
 #endif
 	    ctx->original_scope.identity || scope->session <= ctx->original_scope_used_session ||
 	    scope->broker != ctx->original_cap.broker ||
@@ -13096,6 +13371,9 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
 	 */
 	rcu_read_lock();
 	if (dm_swapz_round090_route_live(ctx->target, scope->bdev, scope->first_sector) &&
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	    swapz_mm_trial_scope_matches_exact(scope, mapper_file) &&
+#endif
 	    swapz_mm_trial_scope_matches_route(scope->bdev, scope->first_sector,
 		scope->area_epoch, scope->swap_type, SWAPZ_TICKET_LZ4, 1U, &route))
 		error = 0;
@@ -13122,7 +13400,11 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
  * A failed target install releases only this attempt's file reference, not
  * the caller's independently published MM scope. No sleeping under queue_lock. */
 static __used noinline int swapz_scope_install(struct swapz_dm *ctx,
-		const struct swapz_mm_trial_scope *scope, struct file *mapper_file)
+		const struct swapz_mm_trial_scope *scope, struct file *mapper_file
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		, u64 registration_epoch
+#endif
+		)
 {
 	unsigned long flags;
 	int error;
@@ -13135,12 +13417,27 @@ static __used noinline int swapz_scope_install(struct swapz_dm *ctx,
 		return -EINVAL;
 	get_file(mapper_file);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	error = swapz_scope_install_locked(ctx, scope, mapper_file);
+	error = swapz_scope_install_locked(ctx, scope, mapper_file
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+			, registration_epoch
+#endif
+			);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	if (error)
 		fput(mapper_file);
 	return error;
 }
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+/* Synchronous controller callback. No retained function or raw target
+ * pointer; the independently admitted caller owns the live target/table
+ * through this call. Not registered, exported or reachable from userspace. */
+static __used noinline int swapz_scope_install_controller(void *context,
+		const struct swapz_mm_trial_scope *scope, struct file *mapper_file,
+		u64 registration_epoch)
+{
+	return swapz_scope_install(context, scope, mapper_file, registration_epoch);
+}
+#endif
 #endif
 #endif
 /* ROUND098_SCOPE_END */
@@ -13319,7 +13616,18 @@ static bool swapz_scope_transaction(struct swapz_dm *ctx,
 
 		memcpy(record.compressed_sha256, entry->observation_compressed_sha256, 32);
 		memcpy(record.page_sha256, key->sha256, 32);
-		(void)swapz_trial_observation_append(&record);
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		if (key->logical_page && key->logical_page <= SWAPZ_ROUND094_GENERATION_PAGES) {
+			unsigned int index = (unsigned int)key->logical_page - 1U;
+
+			ctx->observation_extent_by_page[index].extent = entry->observation_extent;
+			ctx->observation_extent_by_page[index].gc_epoch = spec->gc_epoch;
+			ctx->observation_extent_by_page[index].generation = (u32)key->dm_generation;
+			memcpy(ctx->observation_extent_by_page[index].compressed_sha256,
+			       entry->observation_compressed_sha256, 32);
+		}
+#endif
+		swapz_scope_observe_event(&record, NULL, 0);
 	}
 #endif
 	return true;
@@ -13541,7 +13849,11 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		u64 read_start_ns = ktime_get_ns();
 		u64 lower_reqs_before = ctx->lower_read_submitted_reqs;
 
-		error = swapz_read(ctx, bio);
+		error = swapz_read(ctx, bio
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+			, true
+#endif
+			);
 		if (error) {
 			swapz_fail_at(ctx, error, "read",
 				      swapz_failure_category(error),
@@ -13672,7 +13984,11 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		}
 		return;
 	case REQ_OP_READ:
-		error = swapz_read(ctx, bio);
+		error = swapz_read(ctx, bio
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+			, false
+#endif
+			);
 		if (!error && ctx->retain_ms)
 			swapz_refresh_accepted_followup(ctx);
 		break;
@@ -15605,7 +15921,11 @@ static void swapz_round090_unpublish_target(struct swapz_dm *ctx)
 	release_cap = ctx->original_cap.broker != NULL;
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 	/* Registry removal joins readers, not retained scope or external debt. */
-	if (ctx->original_retained_scope.identity || ctx->original_scope_file)
+	if ((ctx->original_retained_scope.identity || ctx->original_scope_file)
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	    && !ctx->original_scope_mm_revoked
+#endif
+	   )
 		release_cap = false;
 #endif
 	if (release_cap) {
@@ -15884,6 +16204,10 @@ static int swapz_round094_setup(struct swapz_dm *ctx)
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 	if (ctx->original_retained_scope.identity || ctx->original_scope_file)
 		return -EBUSY;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (ctx->original_scope_used_session)
+		return -EALREADY; /* one-shot; no new owner after exact retirement */
+#endif
 #endif
 	if (ctx->original_cap.broker)
 		return -EALREADY;
@@ -16041,7 +16365,11 @@ static void swapz_round094_teardown_work(struct work_struct *work)
 
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 	/* Defense in depth for all callers: no external join, no close. */
-	if (ctx->original_retained_scope.identity || ctx->original_scope_file) {
+	if ((ctx->original_retained_scope.identity || ctx->original_scope_file)
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	    && !ctx->original_scope_mm_revoked
+#endif
+	   ) {
 		if (!ctx->original_teardown_error)
 			ctx->original_teardown_error = -EBUSY;
 		return;
@@ -16336,6 +16664,13 @@ static void swapz_scope_observe_plain_accept_locked(struct swapz_dm *ctx,
 	if (!swapz_scope_route_ready_locked(ctx, bio->bi_bdev,
 			bio->bi_iter.bi_sector))
 		goto incomplete;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	/* The ordered execution path selects typed READ, after earlier writes. */
+	if (bio_op(bio) == REQ_OP_READ) {
+		entry->observation_read_selected = true;
+		return;
+	}
+#endif
 	/* Mint target tokens first; never leave core lineage installed
 	 * just because a later target token allocation failed.
 	 */
@@ -16366,7 +16701,18 @@ static void swapz_scope_observe_plain_accept_locked(struct swapz_dm *ctx,
 			.logical = (u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS),
 		};
 
-		(void)swapz_trial_observation_append(&record);
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		if (kind == SWAPZ_OBS_ORDINARY_WRITE) {
+			void *mapped;
+			const u8 *input = swapz_map_single_bio_input(bio, &mapped);
+
+			if (!input)
+				goto incomplete;
+			swapz_scope_observe_event(&record, input, SWAPZ_BLOCK_BYTES);
+			kunmap_local(mapped);
+		} else
+#endif
+			swapz_scope_observe_event(&record, NULL, 0);
 	}
 	/* Ordinary lower/publish/discard lineage and independent byte
 	 * collection are not yet connected. Never certify a partial trace.
@@ -16499,6 +16845,9 @@ map_entry:
 	entry->observation_clone = 0;
 	entry->observation_descriptor = 0;
 	entry->observation_extent = 0;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	entry->observation_read_selected = false;
+#endif
 	if (map_refusal != DM_MAPIO_SUBMITTED) {
 		swapz_scope_observe_map_refusal(ctx, bio);
 		return map_refusal;
@@ -16863,6 +17212,10 @@ static void swapz_scope_stop_capture(struct swapz_dm *ctx)
 
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	identity = ctx->original_retained_scope.identity;
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (ctx->original_scope_mm_revoked)
+		identity = 0; /* actual prior revoke, not an ESTALE normalization */
+#endif
 	if (identity)
 		ctx->original_scope_capture_stopped = true;
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -16888,6 +17241,81 @@ static bool swapz_scope_external_join_missing(const struct swapz_dm *ctx)
 {
 	return ctx->original_retained_scope.identity != 0 || ctx->original_scope_file != NULL;
 }
+
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+/* Called only after local ingress, registry grace, worker/candidate and
+ * lower joins in drain. A normal suspend must preserve typed mappings:
+ * do not discard live records merely to make the retirement gate pass.
+ * If they remain, the owner must arrange a genuine final table retirement
+ * outside this path. Keep the old identity/cap/file on every failed join. */
+static int swapz_scope_finish_retained(struct swapz_dm *ctx)
+{
+	struct swapz_shared_storage_decoder *storage = ctx->original_gated_storage;
+	struct file *mapper;
+	unsigned long flags;
+	unsigned int index;
+	int error;
+
+	if (!ctx->original_retained_scope.identity || !ctx->original_scope_file ||
+	    !ctx->original_target_drained || ctx->accepting || ctx->failed ||
+	    ctx->original_listed || ctx->original_route.registration_epoch ||
+	    ctx->original_snapshot_epoch || ctx->original_release_ref.broker ||
+	    atomic_read(&ctx->original_release_busy) || ctx->gc_recovery.active ||
+	    ctx->authority.gc_allocation || ctx->authority.in_flight ||
+	    ctx->authority.batch_pending)
+		return -EBUSY;
+	if (!ctx->original_scope_mm_revoked) {
+		if (!storage || !ctx->original_storage_ready ||
+		    ctx->authority.original != &storage->storage.owner ||
+		    storage->storage.pending_decoder)
+			return -EBUSY;
+		mutex_lock(&ctx->ordered_owner);
+		for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index) {
+			const struct swapz_shared_original_record *record =
+				&storage->storage.owner.records[index];
+
+			if (record->decoder || record->pins || storage->storage.owner.pins[index].id)
+				break;
+		}
+		mutex_unlock(&ctx->ordered_owner);
+		if (index != SWAPZ_SHARED_ORIGINAL_CAPACITY)
+			return -EBUSY;
+		error = swapz_trial_controller_revoke_joined(&ctx->original_retained_scope);
+		if (error)
+			goto failure;
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		ctx->original_scope_mm_revoked = true;
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	}
+	/* Release the target cap only after actual MM revoke. Never wait for
+	 * old-owner retirement while holding the cap that prevents it. */
+	swapz_round090_unpublish_target(ctx);
+	queue_work(system_unbound_wq, &ctx->original_teardown_work);
+	flush_work(&ctx->original_teardown_work);
+	if (!swapz_round097_target_debt_free(ctx) || ctx->original_owner_session ||
+	    ctx->original_owner_epoch || ctx->original_owner_closing) {
+		error = ctx->original_teardown_error ? ctx->original_teardown_error : -EBUSY;
+		goto failure;
+	}
+	error = swapz_trial_controller_finish(&ctx->original_retained_scope);
+	if (error)
+		goto failure;
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	mapper = ctx->original_scope_file;
+	ctx->original_scope_file = NULL;
+	ctx->original_retained_scope = (struct swapz_trial_retained_scope){};
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	fput(mapper);
+	return 0;
+failure:
+	if (error != -EBUSY) {
+		if (!ctx->original_scope_finish_error)
+			ctx->original_scope_finish_error = error;
+		swapz_scope_observe_invalid();
+	}
+	return error;
+}
+#endif
 #endif
 
 static void swapz_drain(struct dm_target *ti)
@@ -17010,10 +17438,12 @@ static void swapz_drain(struct dm_target *ti)
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 		if (swapz_scope_external_join_missing(ctx)) {
 			/* Preserve scope ownership; no synthetic external join. */
+#if !defined(SWAPZ_ROUND104_INTEGRATION_TEST)
 			if (!ctx->original_teardown_error)
 				ctx->original_teardown_error = ctx->original_scope_stop_error ?
 					ctx->original_scope_stop_error : -EBUSY;
 			swapz_scope_observe_invalid();
+#endif
 		} else
 #endif
 		{
@@ -17030,6 +17460,18 @@ static void swapz_drain(struct dm_target *ti)
 		if (error)
 			swapz_fail(ctx, error);
 	}
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	if (swapz_scope_external_join_missing(ctx)) {
+		int error = swapz_scope_finish_retained(ctx);
+
+		if (error && !ctx->original_scope_finish_error && error != -EBUSY)
+			ctx->original_scope_finish_error = error;
+		/* Busy is outstanding real debt, not permission to reopen.
+		 * Terminal error remains separate from transient teardown retry. */
+		if (error && !ctx->original_teardown_error)
+			ctx->original_teardown_error = error;
+	}
+#endif
 }
 
 static void swapz_resume(struct dm_target *ti)
@@ -17051,6 +17493,9 @@ static void swapz_resume(struct dm_target *ti)
 	if (ctx->original_trial && !READ_ONCE(ctx->failed)
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 	    && !swapz_scope_external_join_missing(ctx)
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	    && !ctx->original_scope_used_session
+#endif
 #endif
 	   ) {
 		queue_work(system_unbound_wq, &ctx->original_setup_work);

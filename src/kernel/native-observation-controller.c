@@ -23,3 +23,234 @@ int swapz_trial_controller_stop_capture(u64 identity)
 	return error == -EALREADY ? 0 : error;
 }
 EXPORT_SYMBOL_GPL(swapz_trial_controller_stop_capture);
+
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+#ifndef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
+#error "Cold controller requires exact staged external join"
+#endif
+#include "native-observation-owner.h"
+#include "native-observation-integration.h"
+#include "zswap-original-ticket.h"
+#include <linux/file.h>
+#include <linux/fs.h>
+#include <linux/mutex.h>
+
+/* Built-in lifetime, serialized control, one shot. No retained callback,
+ * target/module/table pointer or caller-owned scope pointer. After recorder
+ * publication a failed startup is retained; an absent or failed external
+ * witness is never evidence that rollback is safe. */
+static DEFINE_MUTEX(swapz_controller_lock);
+static struct swapz_mm_trial_scope swapz_controller_scope;
+static struct file *swapz_controller_mapper;
+static u64 swapz_controller_registration;
+static bool swapz_controller_used, swapz_controller_published;
+static bool swapz_controller_external_joined, swapz_controller_mm_revoked;
+static int swapz_controller_first_error;
+
+int swapz_trial_controller_begin(const struct swapz_mm_trial_scope *scope,
+		const struct swapz_trial_observation_scope *observation,
+		struct file *mapper_file, size_t capacity,
+		swapz_trial_target_install install, void *context)
+{
+	struct swapz_mm_trial_scope selected;
+	struct file *area_file = NULL;
+	u32 type;
+	u64 epoch;
+	int error;
+
+	if (!scope || !observation || !mapper_file || !install ||
+	    !scope->identity || !scope->broker || !scope->session ||
+	    !scope->table_epoch || !scope->target_epoch || !scope->bdev ||
+	    !S_ISBLK(file_inode(mapper_file)->i_mode) ||
+	    file_bdev(mapper_file) != scope->bdev || bdev_is_partition(scope->bdev) ||
+	    !scope->first_sector || scope->first_sector % 8 ||
+	    !scope->sector_count || scope->sector_count % 8 ||
+	    scope->sector_count > 16 * 8 ||
+	    scope->first_sector > bdev_nr_sectors(scope->bdev) ||
+	    scope->sector_count > bdev_nr_sectors(scope->bdev) - scope->first_sector ||
+	    scope->session != observation->session ||
+	    scope->table_epoch != observation->epoch ||
+	    scope->target_epoch != observation->target_epoch ||
+	    !observation->registration_epoch ||
+	    scope->first_sector / 8 != observation->first_logical ||
+	    scope->sector_count / 8 != observation->page_count ||
+	    !capacity || capacity > SWAPZ_OBSERVATION_MAX_RECORDS)
+		return -EINVAL;
+	selected = *scope;
+	mutex_lock(&swapz_controller_lock);
+	if (swapz_controller_used) {
+		error = -EALREADY;
+		goto unlock;
+	}
+	error = swapz_mm_trial_area_get(mapper_file, selected.first_sector,
+		selected.sector_count, &type, &epoch, &area_file);
+	if (error)
+		goto unlock;
+	if (selected.swap_type != type || selected.area_epoch != epoch) {
+		error = -ESTALE;
+		goto put_area;
+	}
+	/* No MM capture can precede byte-gate bind. MM publish independently
+	 * revalidates and retains the actual area and mapper references. */
+	if (!swapz_trial_observation_start(observation, capacity)) {
+		error = -EBUSY;
+		goto put_area;
+	}
+	swapz_controller_used = true;
+	swapz_controller_scope = selected;
+	swapz_controller_registration = observation->registration_epoch;
+	get_file(mapper_file);
+	swapz_controller_mapper = mapper_file;
+	if (!swapz_trial_byte_bind_scope(selected.identity, type, epoch)) {
+		error = -EIO;
+		goto retain;
+	}
+	error = swapz_mm_trial_scope_publish(&selected, mapper_file);
+	if (error)
+		goto retain;
+	swapz_controller_published = true;
+	if (!swapz_mm_trial_scope_matches_exact(&selected, mapper_file)) {
+		error = -ESTALE;
+		goto retain;
+	}
+	error = install(context, &selected, mapper_file, observation->registration_epoch);
+	if (!error)
+		goto put_area;
+retain:
+	if (!swapz_controller_first_error)
+		swapz_controller_first_error = error;
+	swapz_trial_byte_invalidate();
+	(void)swapz_trial_observation_append(NULL);
+	if (swapz_controller_published)
+		(void)swapz_trial_controller_stop_capture(selected.identity);
+	/* A failed publish can itself retain MM debt. No forced revoke or
+	 * recorder free; retain the exact identity and counted mapper. */
+put_area:
+unlock:
+	mutex_unlock(&swapz_controller_lock);
+	if (area_file)
+		fput(area_file);
+	return error;
+}
+
+/* All control callers hold the same cold serialization lock. No caller
+ * boolean can substitute for the actual MM/core and old-owner witnesses. */
+static bool swapz_controller_matches_locked(const struct swapz_trial_retained_scope *retained)
+{
+	lockdep_assert_held(&swapz_controller_lock);
+	return retained && retained->identity && swapz_controller_published &&
+	       swapz_controller_mapper &&
+	       retained->identity == swapz_controller_scope.identity &&
+	       retained->session == swapz_controller_scope.session &&
+	       retained->epoch == swapz_controller_scope.table_epoch &&
+	       retained->target_epoch == swapz_controller_scope.target_epoch &&
+	       retained->registration_epoch == swapz_controller_registration;
+}
+
+static void swapz_controller_record_error(int error)
+{
+	lockdep_assert_held(&swapz_controller_lock);
+	if (error && error != -EBUSY) {
+		if (!swapz_controller_first_error)
+			swapz_controller_first_error = error;
+		swapz_trial_byte_invalidate();
+		(void)swapz_trial_observation_append(NULL);
+	}
+}
+
+static int swapz_controller_join_locked(const struct swapz_trial_retained_scope *retained)
+{
+	int error;
+
+	lockdep_assert_held(&swapz_controller_lock);
+	if (!swapz_controller_matches_locked(retained))
+		return -ESTALE;
+	if (swapz_controller_external_joined)
+		return 0;
+	error = swapz_trial_controller_stop_capture(retained->identity);
+	if (!error)
+		error = swapz_mm_trial_scope_join_external(retained->identity,
+			retained->session, retained->epoch, retained->target_epoch);
+	if (!error)
+		swapz_controller_external_joined = true;
+	return error;
+}
+
+/* Genuine external MM/core witness only; no target or broker debt proof. */
+int swapz_trial_controller_join_external(const struct swapz_trial_retained_scope *retained)
+{
+	int error;
+
+	mutex_lock(&swapz_controller_lock);
+	error = swapz_controller_join_locked(retained);
+	swapz_controller_record_error(error);
+	mutex_unlock(&swapz_controller_lock);
+	return error;
+}
+
+/* Actual target drain calls this only after local ingress/provider/worker/
+ * candidate and lower joins. MM independently proves retired area and
+ * terminal completion. Keep the recorder available for all terminal events.
+ * This negative-only interface never starts or reopens a scope. */
+int swapz_trial_controller_revoke_joined(const struct swapz_trial_retained_scope *retained)
+{
+	int error;
+
+	mutex_lock(&swapz_controller_lock);
+	error = swapz_controller_join_locked(retained);
+	if (!error && !swapz_controller_mm_revoked) {
+		error = swapz_mm_trial_scope_revoke(retained->identity);
+		if (!error)
+			swapz_controller_mm_revoked = true;
+	}
+	swapz_controller_record_error(error);
+	mutex_unlock(&swapz_controller_lock);
+	return error;
+}
+EXPORT_SYMBOL_GPL(swapz_trial_controller_revoke_joined);
+
+/* Called by the recorder stop owner synchronously under both cold locks;
+ * do not acquire either lock again. Exact broker retirement independently
+ * joins the permanent retry work after target and MM caps are released. */
+static bool swapz_controller_recorder_join(void *context)
+{
+	const struct swapz_trial_retained_scope *retained = context;
+
+	lockdep_assert_held(&swapz_controller_lock);
+	return swapz_controller_matches_locked(retained) &&
+	       swapz_controller_external_joined && swapz_controller_mm_revoked &&
+	       !swapz_mm_broker_owner_retired(retained->session, retained->epoch);
+}
+
+int swapz_trial_controller_finish(const struct swapz_trial_retained_scope *retained)
+{
+	struct file *mapper = NULL;
+	int error = -ESTALE;
+
+	mutex_lock(&swapz_controller_lock);
+	if (!swapz_controller_matches_locked(retained))
+		goto unlock;
+	error = -EBUSY;
+	if (!swapz_controller_external_joined || !swapz_controller_mm_revoked)
+		goto unlock;
+	error = swapz_mm_broker_owner_retired(retained->session, retained->epoch);
+	if (error)
+		goto unlock;
+	/* No CLEANUP record is synthesized. Sealing the recorder does not
+	 * imply a clean trace; owner retains it for independent export. */
+	if (!swapz_trial_observation_stop(swapz_controller_recorder_join, (void *)retained)) {
+		error = -EUCLEAN;
+		goto unlock;
+	}
+	mapper = swapz_controller_mapper;
+	swapz_controller_mapper = NULL;
+	error = 0;
+unlock:
+	swapz_controller_record_error(error);
+	mutex_unlock(&swapz_controller_lock);
+	if (mapper)
+		fput(mapper);
+	return error;
+}
+EXPORT_SYMBOL_GPL(swapz_trial_controller_finish);
+#endif
