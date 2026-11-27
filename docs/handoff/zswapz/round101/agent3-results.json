@@ -1,7 +1,7 @@
 {
   "round": 101,
   "agent": 3,
-  "status": "PROGRESS_HOST_PASS_NATIVE_PREREQUISITE_FAILED_CORRECTION_PENDING",
+  "status": "FOCUSED_TARGET_OBJECT_PASS_HISTORICAL_COMPOSITION_BLOCKED",
   "task": "f3e2a20dd9b17feb677f732e6f5088ff263822fa",
   "freeze": "28ffacb0a50fede481d010c0b688271badbbae6e",
   "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
@@ -78,75 +78,96 @@
     }
   },
   "followup_ci": {
-    "census": {
-      "queued": 28,
-      "in_progress": 2
-    },
     "focused": {
       "run": 45921767790,
       "jobs": [
         {
           "id": 140253903354,
           "name": "actual-target-object",
-          "status": "in_progress",
-          "conclusion": null,
-          "steps": [
-            {
-              "name": "Set up job",
-              "status": "completed",
-              "conclusion": "success"
-            },
-            {
-              "name": "Run actions/checkout@v4",
-              "status": "completed",
-              "conclusion": "success"
-            },
-            {
-              "name": "Exact source and complete standards prefix",
-              "status": "completed",
-              "conclusion": "success"
-            },
-            {
-              "name": "Provision genuine compiler and kernel build prerequisites (runner only)",
-              "status": "in_progress",
-              "conclusion": null
-            },
-            {
-              "name": "Run actions/checkout@v4",
-              "status": "pending",
-              "conclusion": null
-            },
-            {
-              "name": "Run actions/checkout@v4",
-              "status": "pending",
-              "conclusion": null
-            },
-            {
-              "name": "Check exact stage, serial host and changed target object",
-              "status": "pending",
-              "conclusion": null
-            },
-            {
-              "name": "Retain bounded evidence",
-              "status": "pending",
-              "conclusion": null
-            },
-            {
-              "name": "Post Run actions/checkout@v4",
-              "status": "pending",
-              "conclusion": null
-            }
-          ]
+          "status": "completed",
+          "conclusion": "success"
         }
       ]
     },
-    "r092": 45921767780,
-    "r094": 45921768008,
-    "prior_host_function_bytes_checked_in_new_job": "PENDING",
-    "new_refusal_only": "PENDING",
-    "native": "PENDING",
-    "config": null,
-    "artifact": null
+    "r092": {
+      "run": 45921767780,
+      "job": 140253903049,
+      "conclusion": "failure",
+      "first_error": "ROUND091_FIRST_ERROR ordered claim lock gate",
+      "artifact": {
+        "id": 15165345000,
+        "bytes": 417,
+        "sha256": "4d388c8cf6073685a6a91098aa60af8bac55d8c9c21dfe44098080dfbd97b06d"
+      },
+      "diagnosis": "Historical verifier slices from swapz_round091_claim_reserved through next process_candidate, including intervening R098 transaction storage reserve/cancel/commit; entire exact slice byte-identical between frozen and corrected source. R089 canonical enqueue and 34 typed source mutations passed. Historical auditor untouched; no claim of composition PASS."
+    },
+    "r094": {
+      "run": 45921768008,
+      "job": 140253904212,
+      "conclusion": "success",
+      "checks_per_compiler": 50
+    },
+    "prior_host_function_bytes_checked_in_new_job": "PASS",
+    "new_refusal_only": {
+      "gcc": 21,
+      "clang": 21,
+      "sanitizers": [
+        "ASan",
+        "UBSan"
+      ],
+      "scope": "serial host primitives; not native concurrency"
+    },
+    "native": {
+      "status": "PASS",
+      "attempts": 1,
+      "object": "dm-target.o",
+      "bytes": 227088,
+      "blob": "cfe205f6f9bd170d078cabc5e1cd4437186e0629",
+      "sha256": "d834c5cbe60be7e3815a0cc8b4297e7ac98a6651f9160a6f8f63d872c8e64025",
+      "gcc_package": "4:13.2.0-7ubuntu1",
+      "full_link": "NOT_RUN_NOT_ALLOWED",
+      "first_error": null
+    },
+    "config": {
+      "base": "allnoconfig",
+      "arch": "x86_64",
+      "required_y": [
+        "64BIT",
+        "X86_64",
+        "SMP",
+        "TREE_RCU",
+        "MMU",
+        "BLOCK",
+        "SWAP",
+        "ZSWAP",
+        "MD",
+        "BLK_DEV_DM",
+        "MODULES",
+        "CRYPTO_LZO",
+        "CRYPTO_LZ4",
+        "CRYPTO_SHA256",
+        "CRYPTO_LIB_SHA256",
+        "CRYPTO_CRC32C",
+        "LZ4_COMPRESS",
+        "LZ4_DECOMPRESS",
+        "LZO_DECOMPRESS",
+        "CRC32",
+        "SWAPZ_ORIGINAL_MM_CARRIER_TEST"
+      ],
+      "nr_cpus": 4,
+      "tiny_rcu": false,
+      "raw_config": "effective.config in artifact; not independently downloaded"
+    },
+    "artifact": {
+      "id": 15165270292,
+      "bytes": 122804,
+      "sha256": "7719c1b483d55703f76185c9ed7d0f80a6ba050cabf0d39aa6c0cf56db7a0e20",
+      "digest_source": "job log and GitHub artifact metadata agree; not independently downloaded"
+    },
+    "census_snapshot_only": {
+      "queued": 28,
+      "in_progress": 2
+    }
   },
   "standards": {
     "initial_parent": "00534afb736c0c3c609588a6801230809ab5dd0f",
@@ -186,5 +207,6 @@
   "vm": false,
   "module_load": false,
   "activation": false,
-  "physical_mutation": false
+  "physical_mutation": false,
+  "terminal_evidence_parent": "ae9e7fc0749ed22c8236df987992a34c0a99932e"
 }
