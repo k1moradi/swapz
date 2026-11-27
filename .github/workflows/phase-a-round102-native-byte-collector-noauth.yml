@@ -78,7 +78,8 @@ jobs:
             test "$(git hash-object "$path")" = "$(git rev-parse "$freeze:$path")"
           done
           test "$(git rev-parse "$freeze:src/kernel/native-observation-byte-bridge.c")" = 81b86699c4790672ab6d35f1ac6ddbc70b9a165d
-          test "$(git rev-parse HEAD^:src/kernel/native-observation-byte-bridge.c)" = 81b86699c4790672ab6d35f1ac6ddbc70b9a165d
+          test "$(git rev-parse 6243f45a5f0f8d432bcb3ee5769f227c65ec3345^:src/kernel/native-observation-byte-bridge.c)" = 81b86699c4790672ab6d35f1ac6ddbc70b9a165d
+          test "$(git hash-object src/kernel/native-observation-byte-bridge.c)" = 902507cb065828bfa9a8b732edd61fb26ca2f08d
           test "$(git hash-object src/kernel/native-observation-integration.h)" = e3bca3367459c7f79960105f63e9ddef4e95b4d6
           python3 -B - <<'PY'
           from pathlib import Path
@@ -209,36 +210,7 @@ jobs:
           make "${make_args[@]}" olddefconfig 2>&1 | tee "$evidence/olddefconfig.log"
           for key in SMP TREE_RCU MODULES MODULE_UNLOAD; do grep -qx "CONFIG_$key=y" "$build/.config"; done
           grep -qx 'CONFIG_NR_CPUS=4' "$build/.config"
-          if grep -Eq '^CONFIG_(TINY_RCU|MODULE_FORCE_UNLOAD)=y
-          cp "$build/.config" "$evidence/effective.config"
-          make "${make_args[@]}" -j2 modules_prepare 2>&1 | tee "$evidence/prepare.log"
-          for stem in native-observation-byte-bridge; do
-            make "${make_args[@]}" -j2 "mm/round108-byte-observation/$stem.o" \
-              2>&1 | tee "$evidence/$stem-object.log"
-            object="$build/mm/round108-byte-observation/$stem.o"
-            test -s "$object"
-            nm "$object" > "$evidence/$stem-symbols.txt"
-            cp "$object" "$evidence/$stem.o"
-          done
-          for symbol in active bind_scope stage_input finish_input event invalidate; do
-            grep -Eq " T swapz_trial_byte_$symbol$" "$evidence/native-observation-byte-bridge-symbols.txt"
-          done
-          for symbol in prepare abort close release export; do
-            grep -Eq " T swapz_byte_bridge_$symbol$" "$evidence/native-observation-byte-bridge-symbols.txt"
-            if grep -q "__ksymtab_swapz_byte_bridge_$symbol" "$evidence/native-observation-byte-bridge-symbols.txt"; then exit 1; fi
-          done
-          grep -F ' U swapz_byte_stop_after_join' "$evidence/native-observation-byte-bridge-symbols.txt"
-          (cd "$evidence"; sha256sum effective.config native-observation-*.o > SHA256SUMS; cat SHA256SUMS)
-          printf 'PASS directed changed bridge object only; AUTH=0 Phase A BLOCKED\n'
-      - name: Retain bounded redacted evidence only
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: round108-agent2-collector
-          path: ${{ runner.temp }}/round108-agent2/
-          if-no-files-found: warn
-          retention-days: 14
- "$build/.config"; then exit 1; fi
+          if grep -Eq '^CONFIG_(TINY_RCU|MODULE_FORCE_UNLOAD)=y$' "$build/.config"; then exit 1; fi
           cp "$build/.config" "$evidence/effective.config"
           make "${make_args[@]}" -j2 modules_prepare 2>&1 | tee "$evidence/prepare.log"
           for stem in native-observation-byte-bridge; do
