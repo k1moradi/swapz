@@ -2,7 +2,7 @@
   "round": 108,
   "agent": 2,
   "issue": 226,
-  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "status": "PASS_STRICT_TERMINAL_BYTE_HOST_AND_DIRECTED_BRIDGE_OBJECT_ONLY",
   "freeze": "f600b79e0e1a812cae4c1c0ae8ab9f68c3d34da3",
   "freeze_tree": "e577889d015f85115b1dc1a9845e472e95884c01",
   "task": "32e841f773cdf6fc0519f6747f255d7b4980a4f4",
@@ -56,7 +56,8 @@
     "corrected": "3ca5c4cba656aa9d7ffaa7cee8cf584935423d0c",
     "source_before_bytes": 1935222,
     "source_after_bytes": 1936753,
-    "exact_prefix_verified": true
+    "exact_prefix_verified": true,
+    "corrected_bytes": 1937111
   },
   "publication": {
     "main_only": true,
@@ -79,8 +80,8 @@
     "job": 140611454673,
     "attempt": 1,
     "source": "5ed7c52ceb03a503e57783bfc5b08bba8f38c6e6",
-    "status": "in_progress",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "success",
     "steps": [
       {
         "name": "Set up job",
@@ -109,36 +110,99 @@
       },
       {
         "name": "Run actions/checkout@v4",
-        "status": "in_progress",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "name": "Directed changed bridge object only, exact Linux SMP generated headers",
-        "status": "pending",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "name": "Retain bounded redacted evidence only",
-        "status": "pending",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "name": "Post Run actions/checkout@v4",
-        "status": "pending",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "name": "Post Run actions/checkout@v4",
-        "status": "pending",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "status": "completed",
+        "conclusion": "success"
       }
     ],
     "first_error": null,
-    "host_checks": null,
-    "mutants_killed": null,
-    "native_object": null,
-    "config_sha256": null,
-    "artifact": null
+    "host_checks": {
+      "gcc": 49,
+      "clang": 49,
+      "total": 98,
+      "actual_transition_modes_each": 13,
+      "extracted_historical_functions": 17,
+      "historical_initializer_shapes": 12,
+      "current_controller_shape": "PASS_SOURCE_ONLY",
+      "native_capture": false,
+      "compilers": {
+        "gcc": "13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1)",
+        "clang": "18.1.3 (Ubuntu 1ubuntu1)"
+      },
+      "flags": "-std=c2x -O2 -g -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie -pthread",
+      "compile_logs_empty": true
+    },
+    "mutants_killed": {
+      "gcc": 5,
+      "clang": 5,
+      "total": 10,
+      "modes": [
+        "pending_finish",
+        "unrepresented",
+        "late_finish_internal",
+        "quarantine_debt",
+        "close_pending"
+      ]
+    },
+    "native_object": {
+      "status": "PASS",
+      "name": "native-observation-byte-bridge.o",
+      "bytes": 19024,
+      "sha256": "5ff81dc0e1b8605c800cf345402e2b87452636f7b91a1b66fb8c734f346b47eb",
+      "elf_class": 64,
+      "elf_little_endian": true,
+      "elf_type": 1,
+      "elf_machine": 62,
+      "existing_trial_symbols_exported": 6,
+      "private_owner_symbols_not_exported": 5,
+      "collector_stop_after_join_import": true,
+      "full_link": "NOT_RUN_A2"
+    },
+    "config_sha256": "623c5c642fe5859ebcc5de43ba864317c22a98b6300c8150171858d0f0b93108",
+    "artifact": {
+      "id": 15213583264,
+      "bytes": 27032,
+      "sha256": "c9c3b0a4d19ee433be0a254f93b8128d4259840beffc88229517b8116e39b797",
+      "downloaded": true,
+      "crc_verified": true,
+      "member_hashes_verified": true,
+      "source_parent_and_manifest_verified": true,
+      "elf_and_symbols_verified": true
+    },
+    "config": {
+      "bytes": 40815,
+      "SMP": true,
+      "TREE_RCU": true,
+      "NR_CPUS": 4,
+      "MODULES": true,
+      "MODULE_UNLOAD": true,
+      "MODULE_FORCE_UNLOAD": false,
+      "TINY_RCU": false
+    }
   },
   "planned": {
     "host_compilers": [
@@ -163,14 +227,15 @@
   },
   "local": {
     "git_checkout": "BLOCKED_DNS",
-    "compiled": false
+    "compiled": false,
+    "artifact_inspection": "PASS"
   },
   "limitations": [
-    "Host and native directed results not yet qualified",
     "No actual native runtime/terminal CLEANUP or workload provenance",
     "White-box impossible debt is test-only; no production setter",
     "Historical claimed-error oracle unchanged; nonzero quarantine refuses current private delivery",
-    "A10 owns full build; no full link by A2"
+    "A10 owns full build; no full link by A2",
+    "Guard-off behavior retained in changed-source suite; no separate historical standalone guard-off rerun"
   ],
   "AUTH": 0,
   "phase_a": "BLOCKED",

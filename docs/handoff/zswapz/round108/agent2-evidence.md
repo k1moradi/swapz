@@ -1,6 +1,6 @@
 # Round 108 — Agent 2 evidence
 
-**SOURCE_PUBLISHED_QUALIFICATION_PENDING.** Issue #226; A1 owns integration/acceptance. This is an observed progress checkpoint, NOT host or native PASS.
+**PASS_STRICT_TERMINAL_BYTE_HOST_AND_DIRECTED_BRIDGE_OBJECT_ONLY.** Issue #226; A1 owns integration/acceptance. Terminal host/directed-only evidence; earlier progress snapshot preserved below.
 
 ## Exact source/publication
 
@@ -41,3 +41,18 @@ Corrected [run 46030111164/job 140611454673](https://github.com/k1moradi/swapz/a
 - Post Run actions/checkout@v4: pending
 - Post Run actions/checkout@v4: pending
 No terminal compiler/check counts, config or object hashes, artifact digest, or final first error available at this snapshot. Local git checkout failed DNS resolving github.com; no local C compile claimed. A10 alone owns full connected compile/link. No runtime, VM, module load, activation, device access or physical mutation. AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW, import OFF; physical NO_GO.
+
+## Terminal update — host and directed bridge object PASS
+
+Corrected run [46030111164 / job 140611454673](https://github.com/k1moradi/swapz/actions/runs/46030111164/job/140611454673), attempt 1, exact tested SHA `5ed7c52ceb03a503e57783bfc5b08bba8f38c6e6`, terminal SUCCESS, all steps successful. First error on corrected run: none. Historical initial workflow parse failure remains recorded above. Exact complete standards prefix 1936753 -> 1937111 bytes confirmed by hosted log.
+
+GCC 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) and Clang 18.1.3 (Ubuntu 1ubuntu1), strict C2x O2 Werror with ASan/UBSan: **49 checks per compiler, 98 total**, 13 historical actual extracted transition modes each; 17 frozen functions, 12 initializer shapes. Five mutants killed per compiler, 10 total: pending_finish, unrepresented, late_finish_internal, quarantine_debt, close_pending. Both compiler logs exactly report R108_TERMINAL_BYTE_HOST_PASS and native_capture=false; all compile log files empty. Frozen current controller terminal shape PASS (source only). Guard-off exercised in changed-source suite, no separate historical standalone rerun.
+
+Directed genuine pinned Linux x86_64 changed bridge object only: SMP=y TREE_RCU=y NR_CPUS=4 MODULES=y MODULE_UNLOAD=y force unload disabled, TINY_RCU absent. Actual symbol manifest independently checked: all six existing exported trial byte symbols present; all five private bridge owner functions defined but not exported (including no __export_symbol marker); collector stop_after_join import present. ELF64 little-endian ET_REL x86-64. No full link by A2.
+
+| Independently verified artifact member | Bytes | SHA256 |
+|---|---:|---|
+| effective.config | 40815 | `623c5c642fe5859ebcc5de43ba864317c22a98b6300c8150171858d0f0b93108` |
+| native-observation-byte-bridge.o | 19024 | `5ff81dc0e1b8605c800cf345402e2b87452636f7b91a1b66fb8c734f346b47eb` |
+
+[Artifact 15213583264](https://github.com/k1moradi/swapz/actions/runs/46030111164/artifacts/15213583264): independently downloaded ZIP, 27032 bytes, SHA256 `c9c3b0a4d19ee433be0a254f93b8128d4259840beffc88229517b8116e39b797`. Exact metadata digest, ZIP CRC, member hashes/lengths, effective flags, native ELF header, source/parent and frozen dependency manifest, compiler and mutant outputs verified. No native workload, actual runtime terminal provenance, activation, device I/O, physical acceptance or connected link inferred. A10 owns connected build; A1 owns integration and acceptance. AUTH=0 Phase A BLOCKED, all switches OFF.
