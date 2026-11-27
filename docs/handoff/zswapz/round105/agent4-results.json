@@ -1,7 +1,7 @@
 {
   "round": 105,
   "agent": 4,
-  "conclusion": "PARTIAL_FOCUSED_HELPERS_PASS_BROAD_CI_UNQUALIFIED",
+  "conclusion": "PARTIAL_R092_HOST_PASS_BROADER_CI_UNQUALIFIED",
   "frozen_commit": "ae7dc02e5db07fc6d133e02ffd558cb68c8e3159",
   "frozen_tree": "3cc943f1e9dd46d6174f18e5adf7519a7e2f3f7c",
   "task_commit": "5148f7f941fa9144d01c51b047fec16a7b9e557f",
@@ -91,11 +91,50 @@
     ]
   },
   "automatic_ci": {
-    "x86_64": "NOT_YET_VERIFIED",
-    "arm64": "NOT_YET_VERIFIED",
-    "r092_full_host_composition": "NOT_YET_VERIFIED",
-    "project_goals": "NOT_YET_VERIFIED",
-    "manual_dispatches": 0
+    "x86_64": "COMPILE_ONLY_PASS_EXACT_C_IN_PROGRESS",
+    "arm64": "COMPILE_ONLY_PASS_EXACT_C_IN_PROGRESS",
+    "r092_full_host_composition": "PASS_HOST_ONLY",
+    "project_goals": "QUEUED",
+    "manual_dispatches": 0,
+    "observed": {
+      "tested_commit": "db57f87498a0b20d298136f3f947c42051c899af",
+      "production_compile_only": {
+        "x86_64": {
+          "job": 140394012544,
+          "status": "success"
+        },
+        "arm64": {
+          "job": 140394012897,
+          "status": "success"
+        }
+      },
+      "r092": {
+        "run": 45965787010,
+        "job": 140394013041,
+        "status": "success",
+        "conclusion": "PASS_HOST_ONLY",
+        "target_blob": "8a84ac4d395e2f635ae3e4216bade471c03618de",
+        "frozen_product": "2499405464110e6a97f054db5527de54b8aafb3a",
+        "frozen_inventory_count": 46,
+        "fragment_sha256": "f4677834a9b0b5682fea58966351183aeb160204a3498e8ac47c04a6b2237da9",
+        "static_mutants_rejected": 15,
+        "checks_per_compiler": 12708,
+        "compiled_mutants_rejected_per_compiler": 4,
+        "mixed_version_negative": "PASS",
+        "first_error": null,
+        "artifact": {
+          "id": 15183040829,
+          "bytes": 842,
+          "sha256": "bc8c0c5a46311f41a264d8c5b1106689b9181272e332d95e956200503da38133",
+          "downloaded_and_verified": true
+        }
+      },
+      "remaining": {
+        "x86_64_exact_c": "IN_PROGRESS",
+        "arm64_exact_c": "IN_PROGRESS",
+        "project_goals": "QUEUED"
+      }
+    }
   },
   "production_defect": "None demonstrated by these historical failures; no runtime conclusion",
   "limitations": [
