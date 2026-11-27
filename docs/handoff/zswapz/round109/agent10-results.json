@@ -1,0 +1,144 @@
+{
+  "round": 109,
+  "agent": 10,
+  "kind": "connected-frozen-compile-link-only",
+  "status": "IN_PROGRESS",
+  "conclusion": null,
+  "source_freeze": "6394bf9aec7709744caf294f8bd7e935ca481dcd",
+  "source_tree": "780198718469ec268f9b588ad5b36c63bc1b1806",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "task": "4f48a24e3282cbab147acd62fe9ca751c8fd1ae9",
+  "tested_commit": "b6b83bd799feb66baeffa435a3fa9f702a080ff5",
+  "tested_parent": "4f48a24e3282cbab147acd62fe9ca751c8fd1ae9",
+  "tested_tree": "d5ce428ed661231f152a7c659247c9c5a070fcd6",
+  "verifier_blob": "dc6478212a008c9e2eea24b022b69ad17b503366",
+  "workflow_blob": "df57c8eb991b6c4f77dfbecbcfd1ff55158a034c",
+  "standards_parent_blob": "f2b2730a8e2db2d52a2b0235d677b3f5c3124a1e",
+  "standards_blob": "6274149988a546a359ec9ab4b5c69ae7d744cda1",
+  "standards_full_parent_prefix_verified": true,
+  "current_bridge_blob": "902507cb065828bfa9a8b732edd61fb26ca2f08d",
+  "stage_helper": "b6139ba044ce06c71e732187905dab8572415e90",
+  "r105_stage_helper": "01ff882ddcdbdd27da6b354a078921169aebce38",
+  "historical_stage": "d2baba1bda02b78eb7df265d22c5e9dbee09e2b1",
+  "historical_baseline": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+  "postimage_pins": {
+    "mm/zswap.c": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+    "drivers/md/dm.c": "332fc3faf1ad05f3756bf7d90b476f28bd50a012",
+    "mm/swapz-trial-terminal.inc": "697f3c9fc51738fedabc58cefc4eee6fddc8358c"
+  },
+  "prepublication": {
+    "workflow_yaml": "PASS_PYYAML_BASELOADER",
+    "embedded_bash": "PASS_BASH_N",
+    "embedded_python": "PASS_AST",
+    "workflow_local_remote_blob_match": true,
+    "parser_fragment_blob": "4907644678ea60457dd25d62c8ad865b05960751",
+    "parser_fragment_byte_identical": true,
+    "parser_selftest": "PASS_LOCAL_R109_SYMBOL_CENSUS_SELFTEST_PASS",
+    "full_verifier_local_ast": "NOT_RUN_LOCAL_FULL_CHECKOUT_UNAVAILABLE; A1 full verifier parser reviewed; mandatory hosted exact blob/AST/runpy gate before staging"
+  },
+  "run_id": 46045309473,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/46045309473",
+  "run_attempt": 1,
+  "jobs": [
+    {
+      "job_id": 140662973727,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/46045309473/job/140662973727",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Exact source and direct main parent",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Hosted toolchain prerequisites",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 4
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "One connected exact stage and full compile link",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Bounded native evidence",
+          "status": "pending",
+          "conclusion": null,
+          "number": 10
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 20
+        }
+      ]
+    }
+  ],
+  "artifacts": [],
+  "full_build_attempts": "NOT_YET_VERIFIED",
+  "full_kernel_link": "NOT_VERIFIED",
+  "genuine_modpost": "NOT_VERIFIED",
+  "module_link": "NOT_VERIFIED",
+  "first_error": null,
+  "compiler_config_artifact_digests": "NOT_VERIFIED",
+  "local_checkout_blocker": {
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "error": "Could not resolve host: github.com",
+    "full_linux_checkout_available": false
+  },
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "physical": "NO_GO",
+  "actual_physical_io": false,
+  "runtime": "NOT_RUN",
+  "module_load": false,
+  "manual_dispatches": 0,
+  "second_full_build": false,
+  "r108_repeat": false,
+  "peer_implementation_dependencies": false
+}
