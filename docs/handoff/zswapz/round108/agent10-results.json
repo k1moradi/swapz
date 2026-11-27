@@ -1,0 +1,70 @@
+{
+  "round": 108,
+  "agent": 10,
+  "kind": "connected-frozen-compile-link-only",
+  "status": "QUEUED",
+  "conclusion": null,
+  "source_freeze": "f600b79e0e1a812cae4c1c0ae8ab9f68c3d34da3",
+  "source_tree": "e577889d015f85115b1dc1a9845e472e95884c01",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "task": "32e841f773cdf6fc0519f6747f255d7b4980a4f4",
+  "tested_commit": "b4e0c96c57a47b672661e5c1e07f23c7457a1059",
+  "tested_parent": "2ffdce985bd8325a35e3bd663dccb2612478511f",
+  "tested_tree": "b534cae7839426435e244acc47c916a5502f67ec",
+  "verifier_blob": "6b4db960a1aa7c30477c0d6e408e380b42904173",
+  "workflow_blob": "e0c3d32b82af59c6ddf0851ac48525899b5a6f65",
+  "standards_parent_blob": "3ca5c4cba656aa9d7ffaa7cee8cf584935423d0c",
+  "standards_blob": "04855a7173e1de7f6e79b34e5a5a100a99c77896",
+  "standards_full_parent_prefix_verified": true,
+  "stage_helper": "b6139ba044ce06c71e732187905dab8572415e90",
+  "r105_stage_helper": "01ff882ddcdbdd27da6b354a078921169aebce38",
+  "postimage_pins": {
+    "mm/zswap.c": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+    "drivers/md/dm.c": "332fc3faf1ad05f3756bf7d90b476f28bd50a012",
+    "mm/swapz-trial-terminal.inc": "697f3c9fc51738fedabc58cefc4eee6fddc8358c"
+  },
+  "run_id": 46030812701,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/46030812701",
+  "run_attempt": 1,
+  "jobs": [
+    {
+      "job_id": 140613826288,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/46030812701/job/140613826288",
+      "status": "queued",
+      "conclusion": null,
+      "steps": null
+    }
+  ],
+  "artifacts": [],
+  "full_kernel_link": "NOT_VERIFIED",
+  "genuine_modpost": "NOT_VERIFIED",
+  "module_link": "NOT_VERIFIED",
+  "first_error": null,
+  "known_verifier_defect": {
+    "classification": "POST_PUBLICATION_STATIC_REVIEW",
+    "file": "tests/tools/round108-connected-build-verify.py",
+    "lines": [
+      295,
+      301,
+      303,
+      306,
+      307,
+      322
+    ],
+    "description": "Overescaped Python raw-string symbol/relocation regexes match literal backslash sequences rather than word boundaries, including line 295 controller definition census. If reached, may reject valid native objects after kernel link and before external module modpost (line 332). First actual CI error not yet known.",
+    "minimal_correction": "Use single backslashes in the raw strings (word boundaries, literal dot, whitespace class); preserve all assertions. No corrective dispatch this round."
+  },
+  "compiler_config_artifact_digests": "NOT_VERIFIED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "physical": "NO_GO",
+  "actual_physical_io": false,
+  "runtime": "NOT_RUN",
+  "module_load": false,
+  "manual_dispatches": 0,
+  "second_full_build": false,
+  "peer_implementation_dependencies": false
+}
