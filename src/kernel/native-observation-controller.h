@@ -24,6 +24,7 @@ struct module;
 struct dm_target;
 struct swapz_mm_trial_scope;
 struct swapz_trial_observation_scope;
+struct swapz_observation_record;
 
 /* Built-in private cold transaction, no exported positive control symbol.
  * Trusted caller must own the independent live mapper/table/target references
@@ -42,7 +43,12 @@ struct swapz_trial_target_ops {
 	/* Read-only local preflight before recorder/MM publication. */
 	swapz_trial_target_install validate;
 	swapz_trial_target_install install;
-	int (*retire)(void *context, const struct swapz_trial_retained_scope *retained);
+	/* Both callbacks run synchronously under the registry and live-table
+	 * lifetime. Preflight is read-only; final retirement transfers the
+	 * target's counted mapper reference to the unlocked caller. */
+	int (*validate_retire)(void *context, const struct swapz_trial_retained_scope *retained);
+	int (*retire)(void *context, const struct swapz_trial_retained_scope *retained,
+		      struct file **released_mapper);
 };
 int swapz_trial_target_register(const struct swapz_trial_target_ops *ops);
 int swapz_trial_target_unregister(const struct swapz_trial_target_ops *ops);
@@ -51,6 +57,8 @@ int swapz_trial_controller_begin_registered(const struct swapz_mm_trial_scope *s
 		struct file *mapper_file, size_t capacity, struct dm_target *target);
 /* Only for an independently retained, already drained final table, before
  * destruction can be blocked by the retained mapper file. Not normal suspend.
+ * Must enter without controller, target or DM locks that conflict with file
+ * release; the caller independently fences the live table and lifecycle.
  */
 int swapz_trial_controller_retire_registered(struct dm_target *target,
 		const struct swapz_trial_retained_scope *retained);
@@ -65,7 +73,10 @@ int swapz_trial_controller_join_external(const struct swapz_trial_retained_scope
  * joined map/provider/work before revoke; before finish it has also closed
  * storage/decoder and relinquished its target cap. No success on ESTALE. */
 int swapz_trial_controller_revoke_joined(const struct swapz_trial_retained_scope *retained);
-int swapz_trial_controller_finish(const struct swapz_trial_retained_scope *retained);
+/* Only the registered target's actual terminal census is accepted; NULL
+ * denotes an uninstalled or incomplete witness, never a clean trace. */
+int swapz_trial_controller_finish(const struct swapz_trial_retained_scope *retained,
+		const struct swapz_observation_record *terminal);
 #endif
 
 #endif

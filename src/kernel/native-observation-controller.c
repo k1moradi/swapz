@@ -47,6 +47,10 @@ static u64 swapz_controller_registration;
 static bool swapz_controller_used, swapz_controller_published;
 static bool swapz_controller_installed;
 static bool swapz_controller_external_joined, swapz_controller_mm_revoked;
+static bool swapz_controller_detaching, swapz_controller_files_detached;
+static bool swapz_controller_broker_retired, swapz_controller_finished;
+static bool swapz_controller_registered_retiring;
+static struct swapz_mm_trial_terminal_snapshot swapz_controller_mm_terminal;
 static int swapz_controller_first_error;
 
 static int swapz_trial_controller_begin(const struct swapz_mm_trial_scope *scope,
@@ -150,7 +154,7 @@ int swapz_trial_target_register(const struct swapz_trial_target_ops *ops)
 {
 	int error = -EBUSY;
 
-	if (!ops || !ops->validate || !ops->install || !ops->retire)
+	if (!ops || !ops->validate || !ops->install || !ops->validate_retire || !ops->retire)
 		return -EINVAL;
 	mutex_lock(&swapz_target_ops_lock);
 	if (!swapz_target_ops) {
@@ -205,11 +209,14 @@ int swapz_trial_controller_begin_registered(const struct swapz_mm_trial_scope *s
 	return error;
 }
 
+static int swapz_controller_detach(const struct swapz_trial_retained_scope *retained);
+
 int swapz_trial_controller_retire_registered(struct dm_target *target,
 		const struct swapz_trial_retained_scope *retained)
 {
 	const struct swapz_trial_target_ops *ops;
 	struct module *owner = NULL;
+	struct file *released_mapper = NULL;
 	int error = -ENODEV;
 
 	if (!target || !retained || !retained->identity)
@@ -218,9 +225,31 @@ int swapz_trial_controller_retire_registered(struct dm_target *target,
 	ops = swapz_target_ops;
 	if (ops && try_module_get(ops->owner)) {
 		owner = ops->owner;
-		error = ops->retire(target, retained);
+		error = ops->validate_retire(target, retained);
 	}
 	mutex_unlock(&swapz_target_ops_lock);
+	/* The caller keeps the actual table alive and lifecycle fenced.
+	 * Never run MM file detachment or either fput under registry/control
+	 * locks. The transient module reference spans both callbacks. */
+	if (!error)
+		error = swapz_controller_detach(retained);
+	if (!error) {
+		mutex_lock(&swapz_target_ops_lock);
+		if (swapz_target_ops == ops) {
+			mutex_lock(&swapz_controller_lock);
+			swapz_controller_registered_retiring = true;
+			mutex_unlock(&swapz_controller_lock);
+			error = ops->retire(target, retained, &released_mapper);
+			mutex_lock(&swapz_controller_lock);
+			swapz_controller_registered_retiring = false;
+			mutex_unlock(&swapz_controller_lock);
+		} else {
+			error = -ESTALE;
+		}
+		mutex_unlock(&swapz_target_ops_lock);
+	}
+	if (released_mapper)
+		fput(released_mapper);
 	if (owner)
 		module_put(owner);
 	return error;
@@ -232,7 +261,8 @@ static bool swapz_controller_matches_locked(const struct swapz_trial_retained_sc
 {
 	lockdep_assert_held(&swapz_controller_lock);
 	return retained && retained->identity && swapz_controller_published &&
-	       swapz_controller_mapper &&
+	       (swapz_controller_mapper || swapz_controller_files_detached ||
+		swapz_controller_detaching) &&
 	       retained->identity == swapz_controller_scope.identity &&
 	       retained->session == swapz_controller_scope.session &&
 	       retained->epoch == swapz_controller_scope.table_epoch &&
@@ -251,13 +281,40 @@ static void swapz_controller_record_error(int error)
 	}
 }
 
+/* Exact MM witness is sampled before revoke destroys the retained key.
+ * The MM gate counts tickets, not owner pointers, including detached callbacks. */
+static int swapz_controller_snapshot_locked(const struct swapz_trial_retained_scope *retained,
+		struct swapz_mm_trial_terminal_snapshot *snapshot)
+{
+	int error;
+
+	lockdep_assert_held(&swapz_controller_lock);
+	error = swapz_mm_trial_scope_terminal_snapshot(retained->identity,
+		retained->session, retained->epoch, retained->target_epoch, snapshot);
+	if (error)
+		return error;
+	if (snapshot->area_epoch != swapz_controller_scope.area_epoch)
+		return -ESTALE;
+	if (snapshot->fault)
+		return -EUCLEAN;
+	if (!snapshot->capture_stopped || !snapshot->area_retired ||
+	    !snapshot->terminal_closed || !snapshot->terminal_joined ||
+	    snapshot->carrier_busy || snapshot->mm_callbacks ||
+	    snapshot->dm_callbacks || snapshot->dm_entrants)
+		return -EBUSY;
+	return 0;
+}
+
 static int swapz_controller_join_locked(const struct swapz_trial_retained_scope *retained)
 {
+	struct swapz_mm_trial_terminal_snapshot snapshot;
 	int error;
 
 	lockdep_assert_held(&swapz_controller_lock);
 	if (!swapz_controller_matches_locked(retained))
 		return -ESTALE;
+	if (swapz_controller_detaching)
+		return -EBUSY;
 	if (swapz_controller_external_joined)
 		return 0;
 	error = swapz_trial_controller_stop_capture(retained->identity);
@@ -265,7 +322,55 @@ static int swapz_controller_join_locked(const struct swapz_trial_retained_scope 
 		error = swapz_mm_trial_scope_join_external(retained->identity,
 			retained->session, retained->epoch, retained->target_epoch);
 	if (!error)
+		error = swapz_controller_snapshot_locked(retained, &snapshot);
+	if (!error) {
+		swapz_controller_mm_terminal = snapshot;
 		swapz_controller_external_joined = true;
+	}
+	return error;
+}
+
+/* Only the registered final-retirement path (or exact uninstalled recovery)
+ * enters here. Keep the scalar key while dropping independent open files.
+ * No target/DM lock may be held by the caller; fput is relinquishment, not
+ * a synchronous device-close or table-destruction witness. */
+static int swapz_controller_detach(const struct swapz_trial_retained_scope *retained)
+{
+	struct swapz_mm_trial_terminal_snapshot snapshot;
+	struct file *mapper = NULL;
+	int error;
+
+	mutex_lock(&swapz_controller_lock);
+	error = swapz_controller_join_locked(retained);
+	if (error || swapz_controller_files_detached)
+		goto unlock;
+	swapz_controller_detaching = true;
+	mutex_unlock(&swapz_controller_lock);
+
+	error = swapz_mm_trial_scope_detach_files(retained->identity,
+		retained->session, retained->epoch, retained->target_epoch);
+
+	mutex_lock(&swapz_controller_lock);
+	if (!error)
+		error = swapz_controller_snapshot_locked(retained, &snapshot);
+	if (!error && !snapshot.files_detached)
+		error = -EUCLEAN;
+	if (!error) {
+		swapz_controller_mm_terminal = snapshot;
+		mapper = swapz_controller_mapper;
+		swapz_controller_mapper = NULL;
+		swapz_controller_scope.bdev = NULL;
+	}
+	mutex_unlock(&swapz_controller_lock);
+	if (mapper)
+		fput(mapper);
+	mutex_lock(&swapz_controller_lock);
+	if (!error)
+		swapz_controller_files_detached = true;
+	swapz_controller_detaching = false;
+unlock:
+	swapz_controller_record_error(error);
+	mutex_unlock(&swapz_controller_lock);
 	return error;
 }
 
@@ -291,10 +396,14 @@ int swapz_trial_controller_revoke_joined(const struct swapz_trial_retained_scope
 
 	mutex_lock(&swapz_controller_lock);
 	error = swapz_controller_join_locked(retained);
+	if (!error && !swapz_controller_files_detached)
+		error = -EBUSY;
 	if (!error && !swapz_controller_mm_revoked) {
 		error = swapz_mm_trial_scope_revoke(retained->identity);
-		if (!error)
+		if (!error) {
 			swapz_controller_mm_revoked = true;
+			swapz_controller_scope.broker = NULL;
+		}
 	}
 	swapz_controller_record_error(error);
 	mutex_unlock(&swapz_controller_lock);
@@ -303,46 +412,75 @@ int swapz_trial_controller_revoke_joined(const struct swapz_trial_retained_scope
 EXPORT_SYMBOL_GPL(swapz_trial_controller_revoke_joined);
 
 /* Called by the recorder stop owner synchronously under both cold locks;
- * do not acquire either lock again. Exact broker retirement independently
- * joins the permanent retry work after target and MM caps are released. */
+ * do not acquire either lock again. The exact old-owner witness was joined
+ * before the terminal record; it cannot be replaced by a caller assertion. */
 static bool swapz_controller_recorder_join(void *context)
 {
 	const struct swapz_trial_retained_scope *retained = context;
 
 	lockdep_assert_held(&swapz_controller_lock);
 	return swapz_controller_matches_locked(retained) &&
-	       swapz_controller_external_joined && swapz_controller_mm_revoked &&
-	       !swapz_mm_broker_owner_retired(retained->session, retained->epoch);
+	       swapz_controller_external_joined && swapz_controller_files_detached &&
+	       swapz_controller_mm_revoked && swapz_controller_broker_retired;
 }
 
-int swapz_trial_controller_finish(const struct swapz_trial_retained_scope *retained)
+int swapz_trial_controller_finish(const struct swapz_trial_retained_scope *retained,
+		const struct swapz_observation_record *terminal)
 {
-	struct file *mapper = NULL;
+	struct swapz_observation_record cleanup;
+	u64 sequence;
 	int error = -ESTALE;
 
 	mutex_lock(&swapz_controller_lock);
-	if (!swapz_controller_matches_locked(retained))
+	if (!swapz_controller_matches_locked(retained) ||
+	    (swapz_controller_installed && !swapz_controller_registered_retiring))
 		goto unlock;
+	if (swapz_controller_finished) {
+		error = 0;
+		goto unlock;
+	}
 	error = -EBUSY;
-	if (!swapz_controller_external_joined || !swapz_controller_mm_revoked)
+	if (!swapz_controller_external_joined || !swapz_controller_files_detached ||
+	    !swapz_controller_mm_revoked || swapz_controller_detaching)
 		goto unlock;
 	error = swapz_mm_broker_owner_retired(retained->session, retained->epoch);
 	if (error)
 		goto unlock;
-	/* No CLEANUP record is synthesized. Sealing the recorder does not
-	 * imply a clean trace; owner retains it for independent export. */
-	if (!swapz_trial_observation_stop(swapz_controller_recorder_join, (void *)retained)) {
-		error = -EUCLEAN;
-		goto unlock;
+	swapz_controller_broker_retired = true;
+	/* The actual target terminal census is produced only after its drain,
+	 * final authority retirement and storage/cap teardown. MM's preserved
+	 * exact snapshot and the old broker witness independently prove their
+	 * respective debts. Do not publish flags7 on an incomplete witness. */
+	if (swapz_controller_installed && terminal &&
+	    terminal->event == SWAPZ_OBS_CLEANUP && !terminal->flags &&
+	    !terminal->caps && !terminal->tickets && !terminal->pins &&
+	    !terminal->reservations && !terminal->bios && !terminal->maps &&
+	    !terminal->quarantines && !swapz_controller_first_error &&
+	    swapz_controller_mm_terminal.files_detached) {
+		/* Copy only the proven census, not arbitrary caller wire fields. */
+		cleanup = (struct swapz_observation_record){
+			.event = SWAPZ_OBS_CLEANUP, .flags = 7,
+			.caps = terminal->caps, .tickets = terminal->tickets,
+			.pins = terminal->pins, .reservations = terminal->reservations,
+			.bios = terminal->bios, .maps = terminal->maps,
+			.quarantines = terminal->quarantines,
+		};
+		sequence = swapz_trial_observation_append_sequence(&cleanup);
+		if (!sequence || !swapz_trial_byte_event(&cleanup, sequence, NULL, 0))
+			swapz_controller_record_error(-EUCLEAN);
+	} else {
+		swapz_controller_record_error(-EUCLEAN);
 	}
-	mapper = swapz_controller_mapper;
-	swapz_controller_mapper = NULL;
+	/* Evidence loss does not retain otherwise genuinely retired target
+	 * ownership. Once attempted, never append CLEANUP again, even if
+	 * the recorder cannot seal its incomplete transport. */
+	if (!swapz_trial_observation_stop(swapz_controller_recorder_join, (void *)retained))
+		swapz_controller_record_error(-EUCLEAN);
+	swapz_controller_finished = true;
 	error = 0;
 unlock:
 	swapz_controller_record_error(error);
 	mutex_unlock(&swapz_controller_lock);
-	if (mapper)
-		fput(mapper);
 	return error;
 }
 EXPORT_SYMBOL_GPL(swapz_trial_controller_finish);
@@ -355,18 +493,16 @@ int swapz_trial_controller_recover_uninstalled(const struct swapz_trial_retained
 	int error = -ESTALE;
 
 	mutex_lock(&swapz_controller_lock);
-	if (!swapz_controller_installed && swapz_controller_matches_locked(retained)) {
-		error = swapz_controller_join_locked(retained);
-		if (!error && !swapz_controller_mm_revoked) {
-			error = swapz_mm_trial_scope_revoke(retained->identity);
-			if (!error)
-				swapz_controller_mm_revoked = true;
-		}
-	}
+	if (!swapz_controller_installed && swapz_controller_matches_locked(retained))
+		error = 0;
 	swapz_controller_record_error(error);
 	mutex_unlock(&swapz_controller_lock);
+	if (!error)
+		error = swapz_controller_detach(retained);
+	if (!error)
+		error = swapz_trial_controller_revoke_joined(retained);
 	/* No target was installed. Its independently closed old owner, not
 	 * this failed startup, must prove that all target cap debt is gone. */
-	return error ? error : swapz_trial_controller_finish(retained);
+	return error ? error : swapz_trial_controller_finish(retained, NULL);
 }
 #endif

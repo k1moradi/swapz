@@ -1091,6 +1091,8 @@ struct swapz_dm {
 	 * Lifecycle serialized; an explicitly retired table cannot resume I/O.
 	 */
 	bool original_scope_final_retirement;
+	/* Scalar geometry survives route invalidation for the terminal map census. */
+	u32 original_scope_first_logical, original_scope_page_count;
 	int original_scope_finish_error;
 #endif
 #endif
@@ -13522,6 +13524,10 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
 			.registration_epoch = ctx->original_route.registration_epoch,
 		};
 		ctx->original_scope_file = mapper_file; /* transferred counted ref */
+#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+		ctx->original_scope_first_logical = (u32)(scope->first_sector / SWAPZ_SECTORS);
+		ctx->original_scope_page_count = (u32)(scope->sector_count / SWAPZ_SECTORS);
+#endif
 #endif
 	}
 	return error;
@@ -17536,15 +17542,64 @@ static bool swapz_scope_target_quiescent(const struct swapz_dm *ctx)
 	       !ctx->authority.batch_pending;
 }
 
-static int swapz_scope_finish_retained(struct swapz_dm *ctx)
+/* Only final, drained target retirement can supply this record. The
+ * storage close proves all typed decoder/record pins and reservations
+ * gone, and the drain proves accepted BIO/worker ownership joined. The
+ * scoped logical map census is actual RAM authority, not expected workload.
+ * A missing proof invalidates evidence without inventing a zero. */
+static bool swapz_scope_terminal_census(struct swapz_dm *ctx,
+		struct swapz_observation_record *terminal)
+{
+	u32 first = ctx->original_scope_first_logical;
+	u32 count = ctx->original_scope_page_count;
+	u32 index, maps = 0;
+	bool clean;
+
+	if (!first || !count || count > SWAPZ_ROUND094_GENERATION_PAGES ||
+	    first >= ctx->logical_pages || count > ctx->logical_pages - first ||
+	    !ctx->original_scope_final_retirement || !ctx->original_scope_mm_revoked ||
+	    !swapz_scope_target_quiescent(ctx) ||
+	    !swapz_round097_target_debt_free(ctx) ||
+	    ctx->original_owner_session || ctx->original_owner_epoch ||
+	    ctx->original_owner_closing || ctx->original_scope_stop_error ||
+	    ctx->original_scope_finish_error)
+		return false;
+
+	/* All producers have joined. ordered_owner protects actual authority
+	 * and the synchronous observation slots; no producer lock across I/O. */
+	mutex_lock(&ctx->ordered_owner);
+	for (index = first; index < first + count; ++index)
+		maps += ctx->maps[index].valid != 0;
+	clean = !maps && !ctx->authority.original &&
+		!ctx->authority.in_flight && !ctx->authority.batch_pending &&
+		!ctx->authority.gc_allocation && !ctx->gc_recovery.active &&
+		!ctx->authority.abandoned_blocks && !ctx->observation_commit &&
+		!ctx->observation_release_operation && !ctx->observation_release_descriptor &&
+		!ctx->observation_read_operation && !ctx->observation_read_extent &&
+		!ctx->submitter_dispatch_active && !ctx->batch_count &&
+		!swapz_has_inflight(ctx) && !atomic_read(&ctx->lower_write_active) &&
+		bio_list_empty(&ctx->deferred_upper_completions) &&
+		!atomic_read(&ctx->completion_active) && bio_list_empty(&ctx->completion_bios);
+	mutex_unlock(&ctx->ordered_owner);
+	if (!clean)
+		return false;
+	/* Only after the actual zero-debt gates above. MM/old broker fields
+	 * and flags are independently authorized by the built-in controller. */
+	*terminal = (struct swapz_observation_record){ .event = SWAPZ_OBS_CLEANUP, .maps = maps };
+	return true;
+}
+
+static int swapz_scope_finish_retained(struct swapz_dm *ctx, struct file **released_mapper)
 {
 	struct swapz_shared_storage_decoder *storage = ctx->original_gated_storage;
-	struct file *mapper;
+	struct swapz_observation_record terminal = {};
+	const struct swapz_observation_record *witness = NULL;
 	unsigned long flags;
 	unsigned int index;
 	int error;
 
-	if (!swapz_scope_target_quiescent(ctx))
+	if (!released_mapper || !ctx->original_scope_final_retirement ||
+	    !swapz_scope_target_quiescent(ctx))
 		return -EBUSY;
 	/* A partial final retirement may have revoked MM but still own live
 	 * typed records. Never release the target cap until they are gone.
@@ -17586,15 +17641,18 @@ static int swapz_scope_finish_retained(struct swapz_dm *ctx)
 		error = ctx->original_teardown_error ? ctx->original_teardown_error : -EBUSY;
 		goto failure;
 	}
-	error = swapz_trial_controller_finish(&ctx->original_retained_scope);
+	if (swapz_scope_terminal_census(ctx, &terminal))
+		witness = &terminal;
+	error = swapz_trial_controller_finish(&ctx->original_retained_scope, witness);
 	if (error)
 		goto failure;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	mapper = ctx->original_scope_file;
+	*released_mapper = ctx->original_scope_file;
 	ctx->original_scope_file = NULL;
 	ctx->original_retained_scope = (struct swapz_trial_retained_scope){};
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	fput(mapper);
+	/* The registered built-in caller puts this counted file only after
+	 * dropping the registry lock; final fput is not proof of dtr. */
 	return 0;
 failure:
 	if (error != -EBUSY) {
@@ -17611,7 +17669,7 @@ failure:
  * Retryable debt retains all outstanding ownership. A partial final
  * retirement cannot resume, including on failure after successful revoke.
  */
-static int swapz_scope_retire_final(struct swapz_dm *ctx)
+static int swapz_scope_retire_final(struct swapz_dm *ctx, struct file **released_mapper)
 {
 	unsigned long flags;
 	int error;
@@ -17620,6 +17678,11 @@ static int swapz_scope_retire_final(struct swapz_dm *ctx)
 		return -EBUSY;
 	if (ctx->original_scope_finish_error)
 		return ctx->original_scope_finish_error;
+	/* Registered preflight has completed exact MM detach. From here even
+	 * a failed revoke is final retirement, never a resumable suspend. */
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	ctx->original_scope_final_retirement = true;
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	if (!ctx->original_scope_mm_revoked) {
 		error = swapz_trial_controller_revoke_joined(&ctx->original_retained_scope);
 		if (error)
@@ -17627,13 +17690,12 @@ static int swapz_scope_retire_final(struct swapz_dm *ctx)
 	}
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	ctx->original_scope_mm_revoked = true;
-	ctx->original_scope_final_retirement = true;
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	mutex_lock(&ctx->ordered_owner);
 	error = swapz_round097_retire_target_records(ctx);
 	mutex_unlock(&ctx->ordered_owner);
 	if (!error)
-		return swapz_scope_finish_retained(ctx);
+		return swapz_scope_finish_retained(ctx, released_mapper);
 failure:
 	if (error != -EBUSY) {
 		if (!ctx->original_scope_finish_error)
@@ -17643,7 +17705,7 @@ failure:
 	return error;
 }
 
-static int swapz_scope_retire_controller(void *context,
+static int swapz_scope_validate_retire_controller(void *context,
 		const struct swapz_trial_retained_scope *retained)
 {
 	struct dm_target *ti = context;
@@ -17659,13 +17721,26 @@ static int swapz_scope_retire_controller(void *context,
 	    key->target_epoch != retained->target_epoch ||
 	    key->registration_epoch != retained->registration_epoch)
 		return -ESTALE;
-	return swapz_scope_retire_final(ctx);
+	if (ctx->original_scope_finish_error)
+		return ctx->original_scope_finish_error;
+	return swapz_scope_target_quiescent(ctx) ? 0 : -EBUSY;
+}
+
+static int swapz_scope_retire_controller(void *context,
+		const struct swapz_trial_retained_scope *retained,
+		struct file **released_mapper)
+{
+	struct dm_target *ti = context;
+	int error = swapz_scope_validate_retire_controller(context, retained);
+
+	return error ? error : swapz_scope_retire_final(ti->private, released_mapper);
 }
 
 static const struct swapz_trial_target_ops swapz_scope_target_ops = {
 	.owner = THIS_MODULE,
 	.validate = swapz_scope_validate_controller,
 	.install = swapz_scope_install_controller,
+	.validate_retire = swapz_scope_validate_retire_controller,
 	.retire = swapz_scope_retire_controller,
 };
 #endif
@@ -17813,18 +17888,8 @@ static void swapz_drain(struct dm_target *ti)
 		if (error)
 			swapz_fail(ctx, error);
 	}
-#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
-	if (swapz_scope_external_join_missing(ctx)) {
-		int error = swapz_scope_finish_retained(ctx);
-
-		if (error && !ctx->original_scope_finish_error && error != -EBUSY)
-			ctx->original_scope_finish_error = error;
-		/* Busy is outstanding real debt, not permission to reopen.
-		 * Terminal error remains separate from transient teardown retry. */
-		if (error && !ctx->original_teardown_error)
-			ctx->original_teardown_error = error;
-	}
-#endif
+/* Normal suspend preserves authority and retained ownership. Only the
+	 * separately fenced registered final retirement may detach mapper files. */
 }
 
 static void swapz_resume(struct dm_target *ti)
@@ -18013,11 +18078,14 @@ static void swapz_dtr(struct dm_target *ti)
 		return;
 	swapz_drain(ti);
 #if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
+	/* dtr is too late to break a circular mapper reference; the actual
+	 * pre-destruction registered caller must already have relinquished it.
+	 * If the invariant is violated, preserve detached quarantine, never
+	 * try a conflicting file detach under DM destruction locks. */
 	if (swapz_scope_external_join_missing(ctx)) {
-		int error = swapz_scope_retire_final(ctx);
-
-		if (error && !ctx->original_teardown_error)
-			ctx->original_teardown_error = error;
+		if (!ctx->original_teardown_error)
+			ctx->original_teardown_error = -EUCLEAN;
+		swapz_scope_observe_invalid();
 	}
 #endif
 #if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
