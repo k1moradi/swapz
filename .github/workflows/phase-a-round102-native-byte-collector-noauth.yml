@@ -1,0 +1,148 @@
+name: Round102 native byte collector directed NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/native-observation-byte-collector.c'
+      - 'src/kernel/native-observation-byte-collector.h'
+      - 'tests/tools/round102-private-byte-reference.py'
+      - 'tests/runtime/native/fixtures/round102-byte-collector.c'
+      - 'tests/runtime/native/fixtures/round102-byte-export-fixture.c'
+      - 'tests/runtime/native/round102-private-byte-reference-test.py'
+      - '.github/workflows/phase-a-round102-native-byte-collector-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  collector-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Source, frozen oracle and complete standards prefix
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/round102-agent2"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$PUSH_BEFORE"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          freeze=d2baba1bda02b78eb7df265d22c5e9dbee09e2b1
+          test "$(git rev-parse "$freeze^{tree}")" = aec0bc814dc0e0c17c71ccaff2cdd9bd3d9727cc
+          for path in tests/tools/native-observation-byte-oracle.py \
+                      tests/tools/native-observation-current-export.py \
+                      tests/tools/native-observation-export.py \
+                      tests/runtime/native/independent-byte-oracle-test.py; do
+            test "$(git hash-object "$path")" = "$(git rev-parse "$freeze:$path")"
+          done
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import subprocess
+          parent = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(parent) and len(current) > len(parent)
+          print("complete standards prefix", len(parent), len(current))
+          PY
+          git rev-parse HEAD HEAD^ > "$evidence/source-parent.txt"
+          git ls-files -s src/kernel/native-observation-byte-collector.c \
+            src/kernel/native-observation-byte-collector.h \
+            tests/tools/round102-private-byte-reference.py \
+            tests/runtime/native/fixtures/round102-byte-collector.c \
+            tests/runtime/native/fixtures/round102-byte-export-fixture.c \
+            tests/runtime/native/round102-private-byte-reference-test.py \
+            .github/workflows/phase-a-round102-native-byte-collector-noauth.yml \
+            > "$evidence/source-blobs.txt"
+      - name: Strict GCC and Clang actual component and fresh private compatibility fixture
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/round102-agent2"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          for cc in gcc clang; do
+            "$cc" --version > "$evidence/$cc-version.txt"
+            flags=(-std=c17 -O2 -g -Wall -Wextra -Werror -pedantic -Wconversion -Wshadow
+                   -fsanitize=address,undefined -fno-sanitize-recover=all
+                   -fno-omit-frame-pointer -fno-pie -no-pie -pthread -Isrc/kernel)
+            "$cc" "${flags[@]}" src/kernel/native-observation-byte-collector.c \
+              tests/runtime/native/fixtures/round102-byte-collector.c \
+              -o "$scratch/collector" 2>&1 | tee "$evidence/$cc-host-compile.log"
+            "$scratch/collector" 2>&1 | tee "$evidence/$cc-host-run.log"
+            "$cc" "${flags[@]}" src/kernel/native-observation-byte-collector.c \
+              tests/runtime/native/fixtures/round102-byte-export-fixture.c \
+              -o "$scratch/export" 2>&1 | tee "$evidence/$cc-export-compile.log"
+            python3 -B tests/runtime/native/round102-private-byte-reference-test.py \
+              "$GITHUB_SHA" "$scratch/export" 2>&1 | tee "$evidence/$cc-private.log"
+          done
+      - name: Provision real kernel build prerequisites on hosted runner
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config \
+            openssl perl python3 xz-utils cpio
+          dpkg-query -W libelf-dev libssl-dev gcc binutils
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: frozen-linux
+          persist-credentials: false
+      - name: Directed actual collector object only, exact Linux SMP generated headers
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/round102-agent2"
+          linux="$GITHUB_WORKSPACE/frozen-linux"
+          test "$(git -C "$linux" rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C "$linux" status --porcelain --untracked-files=all)"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          build="$scratch/build"
+          component="$scratch/component"
+          mkdir -p "$build" "$component"
+          cp src/kernel/native-observation-byte-collector.{c,h} "$component/"
+          for suffix in c h; do
+            name="native-observation-byte-collector.$suffix"
+            test "$(git hash-object "$component/$name")" = "$(git rev-parse "HEAD:src/kernel/$name")"
+          done
+          printf 'obj-m := native-observation-byte-collector.o\nccflags-y += -Werror\n' > "$component/Kbuild"
+          # This independent component uses only original Linux types, string
+          # and spinlock headers; no overlay or peer R102 product source.
+          make_args=(-C "$linux" O="$build" ARCH=x86_64 CC=gcc)
+          make "${make_args[@]}" allnoconfig 2>&1 | tee "$evidence/allnoconfig.log"
+          "$linux/scripts/config" --file "$build/.config" --enable SMP --enable TREE_RCU \
+            --enable MODULES --set-val NR_CPUS 4 --disable TINY_RCU --disable MODULE_SIG \
+            --disable DEBUG_INFO --disable DEBUG_INFO_BTF
+          make "${make_args[@]}" olddefconfig 2>&1 | tee "$evidence/olddefconfig.log"
+          for key in SMP TREE_RCU MODULES; do grep -qx "CONFIG_$key=y" "$build/.config"; done
+          grep -qx 'CONFIG_NR_CPUS=4' "$build/.config"
+          ! grep -qx 'CONFIG_TINY_RCU=y' "$build/.config"
+          cp "$build/.config" "$evidence/effective.config"
+          make "${make_args[@]}" -j2 modules_prepare 2>&1 | tee "$evidence/prepare.log"
+          make "${make_args[@]}" M="$component" -j2 native-observation-byte-collector.o \
+            2>&1 | tee "$evidence/collector-object.log"
+          object="$component/native-observation-byte-collector.o"
+          test -s "$object"
+          nm "$object" > "$evidence/collector-symbols.txt"
+          for symbol in start begin accept pin copy unpin clone upper user invalidate stop export release; do
+            grep -Eq " [Tt] swapz_byte_$symbol$" "$evidence/collector-symbols.txt"
+          done
+          cp "$object" "$evidence/native-observation-byte-collector.o"
+          (cd "$evidence"; sha256sum effective.config native-observation-byte-collector.o > SHA256SUMS)
+          printf 'PASS directed collector object only; AUTH=0 Phase A BLOCKED\n'
+      - name: Retain bounded redacted evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round102-agent2-collector
+          path: ${{ runner.temp }}/round102-agent2/
+          if-no-files-found: warn
+          retention-days: 14
