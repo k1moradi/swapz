@@ -1,0 +1,160 @@
+{
+  "round": 111,
+  "agent": 10,
+  "kind": "composed-connected-compile-link-only",
+  "status": "IN_PROGRESS",
+  "conclusion": null,
+  "source_freeze": "4345f21b1da720e6c8d685c7b232bfcebe635d50",
+  "source_tree": "98cb27a3f57d6482d859a260526edb5614ec7994",
+  "product_subtree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "task": "74f7febc4da930ae1538c442550136d85c4d18fe",
+  "tested_commit": "91f77bc9a0e60b45b5c32305acde6f64116885c6",
+  "tested_parent": "74f7febc4da930ae1538c442550136d85c4d18fe",
+  "tested_tree": "a581fbaecb3f327b7ba55eb08e7fec43b14d116d",
+  "verifier_blob": "fef867e688b2c8342f4447cc908bd3c13ec34f16",
+  "workflow_blob": "5d83fa6cee205f8dd30878093a56d4130cb450a7",
+  "standards_parent_blob": "10367150c011ef4c19796a3e4c2ff04e7cd9c633",
+  "standards_blob": "a69db93df2d3fdc047c1290e5c902f91f080b5fa",
+  "standards_full_parent_prefix_verified": true,
+  "composition_helper": "b2ab565043799e96adc374aeb4cdaacbce45c1df",
+  "composition_inputs": "1ede7cfc7be8e870cadf34afec7a655d4630750e",
+  "connected_frozen": "6394bf9aec7709744caf294f8bd7e935ca481dcd",
+  "historical_stage": "d2baba1bda02b78eb7df265d22c5e9dbee09e2b1",
+  "historical_baseline": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+  "mm_patch": "3c38d165804cb62c7f0d99e27e1ed303987ec90e",
+  "dm_patch": "61a83b92c43be93d0a3ebffe614de4bc8ebe8660",
+  "postimage_pins": {
+    "mm/swapfile.c": "8b9826f09f7b3127d4cb739a072102763d8e1ecd",
+    "include/linux/swapz_mm_carrier.h": "8d369c402780e06ffd317919acdd6bbd4802646e",
+    "drivers/md/dm.c": "5e446e6b80f5744e082ed13a506506499ecb854f"
+  },
+  "prepublication": {
+    "workflow_yaml": "PASS_PYYAML_BASELOADER",
+    "embedded_bash": "PASS_BASH_N",
+    "embedded_python": "PASS_AST",
+    "checkout_sequence": "PASS",
+    "single_source_trigger": "PASS",
+    "workflow_local_remote_blob_match": true,
+    "full_verifier_ast_and_selftest": "HOSTED_GATE_REQUIRED; NOT_EXECUTED_LOCALLY",
+    "exact_pins": "PASS"
+  },
+  "run_id": 46055928263,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/46055928263",
+  "run_attempt": 1,
+  "jobs": [
+    {
+      "job_id": 140698287504,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/46055928263/job/140698287504",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Exact source and direct main parent",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Hosted toolchain prerequisites",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 4
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 10
+        },
+        {
+          "name": "One connected exact stage and full compile link",
+          "status": "pending",
+          "conclusion": null,
+          "number": 11
+        },
+        {
+          "name": "Bounded native evidence",
+          "status": "pending",
+          "conclusion": null,
+          "number": 12
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 24
+        }
+      ]
+    }
+  ],
+  "artifacts": [],
+  "full_build_attempts": "NOT_YET_VERIFIED",
+  "full_kernel_link": "NOT_VERIFIED",
+  "genuine_modpost": "NOT_VERIFIED",
+  "module_link": "NOT_VERIFIED",
+  "composed_native_relocations": "NOT_VERIFIED",
+  "first_error": null,
+  "compiler_config_artifact_digests": "NOT_VERIFIED",
+  "local_checkout_blocker": {
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "error": "Could not resolve host: github.com",
+    "full_linux_checkout_available": false
+  },
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "physical": "NO_GO",
+  "actual_physical_io": false,
+  "runtime": "NOT_RUN",
+  "module_load": false,
+  "manual_dispatches": 0,
+  "second_full_build": false,
+  "historical_full_build_repeat": false,
+  "peer_implementation_dependencies": false
+}
