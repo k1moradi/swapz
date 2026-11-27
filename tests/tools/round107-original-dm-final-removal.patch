@@ -1,0 +1,328 @@
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+index 6912eb7ec5a9ef325f7282ef9c9226b39265f01d..332fc3faf1ad05f3756bf7d90b476f28bd50a012 100644
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -14,1 +14,7 @@
+-#include "dm-rq.h"
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++#if defined(MODULE) || !defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || !defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++#error "Private final removal requires built-in frozen observation controller"
++#endif
++#include "native-observation-controller.h"
++#endif
++#include "dm-rq.h"
+@@ -65,1 +71,62 @@
+-static void do_deferred_remove(struct work_struct *w);
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++/* One private, built-in trial owner. _minor_lock protects every field.
++ * The reservation owns one md holder until READY; the live table cannot
++ * be swapped or destroyed while reserved. No target pointer is retained.
++ * A terminal failure quarantines that ownership, not ordinary devices.
++ */
++enum dm_swapz_final_phase {
++	DM_SWAPZ_FINAL_IDLE,
++	DM_SWAPZ_FINAL_RUNNING,
++	DM_SWAPZ_FINAL_RETRY,
++	DM_SWAPZ_FINAL_RETIRED,
++	DM_SWAPZ_FINAL_READY,
++	DM_SWAPZ_FINAL_QUARANTINED,
++	DM_SWAPZ_FINAL_DELETING,
++	DM_SWAPZ_FINAL_DESTROYED,
++};
++
++static struct {
++	struct mapped_device *md;
++	struct dm_table *table;
++	struct swapz_trial_retained_scope key;
++	enum dm_swapz_final_phase phase;
++	int first_error;
++} dm_swapz_final;
++
++static bool dm_swapz_final_key_matches(const struct swapz_trial_retained_scope *key)
++{
++	lockdep_assert_held(&_minor_lock);
++	return key->identity == dm_swapz_final.key.identity &&
++	       key->session == dm_swapz_final.key.session &&
++	       key->epoch == dm_swapz_final.key.epoch &&
++	       key->target_epoch == dm_swapz_final.key.target_epoch &&
++	       key->registration_epoch == dm_swapz_final.key.registration_epoch;
++}
++
++/* suspend_lock -> _minor_lock; no reverse nesting. Native deferred-list
++ * mutation holds only deferred_lock here, never _minor_lock.
++ */
++static bool dm_swapz_final_fenced(struct mapped_device *md)
++{
++	bool fenced;
++
++	lockdep_assert_held(&md->suspend_lock);
++	spin_lock(&_minor_lock);
++	fenced = dm_swapz_final.md == md;
++	spin_unlock(&_minor_lock);
++	return fenced;
++}
++
++static bool dm_swapz_final_pending(struct mapped_device *md)
++{
++	unsigned long flags;
++	bool pending;
++
++	spin_lock_irqsave(&md->deferred_lock, flags);
++	pending = !bio_list_empty(&md->deferred) || md->requeue_list;
++	spin_unlock_irqrestore(&md->deferred_lock, flags);
++	return pending;
++}
++#endif
++
++static void do_deferred_remove(struct work_struct *w);
+@@ -328,2 +395,9 @@
+-	if (test_bit(DMF_FREEING, &md->flags) ||
+-	    dm_deleting_md(md)) {
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	/* Final intent prevents fresh opens, not existing-file close. */
++	if (dm_swapz_final.md == md) {
++		md = NULL;
++		goto out;
++	}
++#endif
++	if (test_bit(DMF_FREEING, &md->flags) ||
++	    dm_deleting_md(md)) {
+@@ -375,1 +449,11 @@
+-	if (dm_open_count(md)) {
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	/* Do not acknowledge ordinary deferred remove while the private
++	 * owner is still retiring or quarantined. No callback here. */
++	if (dm_swapz_final.md == md &&
++	    (dm_swapz_final.phase != DM_SWAPZ_FINAL_READY ||
++	     dm_swapz_final_pending(md))) {
++		r = -EAGAIN;
++		goto unlock;
++	}
++#endif
++	if (dm_open_count(md)) {
+@@ -381,4 +465,12 @@
+-	else
+-		set_bit(DMF_DELETING, &md->flags);
+-
+-	spin_unlock(&_minor_lock);
++	else
++		set_bit(DMF_DELETING, &md->flags);
++
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	if (!r && dm_swapz_final.md == md) {
++		dm_swapz_final.phase = DM_SWAPZ_FINAL_DELETING;
++		/* The native deletion path now owns the live table. */
++		dm_swapz_final.table = NULL;
++	}
++unlock:
++#endif
++	spin_unlock(&_minor_lock);
+@@ -3006,2 +3098,14 @@
+-	spin_lock(&_minor_lock);
+-	idr_replace(&_minor_idr, MINOR_ALLOCED, MINOR(disk_devt(dm_disk(md))));
++	spin_lock(&_minor_lock);
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	/* Built-in DM has no live module-exit forced removal. The normal
++	 * ioctl/deferred paths must have crossed the native deletion gate.
++	 * Fail closed if a future internal direct-destroy caller bypasses
++	 * it; the retained ownership must not be destroyed behind our back. */
++	if (dm_swapz_final.md == md &&
++	    WARN_ON_ONCE(!wait || dm_swapz_final.phase != DM_SWAPZ_FINAL_DELETING ||
++			 dm_open_count(md))) {
++		spin_unlock(&_minor_lock);
++		return;
++	}
++#endif
++	idr_replace(&_minor_idr, MINOR_ALLOCED, MINOR(disk_devt(dm_disk(md))));
+@@ -3042,2 +3146,12 @@
+-	dm_table_destroy(__unbind(md));
+-	free_dev(md);
++	dm_table_destroy(__unbind(md));
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	/* Only actual dtr return can consume the final reservation.
++	 * No table or target pointer is used after destruction. */
++	spin_lock(&_minor_lock);
++	if (dm_swapz_final.md == md) {
++		dm_swapz_final.md = NULL;
++		dm_swapz_final.phase = DM_SWAPZ_FINAL_DESTROYED;
++	}
++	spin_unlock(&_minor_lock);
++#endif
++	free_dev(md);
+@@ -3149,3 +3263,153 @@
+-/*
+- * Swap in a new table, returning the old one for the caller to destroy.
+- */
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++static bool dm_swapz_final_drained(struct mapped_device *md)
++{
++	lockdep_assert_held(&md->suspend_lock);
++	return dm_suspended_md(md) && !dm_suspended_internally_md(md) &&
++	       test_bit(DMF_BLOCK_IO_FOR_SUSPEND, &md->flags) &&
++	       !test_bit(DMF_POST_SUSPENDING, &md->flags) &&
++	       !dm_request_based(md) && !dm_in_flight_bios(md) &&
++	       !dm_swapz_final_pending(md);
++}
++
++/* Private cold seam, deliberately no caller under AUTH0. Only an
++ * independently already-admitted owner with live md/table/target lifetime,
++ * an immutable retained key and explicit final-removal intent may call.
++ * This is NOT an authorization entry and never suspends, opens, removes,
++ * or invokes normal dtr. A successful result means deletion eligibility
++ * at this check, not final close or destruction.
++ *
++ * Hold the native SRCU table borrow and our own md holder over the
++ * synchronous frozen controller callback. Release suspend_lock and
++ * _minor_lock first; controller may detach/put its own and MM/target files.
++ * Release our SRCU borrow before reacquiring suspend_lock, so a concurrent
++ * table synchronization never waits on a reader waiting for that lock.
++ * The reservation fences swap/resume/delete until the final check.
++ * Only EBUSY from the callback permits exact-key retry. After callback
++ * success, waiting for actual opens to close must not call it again.
++ */
++static __used noinline int dm_swapz_retire_final_table(struct mapped_device *md,
++		struct dm_table *expected_table,
++		const struct swapz_trial_retained_scope *retained)
++{
++	struct swapz_trial_retained_scope key;
++	struct dm_table *table;
++	struct dm_target *target;
++	bool invoke = true, release_holder = false, drained, same_table;
++	int error, srcu_idx;
++
++	if (!md || !expected_table || !retained)
++		return -EINVAL;
++	key = *retained;
++	if (!key.identity || !key.session || !key.epoch || !key.target_epoch ||
++	    !key.registration_epoch)
++		return -EINVAL;
++
++	lockdep_assert_not_held(&_minor_lock);
++	lockdep_assert_not_held(&md->suspend_lock);
++	mutex_lock(&md->suspend_lock);
++	table = dm_get_live_table(md, &srcu_idx);
++	error = -ESTALE;
++	if (table != expected_table || dm_table_get_md(table) != md ||
++	    table->num_targets != 1)
++		goto unlock_table;
++	target = dm_table_get_target(table, 0);
++	if (!target || target->table != table || !target->type ||
++	    strcmp(target->type->name, "swapz"))
++		goto unlock_table;
++	error = -EBUSY;
++	if (!dm_swapz_final_drained(md))
++		goto unlock_table;
++
++	spin_lock(&_minor_lock);
++	if (test_bit(DMF_FREEING, &md->flags) || dm_deleting_md(md))
++		goto unlock_minor;
++	if (dm_swapz_final.md) {
++		error = -ESTALE;
++		if (dm_swapz_final.md != md || dm_swapz_final.table != table ||
++		    !dm_swapz_final_key_matches(&key))
++			goto unlock_minor;
++		error = -EBUSY;
++		if (dm_swapz_final.phase == DM_SWAPZ_FINAL_RUNNING)
++			goto unlock_minor;
++		if (dm_swapz_final.phase == DM_SWAPZ_FINAL_QUARANTINED) {
++			error = dm_swapz_final.first_error;
++			goto unlock_minor;
++		}
++		error = -EALREADY;
++		if (dm_swapz_final.phase == DM_SWAPZ_FINAL_READY)
++			goto unlock_minor;
++		invoke = dm_swapz_final.phase == DM_SWAPZ_FINAL_RETRY;
++		if (!invoke && dm_swapz_final.phase != DM_SWAPZ_FINAL_RETIRED)
++			goto unlock_minor;
++	} else {
++		error = -EALREADY;
++		if (dm_swapz_final.phase != DM_SWAPZ_FINAL_IDLE)
++			goto unlock_minor;
++		/* dm_get is under _minor_lock, after the freeing/deleting check.
++		 * The extra holder is independent of all open mapper files. */
++		dm_get(md);
++		dm_swapz_final.md = md;
++		dm_swapz_final.table = table;
++		dm_swapz_final.key = key;
++	}
++	dm_swapz_final.phase = DM_SWAPZ_FINAL_RUNNING;
++	spin_unlock(&_minor_lock);
++	mutex_unlock(&md->suspend_lock);
++
++	error = invoke ? swapz_trial_controller_retire_registered(target, &key) : 0;
++	dm_put_live_table(md, srcu_idx);
++
++	mutex_lock(&md->suspend_lock);
++	same_table = rcu_dereference_protected(md->map,
++				lockdep_is_held(&md->suspend_lock)) == expected_table;
++	drained = dm_swapz_final_drained(md);
++	spin_lock(&_minor_lock);
++	/* The exact reservation must still be ours. Never accept a stale
++	 * callback or release a holder owned by another transaction. */
++	if (WARN_ON_ONCE(dm_swapz_final.md != md ||
++			 dm_swapz_final.table != expected_table ||
++			 dm_swapz_final.phase != DM_SWAPZ_FINAL_RUNNING ||
++			 !dm_swapz_final_key_matches(&key))) {
++		if (!error)
++			error = -ESTALE;
++		goto unlock_result;
++	}
++	if (!same_table || test_bit(DMF_FREEING, &md->flags) ||
++	    dm_deleting_md(md)) {
++		if (!error || error == -EBUSY)
++			error = -ESTALE;
++	}
++	if (error && error != -EBUSY) {
++		if (!dm_swapz_final.first_error)
++			dm_swapz_final.first_error = error;
++		dm_swapz_final.phase = DM_SWAPZ_FINAL_QUARANTINED;
++	} else if (error) {
++		dm_swapz_final.phase = DM_SWAPZ_FINAL_RETRY;
++	} else if (!drained || dm_open_count(md) || dm_swapz_final_pending(md)) {
++		/* fput may be asynchronous. Preserve the reservation until
++		 * the real native open count is zero, never force it. */
++		dm_swapz_final.phase = DM_SWAPZ_FINAL_RETIRED;
++		error = -EBUSY;
++	} else {
++		dm_swapz_final.phase = DM_SWAPZ_FINAL_READY;
++		release_holder = true;
++	}
++unlock_result:
++	spin_unlock(&_minor_lock);
++	mutex_unlock(&md->suspend_lock);
++	if (release_holder)
++		dm_put(md);
++	return error;
++
++unlock_minor:
++	spin_unlock(&_minor_lock);
++unlock_table:
++	mutex_unlock(&md->suspend_lock);
++	dm_put_live_table(md, srcu_idx);
++	return error;
++}
++#endif
++
++/*
++ * Swap in a new table, returning the old one for the caller to destroy.
++ */
+@@ -3161,1 +3425,7 @@
+-	/* device must be suspended */
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	if (dm_swapz_final_fenced(md)) {
++		map = ERR_PTR(-EBUSY);
++		goto out;
++	}
++#endif
++	/* device must be suspended */
+@@ -3420,2 +3690,8 @@
+-	if (!dm_suspended_md(md) || test_bit(DMF_FREEING, &md->flags))
+-		goto out;
++#ifdef SWAPZ_ROUND107_FINAL_REMOVAL_TEST
++	if (dm_swapz_final_fenced(md)) {
++		r = -EBUSY;
++		goto out;
++	}
++#endif
++	if (!dm_suspended_md(md) || test_bit(DMF_FREEING, &md->flags))
++		goto out;
