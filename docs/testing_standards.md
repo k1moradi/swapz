@@ -21035,3 +21035,8 @@ Under the existing scoped observation guard, reset per-BIO tokens before any ref
 ### Round 101 target qualification follow-up
 
 Exact first host execution passed 144 checks per GCC/Clang, but native prerequisite failed at libelf-pkg-config before any target compile. Provision runner packages explicitly. Separate early refused-map scope lock into a terminal-only helper; the normal map core validation must still precede the normal admission queue lock (R089/R092 regression), not bypass it. Keep original host cases and validate prior tested function bytes unchanged; execute only new refusal-only focused cases before the first directed target object attempt. The prior failure and artifact remain immutable. No historical auditor changes or native/full-link credit before actual successful build.
+
+
+### R101 A11 packaging correction
+
+Initial run 45921709462/job 140253713602 failed before Linux checkout: outer repository git diff --check interpreted tab-indented unified patch context as added text (first: patch line 17, space before tab in indent). Use zero-context overlay packaging with explicit --unidiff-zero and strict --whitespace=error for actual application; all five pinned preimages and predicted postimages are unchanged. Keep outer repository diff --check and actual staged source diff --check intact. The changed packaging triggers only the focused lane; do not manually replay the failed source. No host or native result was produced by the initial run. AUTH0, Phase A BLOCKED.

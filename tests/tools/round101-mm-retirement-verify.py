@@ -19,7 +19,7 @@ BROKER = "src/kernel/zswap-original-ticket.c"
 OWNER = "src/kernel/zswap-original-broker-owner.inc"
 HEADER = "src/kernel/zswap-original-ticket.h"
 PATCH = "tests/tools/round101-original-mm-retirement.patch"
-PATCH_PIN = "df8881c99dd38bff0e38f9678daf35abe603e91d"
+PATCH_PIN = "4d34b0d771789c09967b38fdf84b0f2b6513cd60"
 PRE = {MM: "cad0d9ba05cd614b95b335ed0c7d70d9e69d00f0",
        CARRIER: "5e11fe42a9dce147cdaf7f30c43b1c8b6feff59a",
        BROKER: "70109f2c2ce9f60681649bd4807382248d0a41a2",
@@ -150,7 +150,9 @@ def stage(linux, output, state):
     require(not git(linux, "diff", "--name-only"), "unexpected unstaged preimage")
     patch = ROOT / PATCH
     pin(patch, PATCH_PIN)
-    new_apply = ["git", "apply", "--whitespace=error"]
+    # Zero-context packaging keeps the repository diff whitespace-clean.
+    # Exact whole-file pre/postimages remain mandatory for each raw hunk.
+    new_apply = ["git", "apply", "--unidiff-zero", "--whitespace=error"]
     step(output, "r101-check", new_apply + ["--check", str(patch)], linux)
     step(output, "r101-apply", new_apply + [str(patch)], linux)
     require(set(git(linux, "diff", "--name-only").decode().splitlines()) == set(POST), "R101 changed path census")
