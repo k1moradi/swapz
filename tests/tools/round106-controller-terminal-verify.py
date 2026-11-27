@@ -15,7 +15,8 @@ FREEZE = "8a83828717ea3000d102043ead78fd86ad0391a8"
 TASK = "7eb880eb84474f75037acb9f33b95d92d861000c"
 LINUX = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 STAGE = "tests/tools/round105-mm-admission-join-verify.py"
-STAGE_PIN = "8dc136fc8db0d25ce1f66de871119bda278e01b1"
+# A1: exact R105 inherited declaration pin correction; product postimages unchanged.
+STAGE_PIN = "01ff882ddcdbdd27da6b354a078921169aebce38"
 FIXTURE = "tests/runtime/native/fixtures/round106-controller-terminal.c"
 FIXTURE_PIN = "9442a6d445d34370ea6d7156923eb674255c0456"
 SOURCE = {
