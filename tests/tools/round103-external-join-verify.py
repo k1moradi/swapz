@@ -36,8 +36,8 @@ FROZEN_CURRENT = {
     "src/kernel/dm-target.c": "087bec323ad59f365d77d3beaf1aa52907cfcfce",
     "src/kernel/native-observation-controller.c": "daa9bfcb321b2cc378994717a12f87a2c67c9b28",
     "src/kernel/native-observation-controller.h": "5dc62a0c7c3abc3999b8e16836a84bdbc2d8e061",
-    "src/kernel/native-observation-collector.c": "2fc41a64228b8f845192fd0107014f71b46391e3",
-    "src/kernel/native-observation-collector.h": "62fdf6f74709f958a3cd10d0faaa3191c40da1d1",
+    "src/kernel/native-observation-byte-collector.c": "2fc41a64228b8f845192fd0107014f71b46391e3",
+    "src/kernel/native-observation-byte-collector.h": "62fdf6f74709f958a3cd10d0faaa3191c40da1d1",
 }
 OBJECTS = ("mm/zswap.o", "mm/page_io.o", "mm/swapfile.o", "drivers/md/dm.o")
 MODES = ("normal", "reopen", "wrong-completion", "split", "late", "overflow",
