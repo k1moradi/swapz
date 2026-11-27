@@ -223,6 +223,12 @@ void swapz_trial_byte_finish_input(u64 input_token, u64 store_sequence)
 	state = bridge;
 	if (!usable(state))
 		goto out;
+	/* CLEANUP is the terminal byte boundary, not permission to finish a
+	 * staged input. Retain both banks for the actual external join. */
+	if (state->cleaned) {
+		lose(state);
+		goto out;
+	}
 	for (unsigned int index = 0; input_token && index < state->pages; ++index) {
 		struct staged_input *input = &state->input[index];
 
@@ -459,6 +465,23 @@ static bool outcome(struct byte_bridge *state, const struct swapz_observation_re
 	}
 }
 
+/* Caller holds bridge_lock. Only BIND consumes a committed input into
+ * the collector; a canceled replacement leaves the prior committed bank.
+ * The bounded cold census cannot infer retirement from a zero token.
+ */
+static bool terminal_ready(const struct byte_bridge *state)
+{
+	const struct byte_operation *op = &state->op;
+
+	if (!op->done ||
+	    (op->captured && (!op->candidate_released || !op->carrier_released)))
+		return false;
+	for (unsigned int index = 0; index < state->pages; ++index)
+		if (state->input[index].token || state->input[index].committed)
+			return false;
+	return true;
+}
+
 static bool apply_event(struct byte_bridge *state, const struct swapz_observation_record *record,
 			u64 sequence, const void *bytes, size_t length)
 {
@@ -474,10 +497,10 @@ static bool apply_event(struct byte_bridge *state, const struct swapz_observatio
 	case SWAPZ_OBS_ACCEPT:
 		return accept_operation(state, record, sequence, bytes, length);
 	case SWAPZ_OBS_CLEANUP:
-		if (state->cleaned || !op->done ||
-		    (op->captured && (!op->candidate_released || !op->carrier_released)) ||
+		if (state->cleaned || !terminal_ready(state) ||
 		    record->flags != 7 || record->caps ||
-		    record->tickets || record->pins || record->reservations || record->bios || record->maps)
+		    record->tickets || record->pins || record->reservations || record->bios ||
+		    record->maps || record->quarantines)
 			return false;
 		state->cleaned = true;
 		return true;
@@ -594,12 +617,10 @@ void swapz_byte_bridge_close(bool joined)
 		BRIDGE_UNLOCK();
 		return;
 	}
-	if (!state->bound || !state->op.done || !state->cleaned ||
-	    (state->op.captured && (!state->op.candidate_released || !state->op.carrier_released)))
+	/* Independently repeat the input/operation census at actual close.
+	 * Loss never substitutes for the caller's external join. */
+	if (!state->bound || !state->cleaned || !terminal_ready(state))
 		lose(state);
-	for (unsigned int index = 0; index < state->pages; ++index)
-		if (state->input[index].token)
-			lose(state);
 	if (!joined)
 		lose(state);
 	state->closed = true;

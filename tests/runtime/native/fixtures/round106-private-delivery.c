@@ -171,6 +171,9 @@ static struct swapz_bio_ref new_entry(void)
 		.observation_descriptor = swapz_trial_observation_mint(),
 	};
 }
+/* Host-only white-box probes of otherwise unreachable terminal debt. */
+void round108_terminal_probe(const char *mode);
+
 static void actual_trace(const char *mode, const struct swapz_trial_observation_scope *scope)
 {
 	struct swapz_dm ctx = {.logical_pages = 16, .prepublication_fua = true};
@@ -364,7 +367,7 @@ finish:
 		assert(swapz_trial_observation_stop(join, (void *)scope));
 	}
 	struct swapz_private_snapshot *snapshot = NULL;
-	if (bad || controller) {
+	if (bad || controller || claimed_error) {
 		assert(!swapz_trial_observation_materialize(scope, &snapshot) && !snapshot);
 		assert(refuse_private());
 	} else {
@@ -381,7 +384,13 @@ int main(int argc, char **argv)
 {
 	assert(argc == 2);
 	const char *mode = argv[1];
-	bool clean = !strcmp(mode, "clean") || !strcmp(mode, "error") || !strcmp(mode, "wrong_copy");
+	bool clean = !strcmp(mode, "clean") || !strcmp(mode, "wrong_copy");
+	bool pending_finish = !strcmp(mode, "pending_finish");
+	bool pending_cancel = !strcmp(mode, "pending_cancel");
+	bool unrepresented = !strcmp(mode, "unrepresented");
+	bool quarantine_debt = !strcmp(mode, "quarantine_debt");
+	bool terminal_reject = pending_finish || pending_cancel || unrepresented ||
+			       quarantine_debt || !strcmp(mode, "error");
 	struct swapz_trial_observation_scope scope = {
 		.session = 11, .epoch = 12, .target_epoch = 13, .registration_epoch = 14,
 		.first_logical = 7, .page_count = 4,
@@ -473,8 +482,16 @@ int main(int argc, char **argv)
 				break;
 			}
 		}
-		if (!strcmp(mode, "pending") && record.event == SWAPZ_OBS_CLEANUP)
-			assert(swapz_trial_byte_stage_input(77, 2, 13, 7, page, sizeof(page)));
+		u64 terminal_token = 0;
+		if (record.event == SWAPZ_OBS_CLEANUP &&
+		    (!strcmp(mode, "pending") || pending_finish || pending_cancel || unrepresented)) {
+			terminal_token = swapz_trial_byte_stage_input(77, 2, 13, 7, page, sizeof(page));
+			assert(terminal_token);
+			if (unrepresented)
+				swapz_trial_byte_finish_input(terminal_token, 100);
+		}
+		if (quarantine_debt && record.event == SWAPZ_OBS_CLEANUP)
+			record.quarantines = 1;
 		if (!strcmp(mode, "bad_status") && record.event == SWAPZ_OBS_CLONE_ENDIO)
 			record.status = 5;
 		if (clean) {
@@ -516,9 +533,28 @@ int main(int argc, char **argv)
 		}
 		if (!strcmp(mode, "wrong_copy") && record.event == SWAPZ_OBS_ORACLE)
 			page[SWAPZ_BYTE_PAGE - 1U] ^= 1U;
-		if (!swapz_trial_byte_event(&record, ordinal, view, length)) {
+		bool accepted = swapz_trial_byte_event(&record, ordinal, view, length);
+		if (record.event == SWAPZ_OBS_CLEANUP && terminal_reject) {
+			/* Refusal must occur at CLEANUP, not merely at close. */
+			assert(!accepted);
+			if (pending_finish || pending_cancel)
+				swapz_trial_byte_finish_input(terminal_token, pending_finish ? 100U : 0U);
+		}
+		if (!accepted) {
 			rejected = true;
 			break;
+		}
+		if (record.event == SWAPZ_OBS_CLEANUP) {
+			if (!strcmp(mode, "late_stage"))
+				assert(!swapz_trial_byte_stage_input(77, 2, 13, 7, page, sizeof(page)));
+			if (!strcmp(mode, "late_finish"))
+				swapz_trial_byte_finish_input(1, 100);
+			if (!strcmp(mode, "duplicate_cleanup")) {
+				u64 extra = swapz_trial_observation_append_sequence(&record);
+				assert(extra == ordinal + 1U);
+				assert(!swapz_trial_byte_event(&record, extra, NULL, 0));
+			}
+			round108_terminal_probe(mode);
 		}
 		if (!strcmp(mode, "duplicate") && index == 1) {
 			assert(!swapz_trial_byte_event(&record, ordinal, view, length));
@@ -578,7 +614,10 @@ int main(int argc, char **argv)
 	} else {
 		assert(rejected || !strcmp(mode, "failed_join") || !strcmp(mode, "pending") ||
 		       !strcmp(mode, "absent_cleanup") || !strcmp(mode, "unforwarded_cleanup") ||
-		       !strcmp(mode, "trailing"));
+		       !strcmp(mode, "trailing") || !strcmp(mode, "late_stage") ||
+		       !strcmp(mode, "late_finish") || !strcmp(mode, "duplicate_cleanup") ||
+		       !strcmp(mode, "late_finish_internal") || !strcmp(mode, "close_pending") ||
+		       !strcmp(mode, "close_committed"));
 		assert(!swapz_trial_observation_export_bytes(reject_sink, NULL) && !exported);
 		assert(refuse_private());
 		puts("R106_PRIVATE_REJECTED AUTH=0");

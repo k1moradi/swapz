@@ -17,7 +17,9 @@ delivery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(delivery)
 private = delivery.private
 correlation, reference, oracle, legacy = private.correlation, private.reference, private.oracle, private.legacy
-source, binary = sys.argv[1:]
+source, binary = sys.argv[1:3]
+mutant_mode = sys.argv[3] if len(sys.argv) == 4 else None
+assert len(sys.argv) in (3, 4)
 fixture_path = ROOT / "tests/runtime/native/independent-byte-oracle-test.py"
 tree = ast.parse(fixture_path.read_text())
 names = {"action", "fixture", "pack"}
@@ -212,8 +214,19 @@ def join(mode, data, expected):
 
 clean = fixture()
 error = fixture(True)
+if mutant_mode:
+    # Mutants must fail an actual assertion, not merely refuse a compiler
+    # invocation or emit arbitrary failure output. Keep payloads private.
+    proc = subprocess.run([binary, mutant_mode], input=clean[3],
+                          capture_output=True, timeout=25)
+    assert proc.returncode != 0 and b"Assertion" in proc.stderr, "surviving mutant: " + mutant_mode
+    print("R108_MUTANT_REJECTED " + mutant_mode)
+    sys.exit(0)
 join("clean", clean, "CONSISTENT_PRIVATE_BYTE_WITNESSES_ONLY")
-join("error", error, "OBSERVED_CLAIMED_ERROR_BLOCKED")
+# The historical oracle's claimed-error classification remains unchanged;
+# the current strict terminal bridge must not export nonzero quarantine debt.
+assert run("error", error) == b"R106_PRIVATE_REJECTED AUTH=0\n"
+checks += 1
 join("wrong_copy", clean, None)
 for mode in ("actual-controller", "actual-write", "actual-read", "actual-ordinary",
              "actual-fallback", "actual-error", "actual-missing-candidate",
@@ -221,8 +234,11 @@ for mode in ("actual-controller", "actual-write", "actual-read", "actual-ordinar
              "actual-interleave", "actual-zero", "actual-packed"):
     assert run(mode, clean) == b"R106_ACTUAL_TRANSITION_CHECK AUTH=0\n", mode
     checks += 1
-for mode in ("absent_cleanup", "unforwarded_cleanup", "failed_join"):
+for mode in ("absent_cleanup", "unforwarded_cleanup", "failed_join",
+             "pending", "pending_finish", "pending_cancel", "unrepresented",
+             "late_stage", "late_finish", "duplicate_cleanup", "quarantine_debt",
+             "wrong_ordinal", "close_pending", "close_committed", "late_finish_internal"):
     assert run(mode, clean) == b"R106_PRIVATE_REJECTED AUTH=0\n", mode
     checks += 1
-print(json.dumps(dict(status="R106_PRIVATE_DELIVERY_HOST_PASS", checks=checks,
+print(json.dumps(dict(status="R108_TERMINAL_BYTE_HOST_PASS", checks=checks,
                       native_capture=False, actual_transition_modes=13, auth=0), sort_keys=True))
