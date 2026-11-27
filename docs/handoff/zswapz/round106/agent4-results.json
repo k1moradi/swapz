@@ -1,7 +1,7 @@
 {
   "round": 106,
   "agent": 4,
-  "conclusion": "PARTIAL_EXACT_SOURCE_REGEX_MUTATION_PREFLIGHT_PASS_HOSTED_QUALIFICATION_PENDING",
+  "conclusion": "PASS_CURRENT_CONSUMER_R092_AND_X86_ARM_PRODUCTION_C_BROADER_PENDING",
   "frozen_commit": "8a83828717ea3000d102043ead78fd86ad0391a8",
   "frozen_tree": "1d175df983eb17b8611624ec8b83ea8ddc89b2e8",
   "task_commit": "7eb880eb84474f75037acb9f33b95d92d861000c",
@@ -62,7 +62,8 @@
   "historical_infrastructure": {
     "job": 140393590583,
     "first_error": "apt packages.microsoft.com Ubuntu noble InRelease HTTP 403 Forbidden; exit 100",
-    "classification": "INFRASTRUCTURE"
+    "classification": "INFRASTRUCTURE",
+    "run": 45965574446
   },
   "focused_preflight": {
     "method": "Connector full exact frozen target bytes and generated Python rule/mutation expressions evaluated by JavaScript mirror; not Python execution, not compiled or loaded kernel.",
@@ -89,16 +90,93 @@
     "native_helper_execution": "NOT_RUN_LOCALLY"
   },
   "automatic_ci": {
-    "x86_64": "NOT_YET_OBSERVED",
-    "arm64": "NOT_YET_OBSERVED",
-    "r092": "NOT_YET_OBSERVED",
-    "project_goals": "NOT_YET_OBSERVED",
-    "matched_consumer": "NOT_YET_OBSERVED",
-    "manual_dispatches": 0
+    "tested_commit": "266fe55f757be6b878c46f2134414bc40c25bc05",
+    "manual_dispatches": 0,
+    "r092": {
+      "run": 45973542313,
+      "job": 140419556779,
+      "status": "SUCCESS",
+      "actual_python": {
+        "legacy": 24,
+        "typed": 6,
+        "scoped_typed": 4,
+        "guarded_fallback": 16,
+        "total_rejected": 50,
+        "extracted_c_compilers": 2
+      },
+      "host": {
+        "conclusion": "PASS_HOST_ONLY",
+        "frozen_product": "2499405464110e6a97f054db5527de54b8aafb3a",
+        "frozen_inventory_count": 46,
+        "fragment_sha256": "f4677834a9b0b5682fea58966351183aeb160204a3498e8ac47c04a6b2237da9",
+        "static_mutants": 15,
+        "checks_per_compiler": 12708,
+        "compiled_mutants_per_compiler": 4,
+        "mixed_version_negative": "PASS",
+        "first_error": null,
+        "native_dm": "NOT_RUN"
+      },
+      "artifact": {
+        "id": 15186251603,
+        "size_bytes": 841,
+        "sha256": "7d7fd3f22a880df4459d24730805150057ec7b19203cda6215926a879211b696",
+        "downloaded_independently": true,
+        "zip_crc_and_results_verified": true
+      }
+    },
+    "product": {
+      "run": 45973545853,
+      "compile_only_x86": {
+        "job": 140419567746,
+        "status": "SUCCESS"
+      },
+      "compile_only_arm": {
+        "job": 140419568186,
+        "status": "SUCCESS"
+      },
+      "exact_c_x86": {
+        "job": 140419568054,
+        "status": "SUCCESS",
+        "actual_source_tests": 183,
+        "legacy_typed_scoped_mutants": 34,
+        "guarded_fallback_mutants": 16,
+        "extracted_c_compilers": 2,
+        "first_error": null
+      },
+      "exact_c_arm": {
+        "job": 140419568094,
+        "status": "SUCCESS",
+        "actual_source_tests": 183,
+        "legacy_typed_scoped_mutants": 34,
+        "guarded_fallback_mutants": 16,
+        "extracted_c_compilers": 2,
+        "first_error": null
+      }
+    },
+    "project_goals": {
+      "run": 45973542366,
+      "success_jobs": [
+        140419557741,
+        140419557792,
+        140419557797,
+        140419557901,
+        140419557955
+      ],
+      "native": {
+        "job": 140419557416,
+        "status": "IN_PROGRESS"
+      },
+      "aggregate": "NOT_YET_VERIFIED"
+    },
+    "matched_consumer": {
+      "run": 45973542478,
+      "job": 140419558321,
+      "status": "IN_PROGRESS"
+    }
   },
   "production_defect": "No product semantic defect demonstrated in audited terminal/fallback branches; no runtime or lifecycle conclusion.",
   "limitations": [
-    "Static source/regex preflight only; actual Python interpreter, original C commit helper, compiler, full historical host composition and complete exact-SHA jobs await hosted results.",
+    "Hosted Python and actual extracted guarded C helper, historical full R092 host composition and all four x86/ARM product-C jobs PASS; exact-SHA project-goals and matched-consumer job not terminal verified. Compiler versions not recorded by R092 result JSON.",
     "Independent work uses only frozen target/preimage. Automatic current main jobs may include intervening peer code, which is not independent frozen full qualification.",
     "No connected build, runtime, activation, module loading, VM or physical activity."
   ],
