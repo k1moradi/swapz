@@ -1,0 +1,64 @@
+{
+  "round": 106,
+  "agent": 3,
+  "issue": 224,
+  "status": "SOURCE_PUBLISHED_QUALIFICATION_QUEUED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_RAW": false,
+  "import": false,
+  "freeze": {
+    "commit": "8a83828717ea3000d102043ead78fd86ad0391a8",
+    "tree": "1d175df983eb17b8611624ec8b83ea8ddc89b2e8",
+    "task": "7eb880eb84474f75037acb9f33b95d92d861000c",
+    "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "r105_stage_verifier": "8dc136fc8db0d25ce1f66de871119bda278e01b1",
+    "carrier_header": "bd88db905e5009e0e6161cad1d09b6d33bde2560",
+    "terminal_inc": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+    "mm_zswap": "058389456ee1586f5a26d40f78cd5cde99312060",
+    "swapfile": "d20a7f0003405bd1450cc52af63a773c91ee86b6"
+  },
+  "publication": {
+    "source": "9c558330dba63b41b3a1c43c38f1c78cfd9a02a3",
+    "parent": "5ff6791e6eca337d2f911e0eb8bef828aa2e8e60",
+    "tree": "f2ce81c86078fced22a196b5072c1467805b100d",
+    "branch": "main",
+    "force": false,
+    "remote_readback_verified": true,
+    "standards_prefix_verified": true
+  },
+  "blobs": {
+    "src/kernel/native-observation-controller.c": "556b99a0d04e3027c3027c387a0a9552e22a19ec",
+    "src/kernel/native-observation-controller.h": "dac2e2844d893b0090b4c1da3614e4a8d0cc2253",
+    "src/kernel/dm-target.c": "b17a17c1096eaa6f43bf42a18c009b8d379e080b",
+    "tests/runtime/native/fixtures/round106-controller-terminal.c": "9442a6d445d34370ea6d7156923eb674255c0456",
+    "tests/tools/round106-controller-terminal-verify.py": "fffc3678f90c614ca79a5096c460a7ceaf49429e",
+    ".github/workflows/phase-a-round106-controller-terminal-noauth.yml": "2603fb2084a5b1bf9c819a5dadba9a32eb3f47aa",
+    "docs/testing_standards.md": "8cd42cec8be9a5efe00ef057e5bd943a713ebd94"
+  },
+  "qualification": {
+    "local_checkout": "BLOCKED_DNS",
+    "host": "NOT_RUN_LOCALLY",
+    "directed_objects": "NOT_RUN_LOCALLY",
+    "planned_host_cases_per_compiler": 21,
+    "planned_mutants_per_compiler": 8,
+    "run_id": 45973947336,
+    "job_id": 140420908032,
+    "run_status": "queued",
+    "conclusion": null,
+    "manual_dispatches": 0,
+    "full_builds_by_agent": 0,
+    "automatic_existing_push_workflows": true,
+    "physical_operations": 0
+  },
+  "limitations": [
+    "No completed current-source test results",
+    "Host fixture models external boundaries",
+    "Frozen bridge pending-token check is at close; CLEANUP is not standalone clean evidence",
+    "Residual scoped ordinary maps and abandoned/failed/unsupported traces cannot certify clean",
+    "No fresh RAW/FUA/fallback or uninstalled recovery execution",
+    "Actual admission and pre-destruction caller independently owned by Agent 11",
+    "Agent 1 integration and acceptance pending"
+  ]
+}
