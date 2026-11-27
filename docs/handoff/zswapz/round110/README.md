@@ -1,0 +1,2 @@
+# R110 — native composed read-only preflight
+Issue [#228](https://github.com/k1moradi/swapz/issues/228). Freeze 1ede7cfc7be8e870cadf34afec7a655d4630750e tree aca15a12f4691651fd6918935816d67620ac571e; Linux c339f4010dea8b0d754f84ace70cd1b089878ef8. [R109 A1 terminal closeout](../round109/agent1-terminal-checkpoint.md). One worker: [A11 actual DM composition](agent11-dm-composed-preflight-p0.md). [Binding contract](frozen-contract.md) · [Notification](notification.md). A1 owns integration; all others stand down, no repeated full build. Report here and #228.
