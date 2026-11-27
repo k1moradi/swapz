@@ -1,0 +1,55 @@
+diff --git a/mm/swapz-trial-terminal.inc b/mm/swapz-trial-terminal.inc
+index 2bfc139f380461c71da78a8c7f9469d1e7eb0b22..b0acebd01b19ea0900300a609ffbf9448aec51d3 100644
+--- a/mm/swapz-trial-terminal.inc
++++ b/mm/swapz-trial-terminal.inc
+@@ -147,12 +147,17 @@
+ #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+ 	struct swapz_trial_debt_slot *slot;
+ 	struct swapz_observation_record record = {};
++	bool missing_correlation = false;
+ #endif
+ 
+ 	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
+ #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+ 	slot = swapz_trial_debt_find(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM);
+-	if (slot && slot->operation && slot->original)
++	/* An admitted origin without final DM correlation is evidence loss,
++	 * not permission to manufacture an ACK or skip its real callback. */
++	missing_correlation = slot && slot->observed &&
++		(!slot->operation || !slot->original);
++	if (slot && slot->observed && slot->operation && slot->original)
+ 		record = (struct swapz_observation_record){
+ 			.event = SWAPZ_OBS_UPPER_ENDIO, .operation = slot->operation,
+ 			.original = slot->original,
+@@ -165,9 +170,9 @@
+ 	bio->bi_end_io = endio;
+ 	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
+ #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+-	if (record.operation)
++	if (ticket && record.operation)
+ 		swapz_mm_observation_emit(&record);
+-	if (!ticket)
++	if (!ticket || missing_correlation)
+ 		swapz_trial_byte_invalidate();
+ #endif
+ 	if (endio)
+@@ -271,8 +276,17 @@
+ #endif
+ 	    !(sector & 7) && sector >= scope->first_sector &&
+ 	    sector - scope->first_sector <= scope->sector_count - 8) {
+-		slot->observed = true;
+-		matched = true;
++		/* Keep callback debt after swapoff starts, but never mint a
++		 * new observation for a revoked or reused swap-area epoch. */
++		if (scope->area_epoch &&
++		    swapz_mm_trial_area_epoch(scope->swap_type) == scope->area_epoch) {
++			slot->observed = true;
++			matched = true;
++		}
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++		else
++			invalidate = true;
++#endif
+ 	}
+ 	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
+ 	rcu_read_unlock();

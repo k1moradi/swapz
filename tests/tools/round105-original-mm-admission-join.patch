@@ -1,0 +1,288 @@
+diff --git a/mm/swapz-trial-terminal.inc b/mm/swapz-trial-terminal.inc
+index b0acebd01b19ea0900300a609ffbf9448aec51d3..697f3c9fc51738fedabc58cefc4eee6fddc8358c 100644
+--- a/mm/swapz-trial-terminal.inc
++++ b/mm/swapz-trial-terminal.inc
+@@ -7,6 +7,24 @@
+ static struct file *swapz_mm_area_file;
+ static bool swapz_mm_area_invalidated, swapz_mm_area_drained;
+ static bool swapz_mm_terminal_closed, swapz_mm_terminal_joined;
++/* Protected by the cold scope mutex. Detached retains only the exact
++ * scalar identity and independent broker cap, not an open mapper file. */
++static bool swapz_mm_scope_files_detached;
++
++static bool swapz_mm_trial_scope_retained(u64 identity)
++{
++	return identity && identity == swapz_mm_scope_storage.identity &&
++	       (swapz_mm_scope_file || swapz_mm_scope_files_detached);
++}
++
++static bool swapz_mm_trial_scope_retained_exact(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch)
++{
++	return swapz_mm_trial_scope_retained(identity) &&
++	       session == swapz_mm_scope_storage.session &&
++	       table_epoch == swapz_mm_scope_storage.table_epoch &&
++	       target_epoch == swapz_mm_scope_storage.target_epoch;
++}
+ 
+ #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+ /* Published scope storage and mapper file remain live until observation
+@@ -341,10 +359,7 @@
+ 	int error = -ESTALE;
+ 
+ 	mutex_lock(&swapz_mm_scope_lock);
+-	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity ||
+-	    session != swapz_mm_scope_storage.session ||
+-	    table_epoch != swapz_mm_scope_storage.table_epoch ||
+-	    target_epoch != swapz_mm_scope_storage.target_epoch)
++	if (!swapz_mm_trial_scope_retained_exact(identity, session, table_epoch, target_epoch))
+ 		goto unlock;
+ 	error = -EBUSY;
+ 	if (swapz_mm_scope_transition || !swapz_mm_scope_capture_stopped)
+@@ -373,5 +388,127 @@
+ 	swapz_mm_scope_transition = false;
+ unlock:
+ 	mutex_unlock(&swapz_mm_scope_lock);
++	return error;
++}
++
++/* Cold, exact, read-only accounting. A detached object still owes its
++ * ticket until callback return; count tickets, not non-NULL owner pointers.
++ * Snapshot is not a target/provider/broker join or a CLEANUP record. */
++int swapz_mm_trial_scope_terminal_snapshot(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch,
++	struct swapz_mm_trial_terminal_snapshot *snapshot)
++{
++	struct swapz_mm_trial_terminal_snapshot observed = {};
++	unsigned long flags;
++	unsigned int index;
++	int error = -ESTALE;
++
++	if (!snapshot)
++		return -EINVAL;
++	mutex_lock(&swapz_mm_scope_lock);
++	if (!swapz_mm_trial_scope_retained_exact(identity, session, table_epoch, target_epoch))
++		goto unlock;
++	error = -EBUSY;
++	if (swapz_mm_scope_transition)
++		goto unlock;
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	observed.area_epoch = swapz_mm_scope_storage.area_epoch;
++	observed.capture_stopped = swapz_mm_scope_capture_stopped;
++	observed.area_retired = swapz_mm_area_drained;
++	observed.terminal_closed = swapz_mm_terminal_closed;
++	observed.terminal_joined = swapz_mm_terminal_joined;
++	observed.carrier_busy = atomic_read_acquire(&swapz_mm_busy) != 0;
++	observed.files_detached = swapz_mm_scope_files_detached;
++	for (index = 0; index < SWAPZ_TRIAL_DEBT_SLOTS; ++index) {
++		const struct swapz_trial_debt_slot *slot = &swapz_mm_terminal_debt.slots[index];
++
++		if (!slot->ticket)
++			continue;
++		switch (slot->kind) {
++		case SWAPZ_TRIAL_MM:
++			++observed.mm_callbacks;
++			break;
++		case SWAPZ_TRIAL_DM:
++			++observed.dm_callbacks;
++			break;
++		case SWAPZ_TRIAL_ENTRY:
++			++observed.dm_entrants;
++			break;
++		default:
++			swapz_mm_terminal_debt.fault = true;
++		}
++	}
++	if (observed.mm_callbacks + observed.dm_callbacks + observed.dm_entrants !=
++	    swapz_mm_terminal_debt.count)
++		swapz_mm_terminal_debt.fault = true;
++	observed.fault = swapz_mm_terminal_debt.fault;
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	*snapshot = observed;
++	error = 0;
++unlock:
++	mutex_unlock(&swapz_mm_scope_lock);
++	return error;
++}
++
++/* Drop only MM-owned open-file refs, not the independent broker cap.
++ * The controller must release its own mapper/table refs separately, outside
++ * controller/target/DM locks, and still prove actual final table retirement.
++ * fput relinquishes ownership; it does not certify synchronous final close.
++ * A transition remains busy across grace and both puts. No raw bdev pointer
++ * is retained after the observation publication has been joined. */
++int swapz_mm_trial_scope_detach_files(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch)
++{
++	struct file *mapper_file, *area_file;
++	unsigned long flags;
++	int error = -ESTALE;
++
++	mutex_lock(&swapz_mm_scope_lock);
++	if (!swapz_mm_trial_scope_retained_exact(identity, session, table_epoch, target_epoch))
++		goto unlock;
++	error = -EBUSY;
++	if (swapz_mm_scope_transition || !swapz_mm_scope_capture_stopped)
++		goto unlock;
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (swapz_mm_terminal_debt.fault)
++		error = -EUCLEAN;
++	else if (swapz_mm_terminal_joined && swapz_mm_terminal_ready()) {
++		if (swapz_mm_scope_files_detached) {
++			error = 0;
++		} else if (swapz_mm_scope_file && swapz_mm_area_file) {
++			swapz_mm_scope_transition = true;
++			rcu_assign_pointer(swapz_mm_scope, NULL);
++			error = 0;
++		} else {
++			error = -EUCLEAN;
++		}
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	if (error || swapz_mm_scope_files_detached)
++		goto unlock;
++	mutex_unlock(&swapz_mm_scope_lock);
++	synchronize_rcu();
++	mutex_lock(&swapz_mm_scope_lock);
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (!swapz_mm_terminal_joined || !swapz_mm_terminal_ready()) {
++		error = swapz_mm_terminal_debt.fault ? -EUCLEAN : -EBUSY;
++		spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++		goto finish;
++	}
++	mapper_file = swapz_mm_scope_file;
++	area_file = swapz_mm_area_file;
++	swapz_mm_scope_file = NULL;
++	swapz_mm_area_file = NULL;
++	swapz_mm_scope_storage.bdev = NULL;
++	swapz_mm_scope_files_detached = true;
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	mutex_unlock(&swapz_mm_scope_lock);
++	fput(area_file);
++	fput(mapper_file);
++	mutex_lock(&swapz_mm_scope_lock);
++finish:
++	swapz_mm_scope_transition = false;
++unlock:
++	mutex_unlock(&swapz_mm_scope_lock);
+ 	return error;
+ }
+diff --git a/mm/zswap.c b/mm/zswap.c
+index e088dd706763bec377d09a81905cf5de9b371c6a..058389456ee1586f5a26d40f78cd5cde99312060 100644
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1139,1 +1139,5 @@
+-	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity)
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	if (!swapz_mm_trial_scope_retained(identity))
++#else
++	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity)
++#endif
+@@ -1181,1 +1185,5 @@
+-	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity)
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	if (!swapz_mm_trial_scope_retained(identity))
++#else
++	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity)
++#endif
+@@ -1217,2 +1225,5 @@
+-		area_file = swapz_mm_area_file;
+-		swapz_mm_area_file = NULL;
++		area_file = swapz_mm_area_file;
++		swapz_mm_area_file = NULL;
++		swapz_mm_scope_files_detached = false;
++		swapz_mm_scope_storage.bdev = NULL;
++		swapz_mm_scope_storage.broker = NULL;
+@@ -2387,1 +2398,12 @@
+-static bool zswap_store_page(struct folio *folio, long index,
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++/* The frozen byte API cannot erase an already committed key. If an actual
++ * scoped entry disappears without a replacement cookie or typed eviction,
++ * reject the trace rather than treating retained old input as fresh. */
++static void swapz_mm_input_retire_unrepresented(const struct zswap_entry *entry)
++{
++	if (entry && entry->original_cookie && swapz_trial_byte_active())
++		swapz_trial_byte_invalidate();
++}
++#endif
++
++static bool zswap_store_page(struct folio *folio, long index,
+@@ -2433,2 +2455,6 @@
+-	if (old)
+-		zswap_entry_free(old);
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++	if (old && !entry->original_cookie)
++		swapz_mm_input_retire_unrepresented(old);
++#endif
++	if (old)
++		zswap_entry_free(old);
+@@ -2657,3 +2683,6 @@
+-	folio_mark_dirty(folio);
+-	xa_erase(tree, offset);
+-	zswap_entry_free(entry);
++	folio_mark_dirty(folio);
++	xa_erase(tree, offset);
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++	swapz_mm_input_retire_unrepresented(entry);
++#endif
++	zswap_entry_free(entry);
+@@ -2680,3 +2709,7 @@
+-		entry = xa_erase(tree, offset + i);
+-		if (entry)
+-			zswap_entry_free(entry);
++		entry = xa_erase(tree, offset + i);
++		if (entry) {
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++			swapz_mm_input_retire_unrepresented(entry);
++#endif
++			zswap_entry_free(entry);
++		}
+diff --git a/mm/swapfile.c b/mm/swapfile.c
+index 031a93193886b093045e4aa15456016da49a7a43..d20a7f0003405bd1450cc52af63a773c91ee86b6 100644
+--- a/mm/swapfile.c
++++ b/mm/swapfile.c
+@@ -3340,3 +3339,0 @@
+-#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
+-	swapz_mm_trial_area_retired(p->type);
+-#endif
+@@ -3360,3 +3357,8 @@
+-	spin_lock(&swap_lock);
+-	p->flags = 0;
+-	spin_unlock(&swap_lock);
++	spin_lock(&swap_lock);
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	/* All selected swap-area resources have been freed and native file
++	 * ownership relinquished. Publish retirement before type reuse. */
++	swapz_mm_trial_area_retired(p->type);
++#endif
++	p->flags = 0;
++	spin_unlock(&swap_lock);
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+index b930f6f04a21d3f2b8b6f2279e028a94cfc99502..bd88db905e5009e0e6161cad1d09b6d33bde2560 100644
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -123,2 +123,22 @@
+-int swapz_mm_trial_scope_join_external(u64 identity, u64 session,
+-	u64 table_epoch, u64 target_epoch);
++int swapz_mm_trial_scope_join_external(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch);
++
++/* Internal process-context MM witnesses; not activation or target proof.
++ * Snapshot counts actual retained tickets including detached callbacks.
++ * Output is unchanged on error; no clean status may be inferred from it
++ * unless capture stopped, area retired, terminal closed/joined and no fault. */
++struct swapz_mm_trial_terminal_snapshot {
++	u64 area_epoch;
++	unsigned int mm_callbacks, dm_callbacks, dm_entrants;
++	bool carrier_busy, capture_stopped, area_retired;
++	bool terminal_closed, terminal_joined, fault, files_detached;
++};
++int swapz_mm_trial_scope_terminal_snapshot(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch,
++	struct swapz_mm_trial_terminal_snapshot *snapshot);
++/* After actual MM join, relinquish MM's own open files, keeping broker cap
++ * and exact identity until final revoke. Caller must not hold controller,
++ * target or DM locks; independently drop its own refs and prove table dtr.
++ * Does not prove all device openers are gone. Exact idempotent while retained. */
++int swapz_mm_trial_scope_detach_files(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch);
