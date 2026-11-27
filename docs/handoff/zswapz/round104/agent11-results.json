@@ -1,7 +1,7 @@
 {
   "round": 104,
   "agent": 11,
-  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "status": "PASS_HOST_AND_DIRECTED_ONLY",
   "issue": 222,
   "task_commit": "3ec158e2870170bd58fc13dfc340722a89f51cae",
   "engineering_freeze": "a9094f96e3fb2841ed0fa553102d98699950221d",
@@ -73,8 +73,8 @@
     "patch_roundtrip": "PASS deterministic line-level reconstruction (not hosted git apply)",
     "local_checkout": "BLOCKED git ls-remote exit128 Could not resolve host: github.com",
     "hosted_precheck": "PASS",
-    "host_gcc": "NOT_VERIFIED",
-    "host_clang": "NOT_VERIFIED",
+    "host_gcc": "PASS_ACTUAL_EXTRACTED_HOST_ONLY",
+    "host_clang": "PASS_ACTUAL_EXTRACTED_HOST_ONLY",
     "host_modes": [
       "normal",
       "chain",
@@ -90,23 +90,32 @@
       "chain-child",
       "early-ack"
     ],
-    "host_counts": null,
-    "stage": "NOT_VERIFIED",
-    "native_compile": "NOT_VERIFIED",
+    "host_counts": {
+      "gcc": 496,
+      "clang": 496,
+      "total": 992
+    },
+    "stage": "PASS",
+    "native_compile": "PASS_DIRECTED_OBJECTS_ONLY",
     "native_objects_requested": [
       "mm/zswap.o",
       "mm/page_io.o",
       "drivers/md/dm.o",
       "block/bio.o"
     ],
-    "native_config": "REQUESTED x86_64 SMP TREE_RCU NR_CPUS=4 default-off",
-    "native_link": "NOT_RUN"
+    "native_config": "VERIFIED x86_64 SMP=y TREE_RCU=y NR_CPUS=4 SWAP=y ZSWAP=y BLK_DEV_DM=y test guard=y ZSWAP_DEFAULT_ON=n ZSWAP_SHRINKER_DEFAULT_ON=n",
+    "native_link": "NOT_RUN",
+    "host_mutants_killed": {
+      "gcc": 5,
+      "clang": 5,
+      "total": 10
+    }
   },
   "ci": {
     "run_id": 45954589398,
     "job_id": 140358011743,
-    "status": "in_progress",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "success",
     "steps": [
       {
         "name": "Set up job",
@@ -152,44 +161,64 @@
       },
       {
         "name": "Exact staged changes, focused GCC and Clang host cases and native changed objects",
-        "status": "in_progress",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "number": 8
       },
       {
         "name": "Bounded evidence",
-        "status": "pending",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "number": 9
       },
       {
         "name": "Post Run actions/checkout@v4",
-        "status": "pending",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "number": 15
       },
       {
         "name": "Post Run actions/checkout@v4",
-        "status": "pending",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "number": 16
       },
       {
         "name": "Post Run actions/checkout@v4",
-        "status": "pending",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "number": 17
       },
       {
         "name": "Post Run actions/checkout@v4",
-        "status": "pending",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "number": 18
+      },
+      {
+        "name": "Complete job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 19
       }
     ],
-    "artifacts": [],
+    "artifacts": [
+      {
+        "id": 15177664331,
+        "name": "round104-agent11-mm-core-witness",
+        "size_in_bytes": 217844,
+        "digest": "sha256:9f0fd2524bb929eb6afb42fb441810f01a0e5ab50ff685f5a4d3f1bd5ae61ab0",
+        "expired": false
+      }
+    ],
     "first_error": null,
-    "log_excerpt": [],
+    "log_excerpt": [
+      "R104 complete standards prefix 1909502 1912533 ddaf986488af22b792fedb494588797f8a5bf22d39cd6f1f099f224625aaa140",
+      "R098_PASS r104-reapply",
+      "R098_PASS r104-staged-diff-check",
+      "R098_PASS changed-native-objects",
+      "R104_A11_PASS AUTH0 DIRECTED_ONLY"
+    ],
     "url": "https://github.com/k1moradi/swapz/actions/runs/45954589398/job/140358011743"
   },
   "expected_unresolved_native_peer_symbols": [
@@ -221,5 +250,166 @@
     "physical_mutation": false,
     "full_disconnected_build": false,
     "manual_duplicate_dispatch": false
+  },
+  "prior_progress_commit": "99d1da5d7dea6793494e65f00c67e1acabf0bac2",
+  "verified_artifact": {
+    "archive_bytes": 217844,
+    "archive_sha256": "9f0fd2524bb929eb6afb42fb441810f01a0e5ab50ff685f5a4d3f1bd5ae61ab0",
+    "zip_crc_check": "PASS",
+    "results_json_sha256": "1b18542da9c837cb94365bb8d42799b009d30dfa02de6ba1a65beaa67ed12e01",
+    "historical_stage_manifest_sha256": "10537320018bdfeea0e78d3294e99d71cd940aec66e1492988113f60df36bb9a",
+    "config_bytes": 46577,
+    "config_sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf",
+    "objects": {
+      "block/bio.o": {
+        "blob": "aa247fbf413b5eb317354f92cf526f124c751a2e",
+        "bytes": 61304,
+        "sha256": "a92f0d34b83bdcc55d6d49f8ef74632414e01b80345d5ca7a41b737d275adcb9"
+      },
+      "drivers/md/dm.o": {
+        "blob": "86cc9f896b46817565326bca5a08665f15faf615",
+        "bytes": 88488,
+        "sha256": "64d15d37be9cf352097b17a3dd6704a8b4d1ebb063ce8f726344a80a81533c2c"
+      },
+      "mm/page_io.o": {
+        "blob": "cd5987885cab8bae523cc42d6fef1b06b5770ab9",
+        "bytes": 21704,
+        "sha256": "1fb048583c93920baf75b8f815b10e6732366eb236a73ca7386385d2ca8f7f73"
+      },
+      "mm/zswap.o": {
+        "blob": "53cd6fc6cc4772f0b352a0651e213229495fddab",
+        "bytes": 84000,
+        "sha256": "8c1f4de8217672a0bb22af85fe9175510fcc4431ae85f3a2872ac4d8024d5563"
+      }
+    },
+    "independent_zip_config_object_hash_checks": "PASS",
+    "independent_nm_peer_symbols": "PASS",
+    "independent_mutant_log_assertion_readback": "PASS",
+    "unresolved_peer_symbols": {
+      "block/bio.o": [],
+      "drivers/md/dm.o": [
+        "swapz_trial_byte_invalidate"
+      ],
+      "mm/page_io.o": [],
+      "mm/zswap.o": [
+        "swapz_trial_byte_active",
+        "swapz_trial_byte_event",
+        "swapz_trial_byte_finish_input",
+        "swapz_trial_byte_invalidate",
+        "swapz_trial_byte_stage_input",
+        "swapz_trial_observation_append_sequence"
+      ]
+    },
+    "host": {
+      "gcc": {
+        "version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "modes": {
+          "normal": {
+            "checks": 235,
+            "graces": 6
+          },
+          "chain": {
+            "checks": 39,
+            "graces": 0
+          },
+          "chain-parent": {
+            "checks": 51,
+            "graces": 0
+          },
+          "requeue": {
+            "checks": 61,
+            "graces": 0
+          },
+          "late": {
+            "checks": 68,
+            "graces": 2
+          },
+          "ordinal": {
+            "checks": 42,
+            "graces": 0
+          }
+        },
+        "mutants": {
+          "chain-child": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=506: !swapz_mm_trial_dm_enter(&child)"
+          },
+          "early-ack": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=482: !recorder_calls && !bridge_calls"
+          },
+          "late-input": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=335: ((const unsigned char *)bytes)[0] == 0xa5"
+          },
+          "wrong-file": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=407: !swapz_mm_trial_scope_matches_exact(&requested, &area)"
+          },
+          "wrong-store": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=343: !store_sequence || (stored && stored->original_cookie == store_sequence)"
+          }
+        }
+      },
+      "clang": {
+        "version": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+        "modes": {
+          "normal": {
+            "checks": 235,
+            "graces": 6
+          },
+          "chain": {
+            "checks": 39,
+            "graces": 0
+          },
+          "chain-parent": {
+            "checks": 51,
+            "graces": 0
+          },
+          "requeue": {
+            "checks": 61,
+            "graces": 0
+          },
+          "late": {
+            "checks": 68,
+            "graces": 2
+          },
+          "ordinal": {
+            "checks": 42,
+            "graces": 0
+          }
+        },
+        "mutants": {
+          "chain-child": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=506: !swapz_mm_trial_dm_enter(&child)"
+          },
+          "early-ack": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=482: !recorder_calls && !bridge_calls"
+          },
+          "late-input": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=335: ((const unsigned char *)bytes)[0] == 0xa5"
+          },
+          "wrong-file": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=407: !swapz_mm_trial_scope_matches_exact(&requested, &area)"
+          },
+          "wrong-store": {
+            "exit": 77,
+            "first_error": "R104_A11_FIRST_ERROR line=343: !store_sequence || (stored && stored->original_cookie == store_sequence)"
+          }
+        }
+      }
+    },
+    "static_checks": {
+      "actual_mm_and_dm_original_ack": true,
+      "actual_source_before_compression": true,
+      "exact_ordinal_call_sites": true,
+      "special_chain_sentinel": true,
+      "store_commit_and_abort": true
+    }
   }
 }

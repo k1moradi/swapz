@@ -1,6 +1,6 @@
 # R104 A11 — actual original MM/core witness integration
 
-**SOURCE_PUBLISHED_QUALIFICATION_PENDING.** Agent1 owns integration/final acceptance. Source-only guarded integration, no physical authority.
+**PASS_HOST_AND_DIRECTED_ONLY — CONNECTED BLOCKED.** Agent1 owns integration/final acceptance. Source-only guarded integration, no physical authority.
 
 ## Immutable source and publication
 
@@ -34,10 +34,35 @@ Issue #222, task 3ec158e2870170bd58fc13dfc340722a89f51cae, freeze a9094f96e3fb28
 
 Connector reconstruction verified seven full Git blobs and deterministic strict zero-context overlay roundtrip; this is not hosted Git apply or compile credit. Hosted verifier stages exact historical R101/R103 original overlay chain and reverse/reapply; exact R104 pre/postimage checks, strict index apply/check/reverse/reapply and staged census/diff. Stage immutable task header and R103 adapter/owner declarations separately. Actual extracted scope, area, stage/store, ordinal and terminal source functions in host fixture; modeled kernel RCU/locks, BIO, allocator, compressor and peer recorder/byte calls. Six requested modes normal (scope field/file mismatches, actual source before compression, actual committed cookie, replacement and abort, exactly one original ACK and real debt), chain, chain-parent, requeue, late, ordinal. Five actual source mutants wrong-file, wrong-store, late-input, chain-child, early-ack; GCC and Clang ASan/UBSan assertions requested. Only directed mm/zswap.o, mm/page_io.o, drivers/md/dm.o, block/bio.o, SMP/TREE_RCU default-off generated config. Page_io unchanged raw source; built because original typed ACK uses changed header. No full link/MODPOST/VM; no native fake peer definitions. Expected unresolved peer symbols listed in JSON, must be verified via nm/relocations, no native link credit.
 
-## Qualification snapshot
+## Historical qualification snapshot (superseded by terminal evidence below)
 
 Local git ls-remote exit128 DNS could not resolve github.com. [R104 focused run 45954589398, job 140358011743](https://github.com/k1moradi/swapz/actions/runs/45954589398/job/140358011743): **IN_PROGRESS**. Direct-main and full standards-prefix precheck PASS. Artifact count 0. No terminal qualification first error verified. GCC/Clang host counts, mutants, actual source staged/native compile, generated config and object/symbol hashes not yet independently verified. No fabricated success. No manual duplicate dispatch.
 
 R103 corrected lane accepted by A1 checkpoint only, not R104: 1235 checks per compiler, all four directed objects, job 140342576444 after filename repair. Historical qualification preserved, not replayed unchanged as current test.
 
 AUTH0 Phase A BLOCKED, compressed handoff/forced RAW/import OFF, physical NO_GO. No branches, PRs, force pushes, duplicate dispatches, disconnected full build, VM, module load, activation, device I/O or physical mutation.
+
+## Terminal qualification — PASS_HOST_AND_DIRECTED_ONLY
+
+Supersedes the earlier progress snapshot (99d1da5d7dea6793494e65f00c67e1acabf0bac2). [Exact tested job](https://github.com/k1moradi/swapz/actions/runs/45954589398/job/140358011743) completed success, every step successful. Read terminal logs and downloaded [artifact 15177664331](https://github.com/k1moradi/swapz/actions/runs/45954589398/artifacts/15177664331); archive bytes 217844, SHA256 9f0fd2524bb929eb6afb42fb441810f01a0e5ab50ff685f5a4d3f1bd5ae61ab0, independently matched API digest and checked ZIP CRC. Artifact results.json SHA256 1b18542da9c837cb94365bb8d42799b009d30dfa02de6ba1a65beaa67ed12e01; source commit bound to 3c11e1463029cb1095d4c4af84739cbdb062c6c1. Actual complete historical stage, R104 apply/check/reverse/reapply, exact postimages, strict diff and static call-site checks PASS. Hosted complete historical standards prefix 1909502 bytes -> 1912533 bytes, old SHA256 ddaf986488af22b792fedb494588797f8a5bf22d39cd6f1f099f224625aaa140. GCC 13.3.0 and Clang 18.1.3 with ASan/UBSan; each 496 host checks, 992 total. Actual assertion failures killed all 5 mutants under both compilers, 10/10. First genuine qualification error: none; expected mutant assertions separately listed in JSON.
+
+| Mode | GCC | Clang |
+|---|---:|---:|
+| normal | 235 | 235 |
+| chain | 39 | 39 |
+| chain-parent | 51 | 51 |
+| requeue | 61 | 61 |
+| late | 68 | 68 |
+| ordinal | 42 | 42 |
+| Total | 496 | 496 |
+
+Actual x86_64 effective config verified from archive: SMP=y TREE_RCU=y NR_CPUS=4 SWAP=y ZSWAP=y BLK_DEV_DM=y SWAPZ_ORIGINAL_MM_CARRIER_TEST=y, ZSWAP_DEFAULT_ON=n and ZSWAP_SHRINKER_DEFAULT_ON=n. Config SHA256 f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf, 46577 bytes; independent hash matches manifest. Directed GCC objects (independent byte counts, SHA256 and Git blob hashes match archive manifest):
+
+| Object | Bytes | SHA256 |
+|---|---:|---|
+| `block/bio.o` | 61304 | `a92f0d34b83bdcc55d6d49f8ef74632414e01b80345d5ca7a41b737d275adcb9` |
+| `drivers/md/dm.o` | 88488 | `64d15d37be9cf352097b17a3dd6704a8b4d1ebb063ce8f726344a80a81533c2c` |
+| `mm/page_io.o` | 21704 | `1fb048583c93920baf75b8f815b10e6732366eb236a73ca7386385d2ca8f7f73` |
+| `mm/zswap.o` | 84000 | `8c1f4de8217672a0bb22af85fe9175510fcc4431ae85f3a2872ac4d8024d5563` |
+
+Independent nm of each archived ELF verifies expected unresolved peer symbols: mm/zswap.o has all six listed in JSON; drivers/md/dm.o has swapz_trial_byte_invalidate; block/bio.o and mm/page_io.o have none of the new peer set. No fake native peer definitions, no full link or MODPOST. Peer API declarations exact; no same-round peer implementation consumed. This is actual changed-object and host-extracted-source qualification, **not** a connected link, native runtime concurrency, physical or production acceptance. AUTH0 remains, Phase A BLOCKED. No further dispatch.
