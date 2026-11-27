@@ -1,0 +1,104 @@
+{
+  "round": 104,
+  "agent": 3,
+  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING_CONNECTED_BLOCKED",
+  "freeze": "a9094f96e3fb2841ed0fa553102d98699950221d",
+  "freeze_tree": "554b80152c9ea277cd6e0f63069bfb8f8ba671b6",
+  "task": "3ec158e2870170bd58fc13dfc340722a89f51cae",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "2d12a079104db9263518e7b20fa6ac36749e4a2e",
+  "source_parent": "99d1da5d7dea6793494e65f00c67e1acabf0bac2",
+  "source_tree": "11b9792d42678d1051afc197c64e90a5a2ff4bfe",
+  "source_blobs": {
+    "src/kernel/dm-target.c": "8a84ac4d395e2f635ae3e4216bade471c03618de",
+    "src/kernel/native-observation-controller.c": "46ab3317c8160bfd8716360d281a7f46609fb6a3",
+    "src/kernel/native-observation-controller.h": "3e917194fda1b1163ed047656a814350448b2523",
+    "src/kernel/native-observation-integration.h": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
+    "tests/runtime/native/fixtures/round104-controller-target.c": "df72cfec8c871e14b7364d80d0395f20f8f63283",
+    "tests/tools/round104-controller-target-verify.py": "4f5f37f5f89022f087b80b97b6abce7a3dae12ae",
+    ".github/workflows/phase-a-round104-controller-target-noauth.yml": "9d6bc982888cdc84377929bc60c8c3f25f7e1548",
+    ".github/workflows/phase-a-round102-controller-stop-noauth.yml": "ba31d1085ec8e96fc58f8ac31e1a25e85f2cbc9e",
+    ".github/workflows/phase-a-round103-retained-target-noauth.yml": "b587eed583d1f1b0a1fe3a23b3de3b75279791c9"
+  },
+  "standards": {
+    "parent": "c74fb3b65869ac5a50755a26a92db41f299a4e01",
+    "parent_bytes": 1912533,
+    "post": "7658957625de2a72fa07125659a27959cedede2c",
+    "complete_raw_parent_blob_recreated": true,
+    "append_only": true
+  },
+  "publication": {
+    "fresh_expected_head": true,
+    "force": false,
+    "stale_head_attempts_abandoned": 2,
+    "verified": true
+  },
+  "qualification": {
+    "run_id": 45954959493,
+    "job_id": 140359182202,
+    "status": "queued",
+    "conclusion": null,
+    "steps": null,
+    "artifacts": [],
+    "host_counts": null,
+    "mutants": null,
+    "native_objects": null,
+    "compiler": null,
+    "config": null,
+    "first_error": null,
+    "host_modes": [
+      "normal",
+      "bind-failure",
+      "rollback",
+      "typed-debt",
+      "wrong-key",
+      "retirement-busy",
+      "failure"
+    ],
+    "mutants_requested": [
+      "skip-exact",
+      "wrong-ordinal",
+      "skip-external",
+      "clear-retained"
+    ],
+    "native_requested": [
+      "native-observation-controller.o",
+      "dm-target.o"
+    ],
+    "expected_unresolved": [
+      "swapz_mm_trial_scope_matches_exact",
+      "swapz_trial_byte_bind_scope",
+      "swapz_trial_byte_active",
+      "swapz_trial_byte_event",
+      "swapz_trial_byte_invalidate"
+    ],
+    "native_link": "NOT_RUN",
+    "stage": "pinned R103 verifier 11ae07a68761d11160b649a3503af64eecd3ec4a, exact unified R101 chain + R103 overlay 5c5e52add5976a96987de22d12cdaacad332f142; frozen R103 recorder C/H overrides, task header, current A3 objects only",
+    "typed_read_test": "actual source ordering checks, not dynamically executed"
+  },
+  "limitations": [
+    "Cold start has no independently admitted trusted caller and target callback remains unregistered; no live activation.",
+    "Failed recorder/MM startup retains owned refs if cleanup cannot be independently proved; no recovery entry for partial startup or detached quarantine.",
+    "Final release on drain refuses live typed records/pins/GC debt; no final table retirement path for still-live typed mappings, no forced discard or circular-lifetime safety claim.",
+    "Target negative revoke/finish exports require actual local debt gate; full cross-module lock/lifetime/ABI integration unqualified.",
+    "Ordinary write input only single complete BIO page; ordinary lower/publish, discard, fallback, claimed-error and GC trace coverage incomplete; evidence loss remains fail closed; no clean trace or authentication.",
+    "Typed read actual byte capture and lower events are source changes, no native execution or independent userspace witness; final page compared with decoded output and retained digest, not independent reference.",
+    "Source review and fixture construction not a completed host/native result; local clone not retried due frozen DNS blocker."
+  ],
+  "peer_round104_source_consumed": false,
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw": "OFF",
+  "import": "OFF",
+  "full_link": false,
+  "vm": false,
+  "module_load": false,
+  "activation": false,
+  "physical_mutation": false,
+  "manual_dispatches": 0,
+  "branches": 0,
+  "prs": 0,
+  "force_pushes": 0,
+  "evidence_parent": "9cd015d8ad099388da080d383a0e0b8ea927f548"
+}
