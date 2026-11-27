@@ -296,8 +296,9 @@ def native(helper, state, evidence, scratch, frozen, baseline, linux):
     make = ["make", "-C", str(linux), "O=" + str(out), "ARCH=x86_64", "CC=gcc"]
     helper.step(state, evidence, "allnoconfig", make + ["KCFLAGS=" + guards, "allnoconfig"], timeout=120)
     config = ["bash", str(linux / "scripts/config"), "--file", str(out / ".config")]
-    for key in helper.REQUIRED:
+    for key in (*helper.REQUIRED, "MODULE_UNLOAD"):
         config += ["--enable", key]
+    config += ["--disable", "MODULE_FORCE_UNLOAD"]
     for key in ("ZSWAP_DEFAULT_ON", "ZSWAP_SHRINKER_DEFAULT_ON", "KUNIT", "MODULE_SIG",
                 "DEBUG_INFO", "DEBUG_INFO_BTF", "TINY_RCU"):
         config += ["--disable", key]
@@ -306,6 +307,7 @@ def native(helper, state, evidence, scratch, frozen, baseline, linux):
     helper.step(state, evidence, "olddefconfig", make + ["KCFLAGS=" + guards, "olddefconfig"], timeout=120)
     effective = (out / ".config").read_text().splitlines()
     require(all("CONFIG_" + key + "=y" in effective for key in helper.REQUIRED) and
+            "CONFIG_MODULE_UNLOAD=y" in effective and "CONFIG_MODULE_FORCE_UNLOAD=y" not in effective and
             "CONFIG_NR_CPUS=4" in effective and "CONFIG_TINY_RCU=y" not in effective and
             "CONFIG_ZSWAP_DEFAULT_ON=y" not in effective and "CONFIG_ZSWAP_SHRINKER_DEFAULT_ON=y" not in effective,
             "SMP TREE_RCU/default-off config")
