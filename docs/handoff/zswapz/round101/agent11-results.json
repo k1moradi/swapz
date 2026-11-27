@@ -1,0 +1,86 @@
+{
+  "round": 101,
+  "agent": 11,
+  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "issue": 219,
+  "task_commit": "f3e2a20dd9b17feb677f732e6f5088ff263822fa",
+  "engineering_freeze": "28ffacb0a50fede481d010c0b688271badbbae6e",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_commit": "eb2e4d03f32510864886e78b2b50f110db048e95",
+  "source_parent": "e8815d5720289639271d7e2ecb7f6b418d41aeba",
+  "source_tree": "7fc5b688a7d9e0114ffdc2d3af3611f1129a8106",
+  "publication": {
+    "branch": "main",
+    "force": false,
+    "expected_head": "e8815d5720289639271d7e2ecb7f6b418d41aeba",
+    "verified": true
+  },
+  "source_blobs": {
+    "tests/tools/round101-original-mm-retirement.patch": "df8881c99dd38bff0e38f9678daf35abe603e91d",
+    "tests/tools/round101-mm-retirement-verify.py": "e5063fc66b8d87ee975965ca91967276d0763eaa",
+    "tests/runtime/native/fixtures/round101-mm-retirement.c": "365f60d465ae8f9b65948aaabdd6b813bbcc05b4",
+    ".github/workflows/phase-a-round101-mm-retirement-noauth.yml": "751623ab3bdfa9a82ca17c7899565601a3ee6a30",
+    "docs/testing_standards.md": "7a51b60e0dbb1f6d045f8b63b3244d4c216c8777"
+  },
+  "staged_pre_post_git_blobs": {
+    "mm/zswap.c": [
+      "cad0d9ba05cd614b95b335ed0c7d70d9e69d00f0",
+      "fcb2f7487cb7ed02ae8ca9a8d486909f721a2ef6"
+    ],
+    "include/linux/swapz_mm_carrier.h": [
+      "5e11fe42a9dce147cdaf7f30c43b1c8b6feff59a",
+      "f50911d4c1ff7f87b502cec042b90968ba3a282f"
+    ],
+    "src/kernel/zswap-original-ticket.c": [
+      "70109f2c2ce9f60681649bd4807382248d0a41a2",
+      "e605bb0b8fbf5e6411a4d5d6182cab1a44d48bea"
+    ],
+    "src/kernel/zswap-original-broker-owner.inc": [
+      "278a93a3fd3fd260444aebc55d4a87112e56f704",
+      "a6a025b1d56513919ac83f4367e9c306fa12c933"
+    ],
+    "src/kernel/zswap-original-ticket.h": [
+      "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea",
+      "6c79e41cb18082b925311bf62d0cfbed45a9e53b"
+    ]
+  },
+  "checks": {
+    "pinned_preimages": "PASS reconstructed and hash-verified",
+    "patch_roundtrip": "PASS deterministic reconstruction; not git apply or compilation",
+    "standards_prefix": "PASS exact previous content prefix",
+    "local_clone": "BLOCKED DNS: git ls-remote exited 128, Could not resolve host: github.com",
+    "hosted_checkout": "NOT_VERIFIED",
+    "git_apply": "NOT_VERIFIED",
+    "native_compile": "NOT_VERIFIED",
+    "gcc_host": "NOT_VERIFIED",
+    "clang_host": "NOT_VERIFIED",
+    "test_counts": null
+  },
+  "ci": {
+    "run_id": 45921709462,
+    "job_id": 140253713602,
+    "status": "queued",
+    "conclusion": null,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45921709462/job/140253713602",
+    "artifacts_verified": false
+  },
+  "limitations": [
+    "Controller must join ingress, area/map, original BIO terminal and provider debt before final revoke.",
+    "Already-admitted pre-stop bind/capture may finish; stop is not I/O join.",
+    "Retirement witness must be queried before reopening; old identity is stale after reuse.",
+    "No runtime integration or kernel activation tested."
+  ],
+  "safety": {
+    "AUTH": 0,
+    "phase_a": "BLOCKED",
+    "compressed_handoff": "OFF",
+    "forced_RAW": "OFF",
+    "import": "OFF",
+    "physical_mutation": false,
+    "vm": false,
+    "module_load": false,
+    "activation": false,
+    "full_build": false,
+    "manual_duplicate_tests": false
+  }
+}
