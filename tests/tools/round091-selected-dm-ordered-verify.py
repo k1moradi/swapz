@@ -100,6 +100,150 @@ def fragment(source, name):
     return source.split(begin, 1)[1].split(end, 1)[0]
 
 
+# Keep byte offsets while masking comments and literals. A malformed token
+# or function boundary is a failed audit, not a shorter accepted fragment.
+C_TOKEN = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'')
+DEFINITION = re.compile(r"(?m)^static (?:bool|int) (\w+)\(")
+
+
+def code_only(source):
+    masked = C_TOKEN.sub(lambda match: re.sub(r"[^\n]", " ", match.group()), source)
+    require(not re.search(r'/\*|//|["\']', masked), "malformed C token")
+    return masked
+
+
+def complete_function(source, name):
+    masked = code_only(source)
+    matches = list(re.finditer(r"(?m)^static (?:bool|int) " + re.escape(name) + r"\(", masked))
+    require(len(matches) == 1, "ambiguous function boundary " + name)
+    start = matches[0].start()
+    # A declaration cannot stand in for a complete definition.
+    opening = masked.find("{", matches[0].end())
+    require(opening >= 0 and ";" not in masked[matches[0].end():opening] and
+            not DEFINITION.search(masked, matches[0].end(), opening),
+            "malformed function boundary " + name)
+    require(re.search(r"\)\s*$", masked[matches[0].end():opening]) is not None,
+            "malformed function signature " + name)
+    depth = 0
+    for brace in re.finditer(r"[{}]", masked[opening:]):
+        position = opening + brace.start()
+        if brace.group() == "{":
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0:
+                require(position > 0 and masked[position - 1] == "\n" and
+                        (position + 1 == len(masked) or masked[position + 1] == "\n") and
+                        not DEFINITION.search(masked, opening + 1, position),
+                        "malformed function boundary " + name)
+                return masked[opening:position + 1]
+    raise RuntimeError("unterminated function " + name)
+
+
+def ordered_once(code, anchors, reason):
+    positions = []
+    for anchor in anchors:
+        require(code.count(anchor) == 1, reason + ": " + anchor)
+        positions.append(code.index(anchor))
+    require(positions == sorted(positions), reason)
+
+
+def claim_and_transactions(source):
+    claim = complete_function(source, "swapz_round091_claim_reserved")
+    lock = "spin_lock_irqsave(&ctx->queue_lock, flags);"
+    unlock = "spin_unlock_irqrestore(&ctx->queue_lock, flags);"
+    ordered_once(claim, (
+        "lockdep_assert_held(&ctx->ordered_owner);", lock,
+        "rcu_read_lock();", "dm_swapz_round091_accepted_clone_matches(",
+        "dm_swapz_round090_route_live(", "rcu_read_unlock();",
+        "if (!selected)", "swapz_ticket_claim_under_queue_lock(&entry->original_candidate, key);",
+        "if (!error)", "entry->original_claimed = true;", "unlock:", unlock,
+        "return error;"), "ordered claim lock gate")
+    # Explicit allowed calls fence indirect new storage/list/I/O/wait helpers.
+    # list_empty is an existing nonmutating descriptor validation.
+    allowed = {"lockdep_assert_held", "spin_lock_irqsave", "spin_unlock_irqrestore",
+               "if", "list_empty", "atomic_read", "rcu_read_lock", "rcu_read_unlock",
+               "dm_swapz_round091_accepted_clone_matches", "dm_swapz_round090_route_live",
+               "defined", "swapz_scope_key_matches_locked",
+               "swapz_ticket_claim_under_queue_lock", "swapz_scope_observe_credit"}
+    calls = set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", claim))
+    require(calls <= allowed and not re.search(r"\(\s*\*\s*\w+\s*\)\s*\(", claim),
+            "ordered claim forbidden call")
+    require(claim.count("spin_lock_irqsave(") == claim.count("spin_unlock_irqrestore(") == 1 and
+            claim.count("return ") == 1 and
+            re.search(r"if\s*\(!selected\)\s*goto unlock;", claim) and
+            re.search(r"if\s*\(!error\)\s*\{\s*entry->original_claimed = true;", claim) and
+            re.search(r"unlock:\s*" + re.escape(unlock) + r"\s*return error;\s*\}$", claim),
+            "ordered claim lock gate")
+    for name, storage, claim_call, refusal in (
+        ("swapz_round091_reserve_claim_commit", "storage",
+         "if (try_claim(context, credit)) {", "if (try_claim(context, credit)) {"),
+        ("swapz_scope_transaction", "ctx->original_storage",
+         "refused = swapz_round091_claim_reserved(claim, credit);", "if (refused) {"),
+    ):
+        transaction = complete_function(source, name)
+        reserve = f"*error = swapz_shared_storage_reserve({storage}, spec, input, &credit);"
+        cancel = f"*error = swapz_shared_storage_cancel_reserved({storage}, credit);"
+        commit = f"*error = swapz_shared_storage_commit_reserved({storage}, credit);"
+        sequence = [reserve, "if (*error)", claim_call]
+        if refusal != claim_call:
+            sequence.append(refusal)
+        sequence.extend((cancel, "return *error != 0;", commit, "return true;"))
+        ordered_once(transaction, sequence, "ordered transaction " + name)
+        require(not re.search(r"\b(?:spin_\w+|mutex_\w+|raw_spin_\w+|wait_for_\w+)\s*\(", transaction) and
+                all(transaction.count("swapz_shared_storage_" + operation + "(") == 1
+                    for operation in ("reserve", "cancel_reserved", "commit_reserved")) and
+                re.search(r"return \*error != 0;\s*\}", transaction) and
+                re.search(r"return true;\s*\}$", transaction),
+                "ordered transaction lock/terminal " + name)
+    process = complete_function(source, "swapz_round091_process_candidate")
+    require("lockdep_assert_held(&ctx->ordered_owner);" in process and
+            not re.search(r"\b(?:spin_\w+|raw_spin_\w+)\s*\(", process) and
+            re.search(r"if \(!swapz_scope_transaction\(ctx, &spec, &input, &claim_context, &error\)\)\s*goto decline;", process) and
+            re.search(r"if \(!swapz_round091_reserve_claim_commit\(ctx->original_storage, &spec,\s*&input, swapz_round091_claim_reserved, &claim_context, &error\)\)\s*goto decline;", process),
+            "ordered transaction actual caller")
+
+
+def static_mutants(source):
+    # These mutate the actual frozen function, not a toy substitute. A
+    # mutant must fail this audit independently of the earlier map checks.
+    anchor = "spin_lock_irqsave(&ctx->queue_lock, flags);"
+    start = source.index("static int swapz_round091_claim_reserved(")
+    end = source.index("\n}", start) + 2
+    original = source[start:end]
+    mutants = (
+        ("storage_inside_claim", anchor, anchor + "\n\tswapz_shared_storage_reserve(0, 0, 0, 0);"),
+        ("wait_inside_claim", anchor, anchor + "\n\twait_for_completion(0);"),
+        ("list_inside_claim", anchor, anchor + "\n\tlist_add_tail(0, 0);"),
+        ("io_inside_claim", anchor, anchor + "\n\tsubmit_bio(0);"),
+        ("wrong_lock", anchor, "spin_lock_irqsave(&ctx->other_lock, flags);"),
+        ("unlock_before_claim", "error = swapz_ticket_claim_under_queue_lock",
+         "spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\terror = swapz_ticket_claim_under_queue_lock"),
+        ("malformed_boundary", "\n}", "\n"),
+        ("duplicate_boundary", "\n}", "\n}\n" + original),
+    )
+    killed = []
+    def kill(name, changed):
+        try:
+            claim_and_transactions(changed)
+        except RuntimeError:
+            killed.append(name)
+        else:
+            raise RuntimeError("static mutant survived " + name)
+    for name, old, new in mutants:
+        require(original.count(old) == 1, "static mutation anchor " + name)
+        kill(name, source[:start] + original.replace(old, new, 1) + source[end:])
+    reserve = "*error = swapz_shared_storage_reserve(ctx->original_storage, spec, input, &credit);"
+    claim = "refused = swapz_round091_claim_reserved(claim, credit);"
+    require(source.count(reserve) == source.count(claim) == 1, "transaction mutant anchors")
+    kill("reserve_after_claim", source.replace(reserve, "", 1).replace(claim, claim + "\n\t" + reserve, 1))
+    cancel = "*error = swapz_shared_storage_cancel_reserved(ctx->original_storage, credit);"
+    require(source.count(cancel) == 1, "cancel mutant anchor")
+    kill("wrong_cancel_credit", source.replace(cancel, cancel.replace(", credit)", ", credit + 1)"), 1))
+    kill("transaction_queue_lock", source.replace(reserve, anchor + "\n\t" + reserve, 1))
+    return killed
+
+
 def static_checks(source, patch):
     anchor = "list_add_tail(&entry->list, &ctx->incoming);"
     require(source.count(anchor) == 1, "canonical FIFO")
@@ -119,12 +263,7 @@ def static_checks(source, patch):
             source.index("swapz_process(ctx, entry->bio)"), "ordinary preparation wait")
     require("swapz_round091_ordered_claim_permitted(void)\n{\n\treturn false;\n}" in source,
             "frozen live claim guard")
-    claim = source.split("static int swapz_round091_claim_reserved(", 1)[1].split("static bool swapz_round091_process_candidate(", 1)[0]
-    require(claim.count("swapz_ticket_claim_under_queue_lock(") == 1 and
-            claim.index("spin_lock_irqsave") < claim.index("dm_swapz_round091_accepted_clone_matches") <
-            claim.index("swapz_ticket_claim_under_queue_lock") < claim.index("entry->original_claimed = true") <
-            claim.index("spin_unlock_irqrestore") and "list_add" not in claim and
-            "swapz_shared_storage_" not in claim, "ordered claim lock gate")
+    claim_and_transactions(source)
     require("map_scope && (!tio->len_ptr || *tio->len_ptr != 8U)" in patch and
             "tio->io->orig_bio, false)" in patch, "accepted clone transient length guard")
     require("swapz_shared_original_segment_pinned(a, segment)" in source and
@@ -235,6 +374,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--linux-root", type=Path, required=True)
     parser.add_argument("--evidence-dir", type=Path, required=True)
+    parser.add_argument("--frozen-r102-target", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
     evidence = args.evidence_dir.resolve()
@@ -244,9 +384,20 @@ def main():
               "physical_io": False, "native_dm": "NOT_RUN", "compilers": {},
               "first_error": None, "conclusion": "FAIL"}
     try:
-        source = (ROOT / "src/kernel/dm-target.c").read_text()
+        if args.frozen_r102_target:
+            frozen = "d2baba1bda02b78eb7df265d22c5e9dbee09e2b1"
+            target = git("show", frozen + ":src/kernel/dm-target.c")
+            require(git_blob(target) == "46c2cb832ff0071a028a27b35f63daa84f29914f",
+                    "R102 frozen target pin")
+            source = target.decode()
+            report["target_ref"] = frozen
+        else:
+            source = (ROOT / "src/kernel/dm-target.c").read_text()
+        report["target_blob"] = git_blob(source.encode())
         patch = (ROOT / "tests/tools/round088-original-dm-selected-clone.patch").read_text()
         static_checks(source, patch)
+        report["static_mutants"] = static_mutants(source)
+        print("ORDERED_STATIC_PASS mutants=" + str(len(report["static_mutants"])), flush=True)
         fragments = fragment(source, "TRANSACTION") + fragment(source, "TYPED_READ")
         report["fragment_sha256"] = hashlib.sha256(fragments.encode()).hexdigest()
         linux = args.linux_root.resolve()

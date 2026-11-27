@@ -8,6 +8,7 @@ on:
       - 'tests/tools/round088-original-dm-selected-clone.patch'
       - 'tests/tools/round089-selected-dm-registry-verify.py'
       - 'tests/tools/round091-selected-dm-ordered-verify.py'
+      - 'tests/tools/round102-unified-stage-verify.py'
       - 'tests/runtime/native/fixtures/round091-selected-dm-ordered.c'
       - 'src/kernel/dm-target.c'
       - 'tests/runtime/native/zswap-origin-consumer-source-test.py'
@@ -16,7 +17,7 @@ permissions:
 jobs:
   selected-dm-source-host:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,6 +50,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           changed="$(git diff --name-only HEAD^ HEAD)"
+          if grep -Fxq 'tests/tools/round102-unified-stage-verify.py' <<< "$changed"; then
+            echo 'r102=true' >> "$GITHUB_OUTPUT"
+          fi
           if grep -Fxq 'tests/tools/round089-selected-dm-registry-verify.py' <<< "$changed" &&
              grep -Fxq 'tests/tools/round094-target-owner-verify.py' <<< "$changed" &&
              ! grep -Evx 'tests/tools/round089-selected-dm-registry-verify.py|tests/tools/round094-target-owner-verify.py|docs/testing_standards.md|.github/workflows/phase-a-round088-selected-dm-admission-host.yml|.github/workflows/phase-a-round094-target-owner-host-noauth.yml' <<< "$changed"; then
@@ -63,16 +67,28 @@ jobs:
           umask 077
           mkdir -p "$RUNNER_TEMP/round092-agent3"
           python3 -B tests/tools/round089-selected-dm-registry-verify.py 2>&1 | tee "$RUNNER_TEMP/round092-agent3/registry.log"
+      - uses: actions/checkout@v4
+        if: steps.extraction-lane.outputs.r102 == 'true'
+        with:
+          path: frozen
+          ref: d2baba1bda02b78eb7df265d22c5e9dbee09e2b1
+          fetch-depth: 0
+          persist-credentials: false
       - name: Exact target source strict C guard and semantic mutants
         if: steps.extraction-lane.outputs.frozen != 'true'
         working-directory: swapz
         run: |
           set -Eeuo pipefail
+          if [[ '${{ steps.extraction-lane.outputs.r102 }}' == true ]]; then
+            cd ../frozen
+            test "$(git rev-parse HEAD)" = d2baba1bda02b78eb7df265d22c5e9dbee09e2b1
+            test "$(git hash-object src/kernel/dm-target.c)" = 46c2cb832ff0071a028a27b35f63daa84f29914f
+          fi
           python3 -B tests/tools/round088-selected-dm-admission-verify.py
           python3 -B tests/tools/round089-selected-dm-registry-verify.py
           python3 -B tests/runtime/native/zswap-origin-consumer-source-test.py
       - uses: actions/checkout@v4
-        if: steps.extraction-lane.outputs.frozen != 'true'
+        if: steps.extraction-lane.outputs.frozen != 'true' && steps.extraction-lane.outputs.r102 != 'true'
         with:
           repository: torvalds/linux
           ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
@@ -89,6 +105,15 @@ jobs:
             crypto/lzo.c
             crypto/lz4.c
           sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        id: full-linux
+        if: always() && steps.extraction-lane.outputs.r102 == 'true'
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
           persist-credentials: false
       - name: Pristine original DM patch applicability and exact postimage
         if: steps.extraction-lane.outputs.frozen != 'true'
@@ -119,7 +144,25 @@ jobs:
         working-directory: swapz
         run: |
           set -Eeuo pipefail
-          python3 -B tests/tools/round091-selected-dm-ordered-verify.py --linux-root ../linux --evidence-dir "$RUNNER_TEMP/round092-agent3"
+          args=()
+          if [[ '${{ steps.extraction-lane.outputs.r102 }}' == true ]]; then
+            args+=(--frozen-r102-target)
+          fi
+          python3 -B tests/tools/round091-selected-dm-ordered-verify.py --linux-root ../linux --evidence-dir "$RUNNER_TEMP/round092-agent3" "${args[@]}"
+      - uses: actions/checkout@v4
+        id: stage-baseline
+        if: always() && steps.full-linux.outcome == 'success'
+        with:
+          path: baseline
+          ref: 5a36cabf0989dfffc75de52a6ab8cc021092ebf6
+          fetch-depth: 1
+          persist-credentials: false
+      - name: R102 independent unified exact staged source (no compile)
+        if: always() && steps.stage-baseline.outcome == 'success'
+        working-directory: swapz
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round102-unified-stage-verify.py ../frozen ../baseline ../linux "$RUNNER_TEMP/round102-agent11-stage"
       - name: Retain bounded host evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -127,4 +170,15 @@ jobs:
           name: round092-agent3-ordered-host
           path: ${{ runner.temp }}/round092-agent3
           if-no-files-found: ignore
+          retention-days: 14
+      - name: Retain unified source manifest and bounded diagnostics
+        if: always() && steps.extraction-lane.outputs.r102 == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: round102-agent11-unified-stage
+          path: |
+            ${{ runner.temp }}/round102-agent11-stage/unified-manifest.json
+            ${{ runner.temp }}/round102-agent11-stage/unified-source.diff
+            ${{ runner.temp }}/round102-agent11-stage/*.log
+          if-no-files-found: warn
           retention-days: 14
