@@ -1,0 +1,225 @@
+{
+  "round": 104,
+  "agent": 11,
+  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "issue": 222,
+  "task_commit": "3ec158e2870170bd58fc13dfc340722a89f51cae",
+  "engineering_freeze": "a9094f96e3fb2841ed0fa553102d98699950221d",
+  "freeze_tree": "554b80152c9ea277cd6e0f63069bfb8f8ba671b6",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_commit": "3c11e1463029cb1095d4c4af84739cbdb062c6c1",
+  "source_parent": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+  "source_tree": "18b39fe8dcdcdb3d00133e84863c78478c2bb615",
+  "source_blobs": {
+    "tests/tools/round104-original-mm-core-witness.patch": "132c03fcefe961696f468a41c763666f1dc4f90c",
+    "tests/tools/round104-mm-core-witness-verify.py": "4e7bea38ad8529eb47eaae8718aacd1c5fbf3fde",
+    "tests/runtime/native/fixtures/round104-mm-core-witness.c": "3b26bb20585b28528c24fcbcdb1394ee83ddd6c6",
+    ".github/workflows/phase-a-round104-mm-core-witness-noauth.yml": "7d159e7ad3339b5da0b613de493640e936f30a0f",
+    "docs/testing_standards.md": "c74fb3b65869ac5a50755a26a92db41f299a4e01"
+  },
+  "staged_pre_post_git_blobs": {
+    "mm/zswap.c": [
+      "833f089bc01e8803f427732975d706c894436eb3",
+      "e088dd706763bec377d09a81905cf5de9b371c6a"
+    ],
+    "drivers/md/dm.c": [
+      "e07dfd963edcdfb438af2ae1f43e3023e54544b7",
+      "6912eb7ec5a9ef325f7282ef9c9226b39265f01d"
+    ],
+    "mm/swapz-trial-terminal.inc": [
+      "3f980d04958676c22d44a6ca2778c4bd40a464fb",
+      "1ecc86d30f20790f1fae7506a3f55d612200831a"
+    ],
+    "include/linux/swapz_mm_carrier.h": [
+      "7091e456b6c09f29d68140cfff3f072e940ccd2f",
+      "b930f6f04a21d3f2b8b6f2279e028a94cfc99502"
+    ],
+    "include/linux/swapz_trial_debt.h": [
+      "207cd1b7a87f493992938cfa00ed4f95c7196811",
+      "d1d2fc65084936380c211094ce6f073273596338"
+    ],
+    "block/bio.c": [
+      "38f24ee2e414107be390d3a01c6b907e06a9dca7",
+      "f6f1ddc82a5632f1f9cf8dbb0bdb2138eb8e0e64"
+    ],
+    "include/linux/bio.h": [
+      "4079365b37690164f85ba962a0bd0918c85899cb",
+      "c7d5543249003b7f190d6ea065fd6253d5572792"
+    ]
+  },
+  "immutable_task_header": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
+  "frozen_declarations": {
+    "adapter": "ffa547fbecad79b3fabf0ded4bb182c201e4a33d",
+    "owner": "9e44829f3920167829fc364fdb6a95bfa0930805"
+  },
+  "historical_stage": {
+    "overlay": "5c5e52add5976a96987de22d12cdaacad332f142",
+    "fixed_verifier": "11ae07a68761d11160b649a3503af64eecd3ec4a",
+    "accepted_by_agent1": "https://github.com/k1moradi/swapz/blob/3ec158e2870170bd58fc13dfc340722a89f51cae/docs/handoff/zswapz/round103/agent1-terminal-checkpoint.md",
+    "corrected_job": 140342576444,
+    "checks_per_compiler": 1235,
+    "historical_only": true
+  },
+  "publication": {
+    "main": true,
+    "force": false,
+    "expected_head": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+    "verified": true,
+    "standards_previous_blob": "a253b3423c55107140ddaccc3568d6721a1f710f",
+    "standards_prefix": "PASS exact raw historical content hash and append readback"
+  },
+  "checks": {
+    "preimages": "PASS exact connector reconstruction and Git hashes, all seven changed paths",
+    "patch_roundtrip": "PASS deterministic line-level reconstruction (not hosted git apply)",
+    "local_checkout": "BLOCKED git ls-remote exit128 Could not resolve host: github.com",
+    "hosted_precheck": "PASS",
+    "host_gcc": "NOT_VERIFIED",
+    "host_clang": "NOT_VERIFIED",
+    "host_modes": [
+      "normal",
+      "chain",
+      "chain-parent",
+      "requeue",
+      "late",
+      "ordinal"
+    ],
+    "host_mutants_requested": [
+      "wrong-file",
+      "wrong-store",
+      "late-input",
+      "chain-child",
+      "early-ack"
+    ],
+    "host_counts": null,
+    "stage": "NOT_VERIFIED",
+    "native_compile": "NOT_VERIFIED",
+    "native_objects_requested": [
+      "mm/zswap.o",
+      "mm/page_io.o",
+      "drivers/md/dm.o",
+      "block/bio.o"
+    ],
+    "native_config": "REQUESTED x86_64 SMP TREE_RCU NR_CPUS=4 default-off",
+    "native_link": "NOT_RUN"
+  },
+  "ci": {
+    "run_id": 45954589398,
+    "job_id": 140358011743,
+    "status": "in_progress",
+    "conclusion": null,
+    "steps": [
+      {
+        "name": "Set up job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 1
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 2
+      },
+      {
+        "name": "Exact direct-main source and standards prefix",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 3
+      },
+      {
+        "name": "Hosted toolchain prerequisites",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 4
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 5
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 6
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 7
+      },
+      {
+        "name": "Exact staged changes, focused GCC and Clang host cases and native changed objects",
+        "status": "in_progress",
+        "conclusion": null,
+        "number": 8
+      },
+      {
+        "name": "Bounded evidence",
+        "status": "pending",
+        "conclusion": null,
+        "number": 9
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 15
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 16
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 17
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 18
+      }
+    ],
+    "artifacts": [],
+    "first_error": null,
+    "log_excerpt": [],
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45954589398/job/140358011743"
+  },
+  "expected_unresolved_native_peer_symbols": [
+    "swapz_trial_byte_active",
+    "swapz_trial_byte_stage_input",
+    "swapz_trial_byte_finish_input",
+    "swapz_trial_byte_event",
+    "swapz_trial_byte_invalidate",
+    "swapz_trial_observation_append_sequence"
+  ],
+  "limitations": [
+    "The exact scope query is a non-sleeping read-only proof, not a ref or permission; existing scope/area retirement gates and one-shot retained file ownership remain.",
+    "Store-site model executes the actual extracted zswap_store_page and stage helper with explicit mocked kernel allocator, compressor, peer byte and recorder calls; actual native execution is not tested. Actual precompression copy synchronously relies on immutable task ABI.",
+    "MM witnesses are NULL/0 at actual append ordinals; ordinary WRITE ACCEPT and final BIO ORACLE byte copy are A3 responsibilities, A2 retention/correlation is separate. Staging may abandon raw/declined/failed store; A2 invalidation/replacement ownership must still be reviewed.",
+    "Ordinary core final correlation is staged at dm_io completion; upper witness emits at real original callback entry, then debt is released after callback return. R103 external area/target/provider/broker join obligations remain separate.",
+    "Special chain-child sentinel and chained parent handled conservatively; evidence invalidation may quarantine scope, ordinary I/O unchanged. Native concurrent completion/requeue remains unexecuted.",
+    "Directed objects use task header and frozen R103 declarations, not same-round peer implementations. Unresolved peer ABI expected, no native link or connected acceptance."
+  ],
+  "safety": {
+    "AUTH": 0,
+    "phase_a": "BLOCKED",
+    "compressed_handoff": "OFF",
+    "forced_RAW": "OFF",
+    "import": "OFF",
+    "physical": "NO_GO",
+    "vm": false,
+    "activation": false,
+    "module_load": false,
+    "physical_mutation": false,
+    "full_disconnected_build": false,
+    "manual_duplicate_dispatch": false
+  }
+}
