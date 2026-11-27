@@ -1,0 +1,130 @@
+{
+  "round": 103,
+  "agent": 2,
+  "issue": 221,
+  "status": "SOURCE_PUBLISHED_LOCAL_COLLECTOR_PASS_R102_TERMINAL_PASS_R103_HOSTED_PENDING",
+  "freeze": "e65d7042b41880c6fef99069d7f65bf6fb4356d4",
+  "freeze_tree": "23a94d1726859c3536e16efd7de5212a68af6531",
+  "task": "c036b9456a03236841274ca2f3f3980c2dc07502",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "2d9d611cafe65507e901368d55a0511a626b4b38",
+  "source_parent": "829747ac92a874b5460e3d19a53b5ca75f310d96",
+  "source_tree": "0550c8d7fe8d1daee718b5ff520df1e0d3f12936",
+  "changes": {
+    "src/kernel/native-observation-adapter.c": {
+      "pre": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+      "post": "00700206f1c6df7e0494cdbfe9da86ec209b5ce3"
+    },
+    "src/kernel/native-observation-adapter.h": {
+      "pre": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+      "post": "ffa547fbecad79b3fabf0ded4bb182c201e4a33d"
+    },
+    "src/kernel/native-observation-owner.c": {
+      "pre": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+      "post": "e99ffb797f02b355b23358d663339fc8d3a49d03"
+    },
+    "src/kernel/native-observation-owner.h": {
+      "pre": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+      "post": "9e44829f3920167829fc364fdb6a95bfa0930805"
+    },
+    "src/kernel/native-observation-byte-collector.c": {
+      "pre": "2fc41a64228b8f845192fd0107014f71b46391e3",
+      "post": "32311b53d289ca422530eabdf1f98b52779c5295"
+    },
+    "src/kernel/native-observation-byte-collector.h": {
+      "pre": "62fdf6f74709f958a3cd10d0faaa3191c40da1d1",
+      "post": "b3c83e38726e3a202700d0d41bc13f32c8066013"
+    },
+    "tests/tools/round103-private-byte-correlation.py": {
+      "pre": null,
+      "post": "da63f69a8fd7676424e8dc3a7b86987c81467ab4"
+    },
+    "tests/runtime/native/fixtures/round103-recorder-correlation.c": {
+      "pre": null,
+      "post": "2ddccf5f2f1a7bba6b5c4fb447f1829ffb8955c0"
+    },
+    "tests/runtime/native/round103-recorder-correlation-test.py": {
+      "pre": null,
+      "post": "40564fb1e89d265079ade94dc02011f62fb49b1b"
+    },
+    ".github/workflows/phase-a-round102-native-byte-collector-noauth.yml": {
+      "pre": "7284431bf71aad2de0ea429cf0a593bed4db2f8b",
+      "post": "1cfa57d953c2356c4f98573805a171d57ec90e8c"
+    }
+  },
+  "standards": {
+    "before": "1c827dd071842bc2517281956b02b114431a0e38",
+    "after": "989a87d9788edbf1ecb6319860b5b71f978ca035",
+    "parent_bytes": 1899644,
+    "exact_complete_prefix": true
+  },
+  "publication": {
+    "branch": "main",
+    "force": false,
+    "expected_parent": "829747ac92a874b5460e3d19a53b5ca75f310d96",
+    "verified_readback": "2d9d611cafe65507e901368d55a0511a626b4b38"
+  },
+  "r102": {
+    "source": "43a7d3ddcd50fdb8127683326dfbe0a0ed4cd301",
+    "run": 45924662813,
+    "job": 140263091610,
+    "attempt": 1,
+    "checkpoint": "QUEUED",
+    "terminal": "SUCCESS",
+    "host_invalid_cases_each": 10,
+    "private_compatibility_checks_each": 13,
+    "directed_collector_object": "PASS",
+    "artifact": {
+      "id": 15165504780,
+      "bytes": 19697,
+      "sha256": "722dcd864343e671f483e94e7bebdb7b0af6c4ae94d10f5b3013cf6d98d16c81",
+      "metadata_and_log_agree": true,
+      "archive_independently_extracted": false
+    },
+    "first_error": null,
+    "object_and_config_hashes": "retained in artifact SHA256SUMS, not independently extracted"
+  },
+  "local": {
+    "status": "PASS_CHANGED_COLLECTOR_HOST_ONLY",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "scenarios_per_compiler": 4,
+    "flags": "-std=c17 -O2 -g -Wall -Wextra -Werror -pedantic -Wconversion -Wshadow -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie -pthread",
+    "test_fixture_sha256": "defbdb4f7fdb98816c4348290cba468db95a465c9c8d8f589b30943d134abfb8",
+    "binaries": {
+      "gcc": "f53ab21270b1b008d7489d72454a9af97a27b304ff3a3301380ad46adfdf9a30",
+      "clang": "a398898e324deded14afc326e41d728cab79ae31d81451b87b64728a41f64485"
+    },
+    "collector_blob_match": true,
+    "ordinal_host": "NOT_RUN_LOCALLY",
+    "private_join": "NOT_RUN_LOCALLY",
+    "native": "NOT_RUN_LOCALLY",
+    "git": {
+      "exit": 128,
+      "error": "Could not resolve host: github.com"
+    }
+  },
+  "hosted": {
+    "run": 45927027376,
+    "job": 140270642307,
+    "attempt": 1,
+    "source": "2d9d611cafe65507e901368d55a0511a626b4b38",
+    "status": "queued",
+    "conclusion": null,
+    "first_error": null,
+    "ordinal_tests": "PENDING",
+    "private_correlation": "PENDING",
+    "directed_objects": "PENDING",
+    "artifact": null,
+    "manual_dispatch": false
+  },
+  "native_capture": false,
+  "connected_link": "NOT_RUN",
+  "integration": "NOT_RUN",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO"
+}
