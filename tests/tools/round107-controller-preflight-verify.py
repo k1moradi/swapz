@@ -318,40 +318,61 @@ def native(helper, state, evidence, scratch, frozen, baseline, linux):
     helper.step(state, evidence, "target-object", make + ["KCFLAGS=" + module_guards,
                "M=" + str(module), "-j2", "dm-target.o"], timeout=900)
     state["objects"] = {}
-    required = {
-        out / controller_object: ("swapz_mm_trial_scope_join_external",
-            "swapz_mm_trial_scope_terminal_snapshot", "swapz_mm_trial_scope_detach_files",
-            "swapz_mm_trial_scope_revoke", "swapz_mm_broker_owner_retired",
-            "swapz_trial_observation_append_sequence", "swapz_trial_byte_event",
-            "swapz_trial_observation_stop"),
-        module / "dm-target.o": ("swapz_mm_trial_scope_matches_exact", "swapz_trial_observation_append_sequence",
-            "swapz_trial_byte_event", "swapz_trial_controller_revoke_joined", "swapz_trial_controller_finish",
-            "swapz_trial_target_register", "swapz_trial_target_unregister"),
-    }
-    for obj, names in required.items():
+    terminal_imports = ("swapz_mm_trial_scope_join_external",
+        "swapz_mm_trial_scope_terminal_snapshot", "swapz_mm_trial_scope_detach_files",
+        "swapz_mm_trial_scope_revoke", "swapz_mm_broker_owner_retired",
+        "swapz_trial_observation_append_sequence", "swapz_trial_byte_event",
+        "swapz_trial_observation_stop")
+    startup_imports = ("swapz_mm_trial_area_get", "swapz_mm_trial_scope_publish",
+        "swapz_trial_observation_start", "swapz_trial_byte_bind_scope")
+    target_imports = ("swapz_mm_trial_scope_matches_exact", "swapz_trial_observation_append_sequence",
+        "swapz_trial_byte_event", "swapz_trial_controller_revoke_joined", "swapz_trial_controller_finish",
+        "swapz_trial_target_register", "swapz_trial_target_unregister")
+
+    def has_symbol(symbols, name):
+        return bool(re.search(r"\b" + name + r"\b", symbols))
+
+    def collect(obj, label):
         imports = subprocess.check_output(["nm", "-u", str(obj)], text=True)
-        require(all(re.search(r"\b" + name + r"\b", imports) for name in names), "missing actual imports " + obj.name)
-        if obj == out / controller_object:
-            require(not any(re.search(r"\b" + name + r"\b", imports) for name in (
-                "swapz_mm_trial_area_get", "swapz_mm_trial_scope_publish",
-                "swapz_trial_observation_start", "swapz_trial_byte_bind_scope")),
-                "guarded admission still imports positive startup")
-        (evidence / (obj.name + ".imports")).write_text(imports)
-        shutil.copyfile(obj, evidence / obj.name)
-        state["objects"][obj.name] = helper.image(obj)
-        print("R107_A3_OBJECT", obj.name, state["objects"][obj.name], flush=True)
-    # A second directed controller object with historical guard-off flags,
-    # not a full link. Confirm old admission imports were not silently removed.
-    (out / controller_object).unlink()
+        symbols = subprocess.check_output(["nm", str(obj)], text=True)
+        (evidence / (label + ".imports")).write_text(imports)
+        (evidence / (label + ".symbols")).write_text(symbols)
+        shutil.copyfile(obj, evidence / label)
+        state["objects"][label] = helper.image(obj)
+        print("R107_A3_OBJECT", label, state["objects"][label], flush=True)
+        return imports, symbols
+
+    # The AUTH0 begin is an unconditional denial. The private publication
+    # flag is never set, so optimization may eliminate terminal imports.
+    # Require those imports in the historical object below, not unreachable
+    # guard-on paths. Retain the complete actual census in both modes.
+    obj = out / controller_object
+    imports, symbols = collect(obj, obj.name)
+    controller = (ROOT / "src/kernel/native-observation-controller.c").read_text()
+    require(controller.count("swapz_controller_published = true;") == 1 and
+            "swapz_controller_published = true;" in function(controller, "swapz_trial_controller_begin") and
+            controller.count("swapz_trial_controller_begin(") == 2,
+            "publication path no longer single guarded caller")
+    require(all(has_symbol(symbols, name) for name in (
+        "swapz_trial_controller_begin_registered", "swapz_trial_controller_query_registered",
+        "swapz_trial_controller_retire_registered", "swapz_trial_target_register",
+        "swapz_trial_target_unregister")), "guarded controller definitions missing")
+    require(all(has_symbol(imports, name) for name in ("try_module_get", "module_put")),
+            "guarded controller module lifetime imports missing")
+    require(not any(has_symbol(imports, name) for name in startup_imports),
+            "guarded admission still imports positive startup")
+    state["guarded_terminal_imports"] = {name: has_symbol(imports, name) for name in terminal_imports}
+    print("R107_A3_GUARDED_TERMINAL_IMPORTS", state["guarded_terminal_imports"], flush=True)
+    imports, _ = collect(module / "dm-target.o", "dm-target.o")
+    require(all(has_symbol(imports, name) for name in target_imports), "missing actual target imports")
+    # Historical guard-off controller must retain all original terminal and
+    # startup imports. This is not a full link or permission to invoke it.
+    obj.unlink()
     helper.step(state, evidence, "controller-historical-object",
                 make + ["KCFLAGS=" + historical_guards, "-j2", controller_object], timeout=900)
-    imports = subprocess.check_output(["nm", "-u", str(out / controller_object)], text=True)
-    require(all(re.search(r"\b" + name + r"\b", imports) for name in (
-        "swapz_mm_trial_area_get", "swapz_mm_trial_scope_publish",
-        "swapz_trial_observation_start", "swapz_trial_byte_bind_scope")), "historical imports missing")
-    (evidence / "controller-historical.imports").write_text(imports)
-    shutil.copyfile(out / controller_object, evidence / "controller-historical.o")
-    state["objects"]["controller-historical.o"] = helper.image(out / controller_object)
+    imports, _ = collect(obj, "controller-historical.o")
+    missing = [name for name in terminal_imports + startup_imports if not has_symbol(imports, name)]
+    require(not missing, "historical startup/terminal imports missing: " + repr(missing))
     require(not (out / "vmlinux").exists() and not (out / "Module.symvers").exists(), "unexpected full link")
     state["native"] = "PASS_DIRECTED_ONLY_UNRESOLVED_PEER_SYMBOLS"
 

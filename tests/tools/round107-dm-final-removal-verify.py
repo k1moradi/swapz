@@ -170,6 +170,8 @@ def stage(state, evidence, frozen, baseline, linux):
     glue = linux / helper.GLUE_DIR
     for name, sha in (("native-observation-owner.h", "dad3cbe3ff93ef2a2bf56bb2b7eef4a6a64e60cb"),
                       ("native-observation-adapter.h", "ffa547fbecad79b3fabf0ded4bb182c201e4a33d"),
+                      ("native-observation-byte-bridge.h", "8105f87229b3aac1d0d3f9798a59915af0232526"),
+                      ("native-observation-byte-collector.h", "75a07d2913f8d7dd8071234c98463d444f98d9bd"),
                       ("native-observation-integration.h", "e3bca3367459c7f79960105f63e9ddef4e95b4d6"),
                       ("native-observation-controller.h", "dac2e2844d893b0090b4c1da3614e4a8d0cc2253")):
         (glue / name).write_bytes(frozen_file("src/kernel/" + name, sha))
