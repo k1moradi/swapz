@@ -1,0 +1,90 @@
+{
+  "round": 102,
+  "agent": 2,
+  "status": "SOURCE_PUBLISHED_LOCAL_HOST_PASS_HOSTED_QUALIFICATION_PENDING",
+  "issue": 220,
+  "freeze": "d2baba1bda02b78eb7df265d22c5e9dbee09e2b1",
+  "frozen_tree": "aec0bc814dc0e0c17c71ccaff2cdd9bd3d9727cc",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "task": "5635a75aa422eef52ed1bf50544bca50b4a9e75e",
+  "source": "43a7d3ddcd50fdb8127683326dfbe0a0ed4cd301",
+  "source_parent": "d9215ce6bc2e12312d22994be02a1724fb81c4ce",
+  "source_tree": "c1c5de1e2d590769d136f5998d5f40381fdc3380",
+  "blobs": {
+    "src/kernel/native-observation-byte-collector.c": "2fc41a64228b8f845192fd0107014f71b46391e3",
+    "src/kernel/native-observation-byte-collector.h": "62fdf6f74709f958a3cd10d0faaa3191c40da1d1",
+    "tests/runtime/native/fixtures/round102-byte-collector.c": "73d93e2027f2e74c14ea88ab82b6c1e1b11c42dd",
+    "tests/runtime/native/fixtures/round102-byte-export-fixture.c": "50451a288e09bfee8b5767dd3bac717ccf28039e",
+    "tests/tools/round102-private-byte-reference.py": "a72851e1b54f468f8fa64096cf26b01dd4ba5c45",
+    "tests/runtime/native/round102-private-byte-reference-test.py": "d3c78675007d63ffe5aeedcbd3dcc281ffeb7cc2",
+    ".github/workflows/phase-a-round102-native-byte-collector-noauth.yml": "7284431bf71aad2de0ea429cf0a593bed4db2f8b"
+  },
+  "standards": {
+    "parent_blob": "30744f929c80a2c3709f072a7e75376823291f6d",
+    "post_blob": "a4a240d3b272b9a426a69ac9fccd0ffb1576ac16",
+    "exact_full_prefix": true,
+    "parent_bytes": 1895862
+  },
+  "publication": {
+    "branch": "main",
+    "force": false,
+    "expected_parent": "d9215ce6bc2e12312d22994be02a1724fb81c4ce",
+    "verified_readback": "43a7d3ddcd50fdb8127683326dfbe0a0ed4cd301"
+  },
+  "local": {
+    "status": "PASS_HOST_MODEL_ONLY",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "flags": "-std=c17 -Wall -Wextra -Werror -pedantic -Wconversion -Wshadow -fsanitize=address,undefined -fno-omit-frame-pointer -pthread",
+    "collector": {
+      "gcc": "PASS",
+      "clang": "PASS",
+      "invalid_cases_per_compiler": 10,
+      "immutable_copy_checks": "4096 bytes each for input/final/user",
+      "failed_join_retention": "PASS",
+      "binary_sha256": {
+        "gcc": "afef70ec7cb97c8615ae6b990ad65632cd20a034dbf659f9e35c8a7de9449447",
+        "clang": "3590522431c4b159108eb50dfe269f1984a6a9d11c04651ba1899e8c258a103e"
+      }
+    },
+    "export_fixture": {
+      "gcc": "PASS",
+      "clang": "PASS",
+      "extra_flags": "-fno-pie -no-pie",
+      "three_distinct_supplied_arrays": true,
+      "binary_sha256": {
+        "gcc": "5ac5790459637e9c5ec0d4f3ebc9c032cb58a649c011c4851476fe8a0b78caea",
+        "clang": "e7df7ac741e8b0db5882d8e3236a366a83b2a71ab038e97e5ce04219b2a93b27"
+      }
+    },
+    "first_error": null,
+    "local_git": {
+      "exit": 128,
+      "first_error": "Could not resolve host: github.com"
+    },
+    "private_oracle_compatibility": "NOT_RUN_LOCALLY",
+    "exact_kernel_object": "NOT_RUN_LOCALLY"
+  },
+  "hosted": {
+    "run": 45924662813,
+    "job": 140263091610,
+    "attempt": 1,
+    "status": "queued",
+    "conclusion": null,
+    "source": "43a7d3ddcd50fdb8127683326dfbe0a0ed4cd301",
+    "first_error": null,
+    "private_compatibility": "PENDING",
+    "directed_kernel_object": "PENDING",
+    "artifact": null,
+    "manual_dispatch": false
+  },
+  "native_capture": false,
+  "native_link": "NOT_RUN",
+  "integration": "NOT_RUN",
+  "physical": "NO_GO",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false
+}
