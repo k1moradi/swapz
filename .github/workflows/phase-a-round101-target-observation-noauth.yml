@@ -1,0 +1,63 @@
+name: Round101 target original completion directed NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/dm-target.c'
+      - 'tests/tools/round101-target-observation-verify.py'
+      - 'tests/runtime/native/fixtures/round101-target-observation.c'
+      - '.github/workflows/phase-a-round101-target-observation-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  actual-target-object:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and complete standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          parent = subprocess.check_output(["git","show","HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(parent) and len(current)>len(parent)
+          print("complete standards prefix",len(parent),len(current))
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: 5a36cabf0989dfffc75de52a6ab8cc021092ebf6
+          path: frozen-product
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: frozen-linux
+          persist-credentials: false
+      - name: Check exact stage, serial host and changed target object
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B tests/tools/round101-target-observation-verify.py frozen-product frozen-linux "$RUNNER_TEMP/round101-agent3"
+      - name: Retain bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round101-agent3-target
+          path: ${{ runner.temp }}/round101-agent3/
+          if-no-files-found: warn
+          retention-days: 14

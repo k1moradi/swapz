@@ -119,6 +119,7 @@ extern bool swapz_mm_trial_scope_matches_route(struct block_device *, sector_t,
 #endif
 #include "native-observation-adapter.h"
 #include <crypto/sha2.h>
+extern bool dm_swapz_trial_observation_origin(struct dm_target *, struct bio *, u64 *, u64 *);
 #define SWAPZ_SCOPED_TARGET_OBSERVATION 1
 #endif
 #endif
@@ -2808,8 +2809,13 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 						   &entry->round058_observation);
 	}
 #endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
-	if (bio_op(bio) != REQ_OP_WRITE || !bio_sectors(bio))
+	if (bio_op(bio) != REQ_OP_WRITE || !bio_sectors(bio)) {
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+		goto observation_endio;
+#else
 		return DM_ENDIO_DONE;
+#endif
+	}
 	if (*error)
 		atomic64_inc(&ctx->endio_write_seen_err);
 	else
@@ -2821,7 +2827,9 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 		atomic64_inc(&ctx->endio_write_forced_err);
 	}
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
-	/* The final clone status, not original MM BIO completion. */
+observation_endio:
+	/* The final clone status for all accepted operations, not original
+	 * MM or core BIO completion. The original owner emits its own ACK. */
 	swapz_scope_observe_clone(dm_per_bio_data(bio, sizeof(struct swapz_bio_ref)),
 		blk_status_to_errno(*error));
 #endif
@@ -11755,11 +11763,6 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 	 * or consult ordinary caches. Decode using the frozen pinned lease.
 	 */
 	if (map->state & SWAPZ_MAP_ORIGINAL) {
-#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
-		/* No frozen read original/extent correlation: invalidate rather
-		 * than fabricate an oracle or reuse the writer's operation. */
-		swapz_scope_observe_invalid();
-#endif
 #if defined(SWAPZ_ROUND097_GATED_TARGET_TEST)
 		error = swapz_round097_read_original_pinned(ctx, logical,
 			ctx->read_compressed, ctx->read_page, &original_pin);
@@ -11769,8 +11772,13 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 			ctx->read_compressed, ctx->original_decode_scratch,
 			ctx->original_decode_verified, ctx->read_page, &original_pin);
 #endif
-		if (error)
+		if (error) {
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+			/* The pinned helper already released on decode failure. */
+			swapz_scope_observe_invalid();
+#endif
 			return error;
+		}
 	} else
 #endif
 	if (!map->valid) {
@@ -11836,8 +11844,17 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 					 &ctx->read_copy_bytes);
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 	if (original_pin) {
-		int release_error = swapz_shared_original_put(&ctx->authority, original_pin);
+		int release_error;
 
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+		/* Actual final BIO copy has returned and the authority pin is
+		 * still live. No independent reference/collector is available;
+		 * never use the decoded scratch as a successful byte oracle.
+		 * Loss applies even when the final copy itself succeeded.
+		 */
+		swapz_scope_observe_invalid();
+#endif
+		release_error = swapz_shared_original_put(&ctx->authority, original_pin);
 		if (!error)
 			error = release_error;
 	}
@@ -16159,6 +16176,90 @@ static bool swapz_round091_retain_candidate_locked(struct swapz_dm *ctx,
 /* ROUND091_RETAIN_END */
 #endif
 
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+/* Only the retained local scope can select a diagnostic observation. An
+ * unsupported shape overlapping it must lose evidence, not alter I/O.
+ * queue_lock protects the borrowed mapper identity and scope lifetime.
+ */
+static bool swapz_scope_observation_selected_locked(const struct swapz_dm *ctx,
+		const struct bio *bio)
+{
+	const struct swapz_mm_trial_scope *scope = &ctx->original_scope;
+	sector_t sector = bio->bi_iter.bi_sector;
+
+	lockdep_assert_held(&ctx->queue_lock);
+	if (!scope->identity || scope->bdev != bio->bi_bdev ||
+	    !scope->sector_count)
+		return false;
+	if (sector >= scope->first_sector)
+		return sector - scope->first_sector < scope->sector_count;
+	return bio_sectors(bio) > scope->first_sector - sector;
+}
+
+/* No carrier transfer here. The frozen core helper itself rejects any
+ * original with a carrier borrow, so an MM ACK cannot acquire a second
+ * core ACK. Call only at irrevocable map admission under queue_lock.
+ */
+static void swapz_scope_observe_plain_accept_locked(struct swapz_dm *ctx,
+		struct swapz_bio_ref *entry, bool rejected_candidate)
+{
+	struct bio *bio = entry->bio;
+	u64 clone, descriptor, operation = 0, original = 0;
+	u32 kind;
+
+	lockdep_assert_held(&ctx->queue_lock);
+	if (!swapz_trial_observation_active())
+		return;
+	if (entry->observation_operation || rejected_candidate) {
+		swapz_scope_observe_invalid();
+		entry->observation_operation = 0;
+		return;
+	}
+	if (!swapz_scope_observation_selected_locked(ctx, bio))
+		return;
+	if (!swapz_scope_route_ready_locked(ctx, bio->bi_bdev,
+			bio->bi_iter.bi_sector))
+		goto incomplete;
+	/* Mint target tokens first; never leave core lineage installed
+	 * just because a later target token allocation failed.
+	 */
+	clone = swapz_trial_observation_mint();
+	descriptor = swapz_trial_observation_mint();
+	if (!clone || !descriptor ||
+	    !dm_swapz_trial_observation_origin(ctx->target, bio, &operation, &original))
+		goto incomplete;
+	entry->observation_clone = clone;
+	entry->observation_descriptor = descriptor;
+	entry->observation_original = original;
+	entry->observation_operation = operation;
+	/* v2 has no ordinary read kind. Whether a READ is typed cannot
+	 * be known at map time: prior FIFO writes can change the map.
+	 * Retain the real terminal correlation but never invent an ACCEPT.
+	 */
+	if (bio_op(bio) == REQ_OP_WRITE)
+		kind = SWAPZ_OBS_ORDINARY_WRITE;
+	else if (bio_op(bio) == REQ_OP_DISCARD)
+		kind = SWAPZ_OBS_DISCARD_BIO;
+	else
+		goto incomplete;
+	{
+		const struct swapz_observation_record record = {
+			.event = SWAPZ_OBS_ACCEPT, .operation = operation,
+			.operation_kind = kind, .original = original,
+			.clone = clone, .descriptor = descriptor,
+			.logical = (u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS),
+		};
+
+		(void)swapz_trial_observation_append(&record);
+	}
+	/* Ordinary lower/publish/discard lineage and independent byte
+	 * collection are not yet connected. Never certify a partial trace.
+	 */
+incomplete:
+	swapz_scope_observe_invalid();
+}
+#endif
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -16278,8 +16379,19 @@ map_entry:
 	/* Map may return KILL/REQUEUE before ordinary descriptor initialization.
 	 * A later core callback must never see stale recorder tokens. */
 	entry->observation_operation = 0;
-	if (map_refusal != DM_MAPIO_SUBMITTED)
+	entry->observation_original = 0;
+	entry->observation_clone = 0;
+	entry->observation_descriptor = 0;
+	entry->observation_extent = 0;
+	if (map_refusal != DM_MAPIO_SUBMITTED) {
+		if (swapz_trial_observation_active()) {
+			spin_lock_irqsave(&ctx->queue_lock, flags);
+			if (swapz_scope_observation_selected_locked(ctx, bio))
+				swapz_scope_observe_invalid();
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		}
 		return map_refusal;
+	}
 #endif
 	INIT_LIST_HEAD(&entry->list);
 	INIT_LIST_HEAD(&entry->preparation_list);
@@ -16404,6 +16516,10 @@ map_entry:
 		 * draining while a previously admitted BIO is added after the drain.
 		 */
 		if (!ctx->accepting) {
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+			if (swapz_scope_observation_selected_locked(ctx, bio))
+				swapz_scope_observe_invalid();
+#endif
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			if (ordered_owned)
 				mutex_unlock(&ctx->ordered_owner);
@@ -16432,6 +16548,7 @@ map_entry:
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 			if (entry->observation_operation)
 				swapz_scope_observe_invalid();
+			entry->observation_operation = 0;
 #endif
 			if (original_candidate.broker)
 				WARN_ON_ONCE(swapz_ticket_put(&original_candidate));
@@ -16489,12 +16606,8 @@ map_entry:
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 	if (original_retained)
 		swapz_scope_observe_accept(entry);
-	else if (entry->observation_operation ||
-		 swapz_scope_route_ready_locked(ctx, bio->bi_bdev, sector)) {
-		/* Unretained/other operation has no complete core lineage. */
-		swapz_scope_observe_invalid();
-		entry->observation_operation = 0;
-	}
+	else
+		swapz_scope_observe_plain_accept_locked(ctx, entry, original_candidate.broker != NULL);
 #endif
 #if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
 /* ROUND052_DM_INTERNAL_MAP_ACCEPTED_START */
