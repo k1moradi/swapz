@@ -1,0 +1,296 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+index 833f089bc01e8803f427732975d706c894436eb3..e088dd706763bec377d09a81905cf5de9b371c6a 100644
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1461,1 +1461,1 @@
+-	if (!swapz_trial_observation_append(record)) {
++	if (!swapz_mm_observation_emit(record)) {
+@@ -1472,1 +1472,1 @@
+-		swapz_trial_observation_append(&preparation);
++		swapz_mm_observation_emit(&preparation);
+@@ -1490,1 +1490,1 @@
+-	swapz_trial_observation_append(&record);
++	swapz_mm_observation_emit(&record);
+@@ -1504,1 +1504,1 @@
+-	swapz_trial_observation_append(&record);
++	swapz_mm_observation_emit(&record);
+@@ -1520,1 +1520,1 @@
+-			swapz_trial_observation_append(&record);
++			swapz_mm_observation_emit(&record);
+@@ -1527,1 +1527,1 @@
+-		swapz_trial_observation_append(&record);
++		swapz_mm_observation_emit(&record);
+@@ -2345,0 +2346,41 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++/* The folio is still locked at the real store site. Capture only a direct
++ * whole-page slot of the exact currently published, bounded area.
++ * No new allocation, digest, decoded buffer or I/O. The byte owner copies
++ * synchronously; the local mapping never escapes this call. */
++static u64 swapz_mm_stage_input(struct folio *folio, long index, swp_entry_t slot)
++{
++	const struct swapz_mm_trial_scope *scope;
++	struct swap_info_struct *si;
++	sector_t sector;
++	void *source;
++	u64 token = 0;
++
++	if (!rcu_access_pointer(swapz_mm_capture_scope) || !swapz_trial_byte_active() ||
++	    PAGE_SIZE != 4096 || index || folio_order(folio))
++		return 0;
++	rcu_read_lock();
++	scope = rcu_dereference(swapz_mm_capture_scope);
++	if (!scope || swp_type(slot) != scope->swap_type ||
++	    swapz_mm_trial_area_epoch(scope->swap_type) != scope->area_epoch)
++		goto unlock;
++	si = __swap_entry_to_info(slot);
++	if (!si || si->ops != &swap_bdev_ops || si->bdev != scope->bdev)
++		goto unlock;
++	sector = swap_folio_sector(folio);
++	if (!sector || (sector & 7) || sector < scope->first_sector ||
++	    sector - scope->first_sector > scope->sector_count - 8 ||
++	    swp_offset(slot) != sector / 8)
++		goto unlock;
++	source = kmap_local_folio(folio, 0);
++	token = swapz_trial_byte_stage_input(scope->identity, scope->swap_type,
++		scope->area_epoch, swp_offset(slot), source, 4096);
++	kunmap_local(source);
++	if (!token)
++		swapz_trial_byte_invalidate();
++unlock:
++	rcu_read_unlock();
++	return token;
++}
++#endif
++
+@@ -2351,0 +2393,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++	u64 input_token;
++#endif
+@@ -2359,0 +2404,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++	input_token = swapz_mm_stage_input(folio, index, page_swpentry);
++#endif
+@@ -2417,0 +2465,8 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++	/* The XArray store succeeded under the folio lock; the entry is not
++	 * reclaim-visible until LRU insertion. Raw/declined cookie abandons. */
++	if (input_token)
++		swapz_trial_byte_finish_input(input_token, entry->original_cookie);
++	else if (entry->original_cookie && swapz_trial_byte_active())
++		swapz_trial_byte_invalidate();
++#endif
+@@ -2427,0 +2483,4 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++	if (input_token)
++		swapz_trial_byte_finish_input(input_token, 0);
++#endif
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+index e07dfd963edcdfb438af2ae1f43e3023e54544b7..6912eb7ec5a9ef325f7282ef9c9226b39265f01d 100644
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -961,0 +962,1 @@
++#ifndef SWAPZ_ROUND104_INTEGRATION_TEST
+@@ -962,0 +964,1 @@
++#endif
+@@ -970,0 +973,3 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++		swapz_trial_byte_invalidate();
++#endif
+@@ -971,0 +977,6 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++		/* Correlate now, emit only at actual original callback entry. */
++		swapz_mm_trial_dm_complete(io->orig_bio, io->swapz_observation_operation,
++			io->swapz_observation_original);
++		(void)status;
++#else
+@@ -978,0 +990,1 @@
++#endif
+diff --git a/mm/swapz-trial-terminal.inc b/mm/swapz-trial-terminal.inc
+index 3f980d04958676c22d44a6ca2778c4bd40a464fb..1ecc86d30f20790f1fae7506a3f55d612200831a 100644
+--- a/mm/swapz-trial-terminal.inc
++++ b/mm/swapz-trial-terminal.inc
+@@ -10,0 +11,27 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++/* Published scope storage and mapper file remain live until observation
++ * unpublication and its grace period; no ref acquisition or sleeping. */
++bool swapz_mm_trial_scope_matches_exact(const struct swapz_mm_trial_scope *requested,
++	const struct file *mapper_file)
++{
++	const struct swapz_mm_trial_scope *scope;
++	bool matched = false;
++
++	if (!requested || !mapper_file)
++		return false;
++	rcu_read_lock();
++	scope = rcu_dereference(swapz_mm_capture_scope);
++	if (scope && mapper_file == READ_ONCE(swapz_mm_scope_file) &&
++	    scope->identity == requested->identity &&
++	    scope->bdev == requested->bdev && scope->broker == requested->broker &&
++	    scope->session == requested->session && scope->table_epoch == requested->table_epoch &&
++	    scope->target_epoch == requested->target_epoch &&
++	    scope->area_epoch == requested->area_epoch && scope->swap_type == requested->swap_type &&
++	    scope->first_sector == requested->first_sector && scope->sector_count == requested->sector_count &&
++	    swapz_mm_trial_area_epoch(scope->swap_type) == scope->area_epoch)
++		matched = true;
++	rcu_read_unlock();
++	return matched;
++}
++#endif
++
+@@ -118,0 +146,4 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	struct swapz_trial_debt_slot *slot;
++	struct swapz_observation_record record = {};
++#endif
+@@ -120,0 +152,9 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	slot = swapz_trial_debt_find(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM);
++	if (slot && slot->operation && slot->original)
++		record = (struct swapz_observation_record){
++			.event = SWAPZ_OBS_UPPER_ENDIO, .operation = slot->operation,
++			.original = slot->original,
++			.status = (u32)-blk_status_to_errno(bio->bi_status)
++		};
++#endif
+@@ -125,0 +166,6 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	if (record.operation)
++		swapz_mm_observation_emit(&record);
++	if (!ticket)
++		swapz_trial_byte_invalidate();
++#endif
+@@ -139,0 +186,3 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	bool invalidate = false;
++#endif
+@@ -147,0 +197,6 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	/* A parent may already have chained children. Preserve its real
++	 * callback debt but reject this unsupported evidence shape. */
++	if (bio_flagged(bio, BIO_CHAIN))
++		swapz_mm_terminal_debt.fault = true;
++#endif
+@@ -153,1 +208,5 @@
+-		   bio_flagged(bio, BIO_CLONED) || bio_flagged(bio, BIO_REMAPPED)) {
++		   bio_flagged(bio, BIO_CLONED) || bio_flagged(bio, BIO_REMAPPED)
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++		   || !bio->bi_end_io || swapz_bio_is_chain_child(bio)
++#endif
++		   ) {
+@@ -164,0 +224,4 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	if (scope && bio->bi_bdev == scope->bdev)
++		invalidate = swapz_mm_terminal_debt.fault;
++#endif
+@@ -166,0 +230,4 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	if (invalidate)
++		swapz_trial_byte_invalidate();
++#endif
+@@ -182,0 +250,3 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	bool invalidate = false;
++#endif
+@@ -189,0 +260,6 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	if (scope && slot && bio_flagged(bio, BIO_CHAIN)) {
++		swapz_mm_terminal_debt.fault = true;
++		invalidate = true;
++	}
++#endif
+@@ -191,0 +268,3 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	    !bio_flagged(bio, BIO_CHAIN) &&
++#endif
+@@ -198,0 +278,4 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	if (invalidate)
++		swapz_trial_byte_invalidate();
++#endif
+@@ -201,0 +285,27 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++/* Called before DM drops its io, only for a qualified final unsplit
++ * completion. The wrapper still owns the actual BIO callback debt.
++ * Never record an ACK here; the block layer may still defer completion. */
++void swapz_mm_trial_dm_complete(const struct bio *bio, u64 operation, u64 original)
++{
++	struct swapz_trial_debt_slot *slot;
++	unsigned long flags;
++	bool valid = false;
++
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	slot = swapz_trial_debt_find(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM);
++	if (slot && slot->observed && !slot->operation && !slot->original &&
++	    operation && original && bio->bi_end_io == swapz_mm_trial_dm_endio &&
++	    !bio_flagged(bio, BIO_CHAIN)) {
++		slot->operation = operation;
++		slot->original = original;
++		valid = true;
++	} else {
++		swapz_mm_terminal_debt.fault = true;
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	if (!valid)
++		swapz_trial_byte_invalidate();
++}
++#endif
++
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+index 7091e456b6c09f29d68140cfff3f072e940ccd2f..b930f6f04a21d3f2b8b6f2279e028a94cfc99502 100644
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -19,0 +20,16 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++#include "native-observation-integration.h"
++u64 swapz_trial_observation_append_sequence(const struct swapz_observation_record *record);
++
++/* The recorder reserves/publishes exactly once; the byte bridge consumes
++ * that ordinal, never a shared count. Byte failure is evidence loss only. */
++static inline bool swapz_mm_observation_emit(const struct swapz_observation_record *record)
++{
++	u64 sequence = swapz_trial_observation_append_sequence(record);
++
++	if (!sequence || !swapz_trial_byte_event(record, sequence, NULL, 0))
++		swapz_trial_byte_invalidate();
++	return sequence != 0;
++}
++#else
++#define swapz_mm_observation_emit(record) swapz_trial_observation_append(record)
+@@ -20,0 +37,1 @@
++#endif
+@@ -98,0 +116,5 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++/* Core records the exact final unsplit origin; wrapper emits at actual
++ * terminal callback entry using the final BIO status. */
++void swapz_mm_trial_dm_complete(const struct bio *bio, u64 operation, u64 original);
++#endif
+diff --git a/include/linux/swapz_trial_debt.h b/include/linux/swapz_trial_debt.h
+index 207cd1b7a87f493992938cfa00ed4f95c7196811..d1d2fc65084936380c211094ce6f073273596338 100644
+--- a/include/linux/swapz_trial_debt.h
++++ b/include/linux/swapz_trial_debt.h
+@@ -22,0 +23,3 @@
++#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
++	u64 operation, original;
++#endif
+diff --git a/block/bio.c b/block/bio.c
+index 38f24ee2e414107be390d3a01c6b907e06a9dca7..f6f1ddc82a5632f1f9cf8dbb0bdb2138eb8e0e64 100644
+--- a/block/bio.c
++++ b/block/bio.c
+@@ -370,0 +371,9 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++/* A chained child may be a fresh allocated BIO, not BIO_CLONED.
++ * Never interpose a callback on the special block-layer sentinel. */
++bool swapz_bio_is_chain_child(const struct bio *bio)
++{
++	return bio->bi_end_io == bio_chain_endio;
++}
++#endif
++
+diff --git a/include/linux/bio.h b/include/linux/bio.h
+index 4079365b37690164f85ba962a0bd0918c85899cb..c7d5543249003b7f190d6ea065fd6253d5572792 100644
+--- a/include/linux/bio.h
++++ b/include/linux/bio.h
+@@ -495,0 +496,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND104_INTEGRATION_TEST)
++bool swapz_bio_is_chain_child(const struct bio *bio);
++#endif
