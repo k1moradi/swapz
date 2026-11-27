@@ -254,7 +254,7 @@ static bool exact_record(const struct byte_bridge *state,
 	const struct swapz_observation_record *committed;
 
 	if (!record || record->sequence || !sequence ||
-	    sequence > state->recorder->capacity || sequence <= state->last_sequence)
+	    sequence > state->recorder->capacity || sequence != state->last_sequence + 1U)
 		return false;
 	committed = &state->recorder->records[sequence - 1U];
 	/* No count read or second reservation. The marker release-publishes
@@ -474,7 +474,9 @@ static bool apply_event(struct byte_bridge *state, const struct swapz_observatio
 	case SWAPZ_OBS_ACCEPT:
 		return accept_operation(state, record, sequence, bytes, length);
 	case SWAPZ_OBS_CLEANUP:
-		if (state->cleaned || !op->done || record->flags != 7 || record->caps ||
+		if (state->cleaned || !op->done ||
+		    (op->captured && (!op->candidate_released || !op->carrier_released)) ||
+		    record->flags != 7 || record->caps ||
 		    record->tickets || record->pins || record->reservations || record->bios || record->maps)
 			return false;
 		state->cleaned = true;
@@ -592,7 +594,7 @@ void swapz_byte_bridge_close(bool joined)
 		BRIDGE_UNLOCK();
 		return;
 	}
-	if (!state->bound || !state->op.done ||
+	if (!state->bound || !state->op.done || !state->cleaned ||
 	    (state->op.captured && (!state->op.candidate_released || !state->op.carrier_released)))
 		lose(state);
 	for (unsigned int index = 0; index < state->pages; ++index)
@@ -619,7 +621,9 @@ bool swapz_byte_bridge_export(swapz_byte_record_sink sink, void *context)
 	 * non-reentrant. No borrowed storage escapes this callback contract.
 	 */
 	if (!bridge || !bridge->joined || !sink || atomic_read(&bridge->recorder->loss) ||
-	    !bridge->recorder->sealed || !swapz_byte_export(&bridge->collector, &records, &count))
+	    !bridge->recorder->sealed || !bridge->cleaned ||
+	    bridge->last_sequence != (u64)atomic_read(&bridge->recorder->count) ||
+	    !swapz_byte_export(&bridge->collector, &records, &count))
 		return false;
 	for (unsigned int index = 0; index < count; ++index)
 		if (!sink(context, &records[index]))

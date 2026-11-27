@@ -26,6 +26,17 @@ KINDS = {"typed_write": 1, "typed_read": 2, "fallback": 3,
 def assemble(directory, source):
     scope, plan, actions = reference.load_plan(directory, source)
     wire = reference.read_private(directory, "wire.bin", legacy.MAX_BYTES)
+    records = reference.private_json(directory, "kernel-collector.json", oracle.MAX_SIDECAR_BYTES)
+    result, sidecar = correlate(
+        scope, plan, actions, wire, records, source,
+        lambda index: reference.private_json(directory, f"user-{index}.json", 4096),
+        lambda index: reference.user_bytes(directory, index))
+    reference.write_private(directory, "sidecar.json", oracle.canonical(sidecar))
+    return result
+
+
+def correlate(scope, plan, actions, wire, records, source, read_user, read_page):
+    """Shared pure correlation; caller controls private inputs and publication."""
     # Bounded random access into the fixed wire; full legacy semantics are
     # checked exactly once below before writing any output.
     require(len(wire) >= legacy.HEADER.size + legacy.FOOTER.size, "kernel_wire_size")
@@ -33,7 +44,6 @@ def assemble(directory, source):
     require(0 < count <= legacy.MAX_RECORDS and len(wire) ==
             legacy.HEADER.size + count * legacy.RECORD.size + legacy.FOOTER.size,
             "kernel_wire_size")
-    records = reference.private_json(directory, "kernel-collector.json", oracle.MAX_SIDECAR_BYTES)
     require(type(records) is list and len(records) == len(actions), "kernel_count")
     witnesses = []
 
@@ -88,7 +98,7 @@ def assemble(directory, source):
                     "kernel_unexpected_pin")
         # Separate actual user observation file for EVERY operation. Neither
         # expected plan nor kernel status is substituted for actual user status.
-        user = reference.private_json(directory, f"user-{index}.json", 4096)
+        user = read_user(index)
         require(type(user) is dict and set(user) == USER_FIELDS and
                 all(oracle.integer(user[key], 1, (1 << 64) - 1) and
                     user[key] == record[key] for key in
@@ -100,13 +110,12 @@ def assemble(directory, source):
         witness = {key: record[key] for key in oracle.WITNESS_FIELDS
                    if key not in ("user_page", "user_status")}
         witness["user_status"] = user["status"]
-        witness["user_page"] = reference.user_bytes(directory, index).hex() if read else None
+        witness["user_page"] = read_page(index).hex() if read else None
         witnesses.append(witness)
     sidecar = dict(schema=oracle.SCHEMA, scope_sha256=legacy.scope_digest(scope).hex(),
                    wire_sha256=oracle.digest(wire), operations=witnesses)
     result = oracle.validate(wire, scope, source, plan, sidecar)
-    reference.write_private(directory, "sidecar.json", oracle.canonical(sidecar))
-    return dict(status=result["status"], operations=result["operations"], auth=0)
+    return dict(status=result["status"], operations=result["operations"], auth=0), sidecar
 
 
 def main():

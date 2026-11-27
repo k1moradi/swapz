@@ -66,6 +66,15 @@ bool swapz_trial_observation_release(void);
  * Callback may not retain record pointers or reenter owner control.
  */
 bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *context);
+
+/* Private bundle v1: one joined, clean, immutable recorder and collector
+ * snapshot under the owner mutex. Explicit little-endian encoding; never
+ * exports struct padding or user bytes. The sink is trusted built-in cold
+ * code, synchronous, non-reentrant, and must discard partial output on
+ * false. Retry from byte zero; a failed sink does not consume evidence.
+ * No exported symbol, user endpoint, admission or activation.
+ */
+bool swapz_trial_observation_export_private(swapz_observation_sink sink, void *context);
 #endif
 
 #endif

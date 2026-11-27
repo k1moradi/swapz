@@ -197,6 +197,128 @@ bool swapz_trial_observation_export(swapz_observation_sink sink, void *context)
 }
 
 #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+/* Private outer framing, independent of the unchanged v2 recorder wire.
+ * Fixed prefix: magic[8], version, wire bytes, operation count, byte section
+ * bytes, scope SHA256[32]. Per operation: 11 u64, 4 u32, then zero or one
+ * 4096-byte page. No native structure is emitted. No allocation or 4K stack.
+ */
+#define PRIVATE_HEADER_BYTES 56U
+#define PRIVATE_RECORD_BYTES 104U
+struct private_export {
+	swapz_observation_sink sink;
+	void *context;
+	u32 count, bytes;
+};
+
+static void private_u32(u8 **output, u32 value)
+{
+	for (unsigned int index = 0; index < 4; ++index) {
+		*(*output)++ = (u8)value;
+		value >>= 8;
+	}
+}
+
+static void private_u64(u8 **output, u64 value)
+{
+	for (unsigned int index = 0; index < 8; ++index) {
+		*(*output)++ = (u8)value;
+		value >>= 8;
+	}
+}
+
+static u32 private_page_kind(enum swapz_byte_kind kind)
+{
+	switch (kind) {
+	case SWAPZ_BYTE_WRITE:
+	case SWAPZ_BYTE_FALLBACK:
+	case SWAPZ_BYTE_ORDINARY:
+	case SWAPZ_BYTE_ERROR:
+		return 1;
+	case SWAPZ_BYTE_READ:
+		return 2;
+	case SWAPZ_BYTE_DISCARD:
+		return 0;
+	default:
+		return 3;
+	}
+}
+
+static bool private_measure(void *context, const struct swapz_byte_record *record)
+{
+	struct private_export *state = context;
+	u32 page_kind = private_page_kind(record->kind);
+
+	if (state->count >= SWAPZ_BYTE_OPERATIONS || page_kind > 2)
+		return false;
+	++state->count;
+	state->bytes += PRIVATE_RECORD_BYTES + (page_kind ? SWAPZ_BYTE_PAGE : 0U);
+	return true;
+}
+
+static bool private_record(void *context, const struct swapz_byte_record *record)
+{
+	struct private_export *state = context;
+	u8 header[PRIVATE_RECORD_BYTES], *output = header;
+	u32 page_kind = private_page_kind(record->kind);
+
+	private_u64(&output, record->operation);
+	private_u64(&output, record->original);
+	private_u64(&output, record->clone);
+	private_u64(&output, record->descriptor);
+	private_u64(&output, record->pin);
+	private_u64(&output, record->accept_sequence);
+	private_u64(&output, record->pin_sequence);
+	private_u64(&output, record->copy_sequence);
+	private_u64(&output, record->release_sequence);
+	private_u64(&output, record->clone_sequence);
+	private_u64(&output, record->upper_sequence);
+	private_u32(&output, record->logical);
+	private_u32(&output, (u32)record->kind);
+	private_u32(&output, record->user_status);
+	private_u32(&output, page_kind);
+	return (size_t)(output - header) == sizeof(header) &&
+		state->sink(state->context, header, sizeof(header)) &&
+		(!page_kind || state->sink(state->context,
+			page_kind == 1 ? record->input_page : record->final_copy,
+			SWAPZ_BYTE_PAGE));
+}
+
+bool swapz_trial_observation_export_private(swapz_observation_sink sink, void *context)
+{
+	struct private_export state = {.sink = sink, .context = context};
+	u8 header[PRIVATE_HEADER_BYTES], *output = header;
+	u32 count, wire_bytes;
+	bool result = false;
+
+	mutex_lock(&trial_control);
+	if (!sink || !trial_joined || !trial_recorder.records || !trial_recorder.sealed ||
+	    atomic_read(&trial_recorder.loss) ||
+	    !swapz_byte_bridge_export(private_measure, &state) || !state.count)
+		goto unlock;
+	count = (u32)atomic_read(&trial_recorder.count);
+	if (!count || count > SWAPZ_OBSERVATION_MAX_RECORDS ||
+	    trial_recorder.records[count - 1U].event != SWAPZ_OBS_CLEANUP)
+		goto unlock;
+	wire_bytes = SWAPZ_OBSERVATION_HEADER_BYTES + count * SWAPZ_OBSERVATION_RECORD_BYTES +
+		SWAPZ_OBSERVATION_FOOTER_BYTES;
+	memcpy(output, "SWZPRV1", 8);
+	output += 8;
+	private_u32(&output, 1);
+	private_u32(&output, wire_bytes);
+	private_u32(&output, state.count);
+	private_u32(&output, state.bytes);
+	memcpy(output, trial_recorder.scope_sha256, 32);
+	output += 32;
+	result = (size_t)(output - header) == sizeof(header) &&
+		sink(context, header, sizeof(header)) &&
+		swapz_observation_export(&trial_recorder, sink, context) &&
+		swapz_byte_bridge_export(private_record, &state) &&
+		sink(context, (const u8 *)"SWZPEND", 8);
+unlock:
+	mutex_unlock(&trial_control);
+	return result;
+}
+
 bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *context)
 {
 	bool result;
@@ -209,6 +331,20 @@ bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *con
 }
 #endif
 
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+static void private_scrub(void *pointer, size_t length)
+{
+#ifdef __KERNEL__
+	memzero_explicit(pointer, length);
+#else
+	volatile u8 *bytes = pointer;
+
+	while (length--)
+		*bytes++ = 0;
+#endif
+}
+#endif
+
 bool swapz_trial_observation_release(void)
 {
 	bool result = false;
@@ -218,6 +354,9 @@ bool swapz_trial_observation_release(void)
 #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
 		if (!swapz_byte_bridge_release())
 			goto unlock;
+		private_scrub(trial_recorder.records,
+			      trial_recorder.capacity * sizeof(*trial_recorder.records));
+		private_scrub(trial_recorder.scope_sha256, sizeof(trial_recorder.scope_sha256));
 #endif
 		kvfree(trial_recorder.records);
 		trial_recorder.records = NULL;
