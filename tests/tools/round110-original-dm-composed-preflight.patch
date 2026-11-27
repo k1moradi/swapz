@@ -1,0 +1,133 @@
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+index 332fc3faf1ad05f3756bf7d90b476f28bd50a012..5e446e6b80f5744e082ed13a506506499ecb854f 100644
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -3412,0 +3413,128 @@
++#ifdef SWAPZ_ROUND110_COMPOSED_PREFLIGHT_TEST
++#if defined(MODULE) || !defined(SWAPZ_ROUND107_FINAL_REMOVAL_TEST) || !defined(SWAPZ_ROUND109_AREA_PREFLIGHT_TEST) || !defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST) || !defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST)
++#error "Composed preflight requires the frozen built-in MM and DM guards"
++#endif
++/* Value-only read-only snapshot. No pointer, lifetime or admission grant. */
++struct dm_swapz_preflight {
++	u32 swap_type;
++	u64 area_epoch, session, table_epoch, target_epoch, registration_epoch;
++	sector_t first_sector, sector_count;
++};
++
++static bool dm_swapz_preflight_live(struct mapped_device *md,
++				  struct block_device *bdev)
++{
++	bool live;
++
++	lockdep_assert_held(&md->suspend_lock);
++	spin_lock(&_minor_lock);
++	live = md->disk && bdev->bd_disk == md->disk &&
++		bdev == md->disk->part0 && md->disk->fops == &dm_blk_dops &&
++		md->disk->private_data == md && dm_open_count(md) > 0 &&
++		!test_bit(DMF_FREEING, &md->flags) && !dm_deleting_md(md) &&
++		!test_bit(DMF_DEFERRED_REMOVE, &md->flags) &&
++		dm_swapz_final.md != md;
++	spin_unlock(&_minor_lock);
++	return live && disk_live(bdev->bd_disk) && !dm_request_based(md) &&
++		!dm_suspended_md(md) && !dm_suspended_internally_md(md) &&
++		!test_bit(DMF_BLOCK_IO_FOR_SUSPEND, &md->flags) &&
++		!test_bit(DMF_POST_SUSPENDING, &md->flags) &&
++		!test_bit(DMF_NOFLUSH_SUSPENDING, &md->flags);
++}
++
++/* Caller independently pins the opened mapper file and md throughout,
++ * owns result storage and enters without DM/controller/producer locks.
++ * suspend_lock precedes the SRCU borrow; return the borrow before unlocking.
++ * Native table replacement and suspend serialize on this mutex. The frozen
++ * query takes registry -> target queue -> RCU, does not acquire suspend_lock
++ * or release a mapper file. No minor lock spans a callback, and swap_lock
++ * is acquired/released by each scalar MM read independently.
++ * The two MM reads bracket the target query, not an atomic admission:
++ * even a successful snapshot may be stale on return. No installed caller.
++ */
++static __used noinline int dm_swapz_combined_preflight(
++		struct mapped_device *md, struct file *mapper_file,
++		sector_t first_sector, sector_t sector_count,
++		struct dm_swapz_preflight *result)
++{
++	struct swapz_mm_trial_area_identity before, after;
++	struct swapz_trial_target_preflight route;
++	struct block_device *bdev;
++	struct dm_table *table;
++	struct dm_target *target;
++	sector_t table_size;
++	int error, srcu_idx;
++
++	if (!result)
++		return -EINVAL;
++	*result = (struct dm_swapz_preflight){};
++	if (!md || !mapper_file || !S_ISBLK(file_inode(mapper_file)->i_mode) ||
++	    mapper_file->f_op != &def_blk_fops ||
++	    (mapper_file->f_mode & FMODE_PATH) ||
++	    !first_sector || (first_sector & 7) ||
++	    !sector_count || (sector_count & 7) ||
++	    sector_count > 16 * 8 || sector_count > (sector_t)-1 - first_sector)
++		return -EINVAL;
++	bdev = file_bdev(mapper_file);
++	if (!bdev || bdev_is_partition(bdev))
++		return -EINVAL;
++
++	lockdep_assert_not_held(&_minor_lock);
++	lockdep_assert_not_held(&md->suspend_lock);
++	mutex_lock(&md->suspend_lock);
++	error = -ESTALE;
++	if (!dm_swapz_preflight_live(md, bdev))
++		goto unlock;
++
++	table = dm_get_live_table(md, &srcu_idx);
++	if (!table || dm_table_get_md(table) != md || table->num_targets != 1)
++		goto put_table;
++	target = dm_table_get_target(table, 0);
++	table_size = dm_table_get_size(table);
++	if (!target || target->table != table || !target->type ||
++	    strcmp(target->type->name, "swapz") || target->begin ||
++	    target->len != table_size || first_sector >= table_size ||
++	    sector_count > table_size - first_sector)
++		goto put_table;
++
++	error = swapz_mm_trial_area_preflight(mapper_file, first_sector,
++					     sector_count, &before);
++	if (error)
++		goto put_table;
++	error = swapz_trial_controller_query_registered(target, mapper_file,
++				NULL, first_sector, sector_count, &route);
++	if (error)
++		goto put_table;
++	error = -ESTALE;
++	if (!route.session || !route.table_epoch || !route.target_epoch ||
++	    !route.registration_epoch || route.first_sector != first_sector ||
++	    route.sector_count != sector_count)
++		goto put_table;
++	error = swapz_mm_trial_area_preflight(mapper_file, first_sector,
++					     sector_count, &after);
++	if (error)
++		goto put_table;
++	error = -ESTALE;
++	if (!before.area_epoch || before.swap_type != after.swap_type ||
++	    before.area_epoch != after.area_epoch ||
++	    rcu_dereference_protected(md->map,
++				lockdep_is_held(&md->suspend_lock)) != table ||
++	    !dm_swapz_preflight_live(md, bdev))
++		goto put_table;
++
++	*result = (struct dm_swapz_preflight){
++		.swap_type = after.swap_type, .area_epoch = after.area_epoch,
++		.session = route.session, .table_epoch = route.table_epoch,
++		.target_epoch = route.target_epoch,
++		.registration_epoch = route.registration_epoch,
++		.first_sector = route.first_sector, .sector_count = route.sector_count,
++	};
++	error = 0;
++put_table:
++	dm_put_live_table(md, srcu_idx);
++unlock:
++	mutex_unlock(&md->suspend_lock);
++	return error;
++}
++#endif
++
