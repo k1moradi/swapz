@@ -1,0 +1,28 @@
+{
+  "round": 111,
+  "agent": 4,
+  "frozen": "4345f21b1da720e6c8d685c7b232bfcebe635d50",
+  "tree": "98cb27a3f57d6482d859a260526edb5614ec7994",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "status": "NOT_RUN",
+  "first_blocker": "Local container GitHub DNS unavailable; source-triggered hosted lane required",
+  "gcc_asan_ubsan": "NOT_RUN",
+  "clang_asan_ubsan": "NOT_RUN",
+  "optimized_timing": "NOT_RUN",
+  "measurements": null,
+  "byte_exact_readback": "NOT_RUN",
+  "ci_run_id": null,
+  "ci_job_id": null,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO",
+  "acceptance": "AGENT1_PENDING",
+  "limitations": [
+    "Host liblz4 backend, pinned Linux wrapper; not actual kernel LZ4 implementation",
+    "Scalar host predictor; no kernel FPU transition",
+    "Preserved packing model only, no lower IO"
+  ]
+}

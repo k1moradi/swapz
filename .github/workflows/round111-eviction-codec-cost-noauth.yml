@@ -1,0 +1,47 @@
+name: Round111 rootless eviction codec-cost diagnostic NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/codec/round111-eviction-codec-cost.c'
+      - 'tests/tools/round111-eviction-codec-cost-verify.py'
+      - '.github/workflows/round111-eviction-codec-cost-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  codec-cost:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            crypto/lzo.c
+            crypto/lz4.c
+            crypto/acompress.c
+            mm/zswap.c
+            mm/Kconfig
+            lib/lzo/
+            include/linux/lzo.h
+      - name: Rootless compile and execute
+        run: |
+          set -euo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(id -u)" != 0
+          python3 -B swapz/tests/tools/round111-eviction-codec-cost-verify.py --linux-root linux --output "$RUNNER_TEMP/round111-codec/results.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round111-eviction-codec-cost
+          path: ${{ runner.temp }}/round111-codec/
+          if-no-files-found: warn
