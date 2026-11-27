@@ -1,0 +1,190 @@
+{
+  "round": 101,
+  "agent": 3,
+  "status": "PROGRESS_HOST_PASS_NATIVE_PREREQUISITE_FAILED_CORRECTION_PENDING",
+  "task": "f3e2a20dd9b17feb677f732e6f5088ff263822fa",
+  "freeze": "28ffacb0a50fede481d010c0b688271badbbae6e",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "790fcb30bad5062956808f0cd0418d2123511245",
+  "source_parent": "eb2e4d03f32510864886e78b2b50f110db048e95",
+  "source_tree": "d7aa05280902098103e4ecd640178958d1c6d484",
+  "source_blob": "46c2cb832ff0071a028a27b35f63daa84f29914f",
+  "initial_source": "e8815d5720289639271d7e2ecb7f6b418d41aeba",
+  "initial_parent": "f3e2a20dd9b17feb677f732e6f5088ff263822fa",
+  "initial_tree": "4abc91df633167a7d1b4b5bb8f26b85d3cc69f55",
+  "initial_target": "ef9aa4208cd2f8783ed6eb6c03f91970cf7cad2a",
+  "frozen_target": "40f502cd3ca3b9f48b1178995fd3f922bfcbfc01",
+  "evidence_parent": "6f85a6eee41a22aae621080a8c173a6d13b48143",
+  "stage": {
+    "baseline": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+    "stage_verifier": "96e6750971c182dfe87e6e57eac048c7c3a529b6",
+    "mm": "cad0d9ba05cd614b95b335ed0c7d70d9e69d00f0",
+    "carrier": "5e11fe42a9dce147cdaf7f30c43b1c8b6feff59a",
+    "page_io": "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+    "core": "f0c0cd4add03bf2b6f9bf37997444ecd08bbb83b",
+    "core_header": "a010598cb4e884a78f06ab66ab4488a1a7f9c418",
+    "actual_initial_hosted_stage": "PASS",
+    "peer_source_consumed": false
+  },
+  "initial_ci": {
+    "census": {
+      "queued": 8,
+      "in_progress": 11,
+      "success": 8,
+      "failure": 3
+    },
+    "focused": {
+      "run": 45921498419,
+      "job": 140253037507,
+      "conclusion": "failure",
+      "host": {
+        "gcc": 144,
+        "clang": 144,
+        "sanitizers": [
+          "ASan",
+          "UBSan"
+        ],
+        "scope": "actual extracted target and frozen core functions with serial modeled primitives; no native concurrency or actual full kernel completion"
+      },
+      "first_error": "libelf-pkg-config: no child diagnostic (exit=1)",
+      "native_target_attempts": 0,
+      "artifact": {
+        "id": 15164434258,
+        "bytes": 25393,
+        "sha256": "fcb1c892189f3b6dde7ca2a0674c0500f5f0ac019aa84d045191697183e406d8",
+        "digest_source": "GitHub artifact metadata; not independently downloaded"
+      }
+    },
+    "r046": {
+      "run": 45921498400,
+      "job": 140253037438,
+      "conclusion": "success",
+      "mutants": 12
+    },
+    "r092": {
+      "run": 45921498374,
+      "job": 140253037204,
+      "conclusion": "failure",
+      "first_error": "round089-selected-dm-registry-verify.py:372 AssertionError: core match before first map queue lock",
+      "preceding_r088": {
+        "cases_per_compiler": 17,
+        "semantic_mutants_per_compiler": 15
+      }
+    },
+    "r094": {
+      "run": 45921498425,
+      "job": 140253037359,
+      "conclusion": "success"
+    }
+  },
+  "followup_ci": {
+    "census": {
+      "queued": 28,
+      "in_progress": 2
+    },
+    "focused": {
+      "run": 45921767790,
+      "jobs": [
+        {
+          "id": 140253903354,
+          "name": "actual-target-object",
+          "status": "in_progress",
+          "conclusion": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "name": "Exact source and complete standards prefix",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "name": "Provision genuine compiler and kernel build prerequisites (runner only)",
+              "status": "in_progress",
+              "conclusion": null
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "pending",
+              "conclusion": null
+            },
+            {
+              "name": "Run actions/checkout@v4",
+              "status": "pending",
+              "conclusion": null
+            },
+            {
+              "name": "Check exact stage, serial host and changed target object",
+              "status": "pending",
+              "conclusion": null
+            },
+            {
+              "name": "Retain bounded evidence",
+              "status": "pending",
+              "conclusion": null
+            },
+            {
+              "name": "Post Run actions/checkout@v4",
+              "status": "pending",
+              "conclusion": null
+            }
+          ]
+        }
+      ]
+    },
+    "r092": 45921767780,
+    "r094": 45921768008,
+    "prior_host_function_bytes_checked_in_new_job": "PENDING",
+    "new_refusal_only": "PENDING",
+    "native": "PENDING",
+    "config": null,
+    "artifact": null
+  },
+  "standards": {
+    "initial_parent": "00534afb736c0c3c609588a6801230809ab5dd0f",
+    "initial_parent_bytes": 1888654,
+    "initial_post": "81ae3f50077da9a3fe80962a3513c2e9566750a0",
+    "initial_post_bytes": 1889673,
+    "followup_parent": "7a51b60e0dbb1f6d045f8b63b3244d4c216c8777",
+    "followup_parent_bytes": 1891174,
+    "followup_post": "8b09a790cf9deeea153e0cabf96b77e505010be7",
+    "followup_post_bytes": 1891894,
+    "raw_complete_prefix_verified": true,
+    "evidence_parent": "8b09a790cf9deeea153e0cabf96b77e505010be7",
+    "evidence_parent_bytes": 1891894,
+    "changed_by_evidence": false
+  },
+  "limitations": {
+    "ordinary_read_kind_unavailable": true,
+    "read_accept_not_fabricated": true,
+    "ordinary_write_discard_accept_partial": true,
+    "sticky_invalid": true,
+    "typed_read_pin_through_copy": true,
+    "independent_final_copy_reference_or_collection": false,
+    "controller_connected": false,
+    "full_link": "NOT_RUN_NOT_ALLOWED",
+    "native_runtime": "NOT_RUN",
+    "physical": "NOT_RUN"
+  },
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw": "OFF",
+  "import": "OFF",
+  "manual_dispatches": 0,
+  "branches": 0,
+  "prs": 0,
+  "force_pushes": 0,
+  "vm": false,
+  "module_load": false,
+  "activation": false,
+  "physical_mutation": false
+}
