@@ -1,0 +1,634 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+index fcb2f7487cb7ed02ae8ca9a8d486909f721a2ef6..833f089bc01e8803f427732975d706c894436eb3 100644
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1002,0 +1003,3 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++#include "swapz-trial-terminal.inc"
++#endif
+@@ -1045,0 +1049,6 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	struct file *area_file = NULL;
++	u32 area_type;
++	u64 area_epoch;
++	unsigned long flags;
++#endif
+@@ -1059,0 +1069,10 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	error = swapz_mm_trial_area_get(mapper_file, scope->first_sector,
++		scope->sector_count, &area_type, &area_epoch, &area_file);
++	if (error)
++		return error;
++	if (area_type != scope->swap_type || area_epoch != scope->area_epoch) {
++		fput(area_file);
++		return -ESTALE;
++	}
++#endif
+@@ -1068,0 +1088,25 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	/* Revalidate against swapoff under the same gate that revokes epochs.
++	 * Broker get/put never runs under this spinlock. */
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (atomic64_read(&swapz_mm_area_epochs[area_type]) != area_epoch) {
++		spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++		error = swapz_ticket_broker_put(&swapz_mm_scope_cap);
++		if (error) {
++			get_file(mapper_file);
++			spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++			swapz_mm_scope_file = mapper_file;
++			swapz_mm_scope_storage = *scope;
++			swapz_mm_area_file = area_file;
++			area_file = NULL;
++			swapz_mm_scope_used = true;
++			swapz_mm_terminal_debt.fault = true;
++			spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++		} else {
++			error = -ESTALE;
++		}
++		goto unlock;
++	}
++	swapz_mm_area_file = area_file;
++	area_file = NULL;
++#endif
+@@ -1074,0 +1119,3 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++#endif
+@@ -1076,0 +1124,4 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	if (area_file)
++		fput(area_file);
++#endif
+@@ -1114,0 +1166,4 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	struct file *area_file = NULL;
++	unsigned long flags;
++#endif
+@@ -1130,0 +1186,8 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (!swapz_mm_terminal_joined || !swapz_mm_terminal_ready()) {
++		if (swapz_mm_terminal_debt.fault)
++			error = -EUCLEAN;
++		spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++		goto unlock;
++	}
+@@ -1131,0 +1195,7 @@
++	rcu_assign_pointer(swapz_mm_scope, NULL);
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	mutex_unlock(&swapz_mm_scope_lock);
++	synchronize_rcu();
++	mutex_lock(&swapz_mm_scope_lock);
++#else
++	swapz_mm_scope_transition = true;
+@@ -1137,0 +1208,1 @@
++#endif
+@@ -1144,0 +1216,4 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++		area_file = swapz_mm_area_file;
++		swapz_mm_area_file = NULL;
++#endif
+@@ -1151,0 +1227,4 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	if (area_file)
++		fput(area_file);
++#endif
+@@ -1602,1 +1681,1 @@
+-	if (!sector || (sector & 7) || atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1))
++	if (!sector || (sector & 7))
+@@ -1603,0 +1683,14 @@
++#if defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	/* Join the real pre-reference carrier acquisition with capture stop.
++	 * No new busy owner can appear after the stop grace period. */
++	rcu_read_lock();
++	if (!rcu_dereference(swapz_mm_capture_scope) ||
++	    atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1)) {
++		rcu_read_unlock();
++		return;
++	}
++	rcu_read_unlock();
++#else
++	if (atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1))
++		return;
++#endif
+@@ -2549,1 +2642,1 @@
+-#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && !(defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST))
+@@ -2569,1 +2662,1 @@
+-#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && !(defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST))
+diff --git a/mm/page_io.c b/mm/page_io.c
+index 08c11d2f9a16a322093b305afa10ba011f67fc2b..5c3ebb46e2d885b0d3ab492a796996c004954d79 100644
+--- a/mm/page_io.c
++++ b/mm/page_io.c
+@@ -370,0 +371,4 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++		if (sis->ops == &swap_bdev_ops)
++			swapz_mm_trial_mm_enter(sis->bdev, sis->type, sio);
++#endif
+@@ -527,0 +532,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	u64 terminal_ticket = swapz_mm_trial_mm_take(sio);
++#endif
+@@ -541,0 +549,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	swapz_mm_trial_mm_put(terminal_ticket);
++#endif
+@@ -589,0 +600,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	u64 terminal_ticket = swapz_mm_trial_mm_take(sio);
++#endif
+@@ -606,0 +620,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	swapz_mm_trial_mm_put(terminal_ticket);
++#endif
+diff --git a/mm/swapfile.c b/mm/swapfile.c
+index 254ce86fa923e6b5f1fefda88c39315c4cc00642..031a93193886b093045e4aa15456016da49a7a43 100644
+--- a/mm/swapfile.c
++++ b/mm/swapfile.c
+@@ -17,0 +18,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++#include <linux/swapz_mm_carrier.h>
++#endif
+@@ -3083,0 +3087,44 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++/* The real allocator list, not a caller-chosen type or epoch. Hold the
++ * active swap file independently of the controller's opened mapper file.
++ * Direct block swap has the native [0, max) identity extent. */
++int swapz_mm_trial_area_get(struct file *mapper_file, sector_t first,
++	sector_t count, u32 *type, u64 *epoch, struct file **area_file)
++{
++	struct swap_info_struct *si;
++	struct block_device *bdev;
++	int error = -ESTALE;
++
++	if (!mapper_file || !type || !epoch || !area_file || PAGE_SIZE != 4096 ||
++	    !S_ISBLK(file_inode(mapper_file)->i_mode) || !first || (first & 7) ||
++	    !count || (count & 7) || count > 16 * 8 ||
++	    count > (sector_t)-1 - first)
++		return -EINVAL;
++	bdev = file_bdev(mapper_file);
++	if (!bdev || bdev_is_partition(bdev))
++		return -EINVAL;
++	spin_lock(&swap_lock);
++	plist_for_each_entry(si, &swap_active_head, list) {
++		u64 current_epoch;
++
++		if (!(si->flags & SWP_WRITEOK) || si->ops != &swap_bdev_ops ||
++		    si->bdev != bdev || !si->swap_file ||
++		    !S_ISBLK(file_inode(si->swap_file)->i_mode) ||
++		    si->swap_file->f_mapping != mapper_file->f_mapping ||
++		    first / 8 >= si->max || count / 8 > si->max - first / 8)
++			continue;
++		current_epoch = swapz_mm_trial_area_epoch(si->type);
++		if (!current_epoch)
++			break;
++		get_file(si->swap_file);
++		*area_file = si->swap_file;
++		*type = si->type;
++		*epoch = current_epoch;
++		error = 0;
++		break;
++	}
++	spin_unlock(&swap_lock);
++	return error;
++}
++#endif
++
+@@ -3093,0 +3141,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	swapz_mm_trial_area_online(si->type);
++#endif
+@@ -3231,0 +3282,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	swapz_mm_trial_area_offline(p->type);
++#endif
+@@ -3286,0 +3340,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	swapz_mm_trial_area_retired(p->type);
++#endif
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+index f0c0cd4add03bf2b6f9bf37997444ecd08bbb83b..e07dfd963edcdfb438af2ae1f43e3023e54544b7 100644
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -1629,1 +1629,4 @@
+-	    !route_live || !swapz_mm_trial_scope_matches_origin(bio->bi_bdev, sector) ||
++	    !route_live ||
++#ifndef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	    !swapz_mm_trial_scope_matches_origin(bio->bi_bdev, sector) ||
++#endif
+@@ -1639,0 +1643,4 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	if (!swapz_mm_trial_dm_origin(bio, sector))
++		return false;
++#endif
+@@ -2326,0 +2334,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	u64 terminal_entrant = swapz_mm_trial_dm_enter(bio);
++#endif
+@@ -2349,0 +2360,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) && defined(SWAPZ_ROUND098_SCOPED_PRODUCER_TEST) && defined(SWAPZ_ROUND103_EXTERNAL_JOIN_TEST)
++	swapz_mm_trial_dm_leave(terminal_entrant);
++#endif
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+index f50911d4c1ff7f87b502cec042b90968ba3a282f..7091e456b6c09f29d68140cfff3f072e940ccd2f 100644
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -83,0 +84,20 @@
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++/* Cold identity acquisition: returns an owned actual swap-file reference.
++ * Caller puts it; final scope publication independently revalidates epoch. */
++int swapz_mm_trial_area_get(struct file *mapper_file, sector_t first,
++	sector_t count, u32 *type, u64 *epoch, struct file **area_file);
++u64 swapz_mm_trial_area_epoch(u32 type);
++void swapz_mm_trial_area_online(u32 type);
++void swapz_mm_trial_area_offline(u32 type);
++void swapz_mm_trial_area_retired(u32 type);
++void swapz_mm_trial_mm_enter(struct block_device *bdev, u32 type, const void *sio);
++u64 swapz_mm_trial_mm_take(const void *sio);
++void swapz_mm_trial_mm_put(u64 ticket);
++u64 swapz_mm_trial_dm_enter(struct bio *bio);
++void swapz_mm_trial_dm_leave(u64 entrant);
++bool swapz_mm_trial_dm_origin(const struct bio *bio, sector_t sector);
++/* Exact process-context witness; requires real area retirement, capture
++ * stop and all admitted MM/DM debt. No target/provider/broker proof. */
++int swapz_mm_trial_scope_join_external(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch);
++#endif
+diff --git a/include/linux/swapz_trial_debt.h b/include/linux/swapz_trial_debt.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..207cd1b7a87f493992938cfa00ed4f95c7196811
+--- /dev/null
++++ b/include/linux/swapz_trial_debt.h
+@@ -0,0 +1,113 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_SWAPZ_TRIAL_DEBT_H
++#define _LINUX_SWAPZ_TRIAL_DEBT_H
++#ifndef SWAPZ_TERMINAL_HOST_TEST
++#include <linux/types.h>
++#endif
++
++struct bio;
++enum swapz_trial_debt_kind {
++	SWAPZ_TRIAL_MM = 1, SWAPZ_TRIAL_DM, SWAPZ_TRIAL_ENTRY
++};
++
++/* At most 64 observed operations, each with MM, DM and submission debt.
++ * Overflow poisons qualification, never the original I/O.
++ * All calls are serialized by the caller's IRQ-safe gate. */
++#define SWAPZ_TRIAL_DEBT_SLOTS 192
++struct swapz_trial_debt_slot {
++	u64 ticket;
++	const void *owner;
++	void (*endio)(struct bio *);
++	enum swapz_trial_debt_kind kind;
++	bool observed;
++};
++
++struct swapz_trial_debt {
++	struct swapz_trial_debt_slot slots[SWAPZ_TRIAL_DEBT_SLOTS];
++	u64 sequence;
++	unsigned int count;
++	bool fault;
++};
++
++static inline struct swapz_trial_debt_slot *
++swapz_trial_debt_find(struct swapz_trial_debt *debt, const void *owner,
++	enum swapz_trial_debt_kind kind)
++{
++	unsigned int index;
++
++	if (!owner)
++		return NULL;
++	for (index = 0; index < SWAPZ_TRIAL_DEBT_SLOTS; ++index) {
++		struct swapz_trial_debt_slot *slot = &debt->slots[index];
++
++		if (slot->ticket && slot->kind == kind && slot->owner == owner)
++			return slot;
++	}
++	return NULL;
++}
++
++static inline u64 swapz_trial_debt_retain(struct swapz_trial_debt *debt,
++	const void *owner, enum swapz_trial_debt_kind kind,
++	void (*endio)(struct bio *))
++{
++	unsigned int index;
++
++	if (debt->sequence == ~(u64)0 ||
++	    (kind != SWAPZ_TRIAL_ENTRY && !owner) ||
++	    swapz_trial_debt_find(debt, owner, kind))
++		goto fault;
++	for (index = 0; index < SWAPZ_TRIAL_DEBT_SLOTS; ++index) {
++		struct swapz_trial_debt_slot *slot = &debt->slots[index];
++
++		if (slot->ticket)
++			continue;
++		*slot = (struct swapz_trial_debt_slot){
++			.ticket = ++debt->sequence, .owner = owner,
++			.kind = kind, .endio = endio
++		};
++		++debt->count;
++		return slot->ticket;
++	}
++fault:
++	debt->fault = true;
++	return 0;
++}
++
++/* Detach the object before invoking its terminal callback/free. Its address
++ * may be reused immediately; the old ticket remains owed until callback exit. */
++static inline u64 swapz_trial_debt_take(struct swapz_trial_debt *debt,
++	const void *owner, enum swapz_trial_debt_kind kind,
++	void (**endio)(struct bio *))
++{
++	struct swapz_trial_debt_slot *slot = swapz_trial_debt_find(debt, owner, kind);
++
++	if (!slot)
++		return 0;
++	if (endio)
++		*endio = slot->endio;
++	slot->owner = NULL;
++	return slot->ticket;
++}
++
++static inline bool swapz_trial_debt_put(struct swapz_trial_debt *debt,
++	u64 ticket, enum swapz_trial_debt_kind kind)
++{
++	unsigned int index;
++
++	if (!ticket)
++		return false;
++	for (index = 0; index < SWAPZ_TRIAL_DEBT_SLOTS; ++index) {
++		struct swapz_trial_debt_slot *slot = &debt->slots[index];
++
++		if (slot->ticket != ticket)
++			continue;
++		if (slot->owner || slot->kind != kind || !debt->count)
++			break;
++		*slot = (struct swapz_trial_debt_slot){};
++		--debt->count;
++		return true;
++	}
++	debt->fault = true;
++	return false;
++}
++#endif
+diff --git a/mm/swapz-trial-terminal.inc b/mm/swapz-trial-terminal.inc
+new file mode 100644
+index 0000000000000000000000000000000000000000..3f980d04958676c22d44a6ca2778c4bd40a464fb
+--- /dev/null
++++ b/mm/swapz-trial-terminal.inc
+@@ -0,0 +1,252 @@
++/* Included only by the guarded original zswap implementation.
++ * Lock order: swap_lock/si->lock or scope mutex -> terminal gate.
++ * No gate -> area, broker, target, recorder or callback acquisition. */
++#include <linux/swapz_trial_debt.h>
++static DEFINE_SPINLOCK(swapz_mm_terminal_gate);
++static struct swapz_trial_debt swapz_mm_terminal_debt;
++static struct file *swapz_mm_area_file;
++static bool swapz_mm_area_invalidated, swapz_mm_area_drained;
++static bool swapz_mm_terminal_closed, swapz_mm_terminal_joined;
++
++u64 swapz_mm_trial_area_epoch(u32 type)
++{
++	return type < MAX_SWAPFILES ? atomic64_read(&swapz_mm_area_epochs[type]) : 0;
++}
++
++/* Called under the actual swap_lock at allocator publication or reinsertion.
++ * Failed swapoff gets a fresh epoch; old retained scope cannot be reopened. */
++void swapz_mm_trial_area_online(u32 type)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (rcu_access_pointer(swapz_mm_scope) && swapz_mm_area_invalidated &&
++	    swapz_mm_scope_storage.swap_type == type)
++		swapz_mm_terminal_debt.fault = true;
++	atomic64_set(&swapz_mm_area_epochs[type], swapz_mm_next(&swapz_mm_area_sequence));
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++}
++
++void swapz_mm_trial_area_offline(u32 type)
++{
++	unsigned long flags;
++	u64 epoch;
++
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	epoch = atomic64_read(&swapz_mm_area_epochs[type]);
++	atomic64_set(&swapz_mm_area_epochs[type], 0);
++	if (rcu_access_pointer(swapz_mm_scope) &&
++	    swapz_mm_scope_storage.swap_type == type &&
++	    swapz_mm_scope_storage.area_epoch == epoch) {
++		swapz_mm_area_invalidated = true;
++		rcu_assign_pointer(swapz_mm_capture_scope, NULL);
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++}
++
++/* Only the successful native swapoff path calls this, after users, RCU,
++ * work, extent and zswap teardown. Failed activation never supplies proof. */
++void swapz_mm_trial_area_retired(u32 type)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (swapz_mm_area_invalidated && swapz_mm_scope_storage.swap_type == type &&
++	    !atomic64_read(&swapz_mm_area_epochs[type]) && !swapz_mm_terminal_debt.fault)
++		swapz_mm_area_drained = true;
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++}
++
++static void swapz_mm_terminal_put(u64 ticket, enum swapz_trial_debt_kind kind)
++{
++	unsigned long flags;
++
++	if (!ticket)
++		return;
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	swapz_trial_debt_put(&swapz_mm_terminal_debt, ticket, kind);
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++}
++
++/* SIO debt starts before submission (including buffered merging and
++ * synchronous submit_bio_wait) and ends only after actual folio completion. */
++void swapz_mm_trial_mm_enter(struct block_device *bdev, u32 type, const void *sio)
++{
++	const struct swapz_mm_trial_scope *scope;
++	unsigned long flags;
++
++	if (!rcu_access_pointer(swapz_mm_scope))
++		return;
++	rcu_read_lock();
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	scope = rcu_dereference(swapz_mm_scope);
++	if (scope && bdev == scope->bdev && type == scope->swap_type) {
++		if (swapz_mm_terminal_closed)
++			swapz_mm_terminal_debt.fault = true;
++		else
++			swapz_trial_debt_retain(&swapz_mm_terminal_debt, sio, SWAPZ_TRIAL_MM, NULL);
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	rcu_read_unlock();
++}
++
++u64 swapz_mm_trial_mm_take(const void *sio)
++{
++	unsigned long flags;
++	u64 ticket;
++
++	if (!rcu_access_pointer(swapz_mm_scope))
++		return 0;
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	ticket = swapz_trial_debt_take(&swapz_mm_terminal_debt, sio, SWAPZ_TRIAL_MM, NULL);
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	return ticket;
++}
++
++void swapz_mm_trial_mm_put(u64 ticket)
++{
++	swapz_mm_terminal_put(ticket, SWAPZ_TRIAL_MM);
++}
++
++/* Preserve the original completion function/private data. The wrapper
++ * remains on the actual original through DM deferral/requeue and chained
++ * split completion. It never reads a BIO after the original callback. */
++static void swapz_mm_trial_dm_endio(struct bio *bio)
++{
++	void (*endio)(struct bio *) = NULL;
++	unsigned long flags;
++	u64 ticket;
++
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	ticket = swapz_trial_debt_take(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM, &endio);
++	if (!ticket)
++		swapz_mm_terminal_debt.fault = true;
++	bio->bi_end_io = endio;
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	if (endio)
++		endio(bio);
++	swapz_mm_terminal_put(ticket, SWAPZ_TRIAL_DM);
++}
++
++/* Start before DM obtains its live-table SRCU reference. An independent
++ * entry ticket survives synchronous completion until submission exits.
++ * Reissued originals retain their original ticket/callback, not a new ACK. */
++u64 swapz_mm_trial_dm_enter(struct bio *bio)
++{
++	const struct swapz_mm_trial_scope *scope;
++	struct swapz_trial_debt_slot *slot;
++	unsigned long flags;
++	u64 entrant = 0;
++
++	if (!rcu_access_pointer(swapz_mm_scope))
++		return 0;
++	rcu_read_lock();
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	scope = rcu_dereference(swapz_mm_scope);
++	if (!scope || bio->bi_bdev != scope->bdev)
++		goto unlock;
++	slot = swapz_trial_debt_find(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM);
++	if (slot) {
++		if (bio->bi_end_io != swapz_mm_trial_dm_endio)
++			swapz_mm_terminal_debt.fault = true;
++	} else if (swapz_mm_terminal_closed || bio->bi_end_io == swapz_mm_trial_dm_endio ||
++		   bio_flagged(bio, BIO_CLONED) || bio_flagged(bio, BIO_REMAPPED)) {
++		/* A split child or unrelated stacked BIO may use the block
++		 * layer's special chain callback. Never replace that callback.
++		 * Its retained parent (if any) still has terminal debt. */
++		swapz_mm_terminal_debt.fault = true;
++		goto unlock;
++	} else if (swapz_trial_debt_retain(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM,
++					  bio->bi_end_io)) {
++		bio->bi_end_io = swapz_mm_trial_dm_endio;
++	}
++	entrant = swapz_trial_debt_retain(&swapz_mm_terminal_debt, NULL, SWAPZ_TRIAL_ENTRY, NULL);
++unlock:
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	rcu_read_unlock();
++	return entrant;
++}
++
++void swapz_mm_trial_dm_leave(u64 entrant)
++{
++	swapz_mm_terminal_put(entrant, SWAPZ_TRIAL_ENTRY);
++}
++
++/* Called only after the original core geometry and exact route checks.
++ * One observation per retained original; requeue cannot mint a second. */
++bool swapz_mm_trial_dm_origin(const struct bio *bio, sector_t sector)
++{
++	struct swapz_trial_debt_slot *slot;
++	const struct swapz_mm_trial_scope *scope;
++	unsigned long flags;
++	bool matched = false;
++
++	if (!rcu_access_pointer(swapz_mm_scope))
++		return false;
++	rcu_read_lock();
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	scope = rcu_dereference(swapz_mm_scope);
++	slot = swapz_trial_debt_find(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM);
++	if (scope && slot && !slot->observed && bio->bi_end_io == swapz_mm_trial_dm_endio &&
++	    bio->bi_bdev == scope->bdev &&
++	    !(sector & 7) && sector >= scope->first_sector &&
++	    sector - scope->first_sector <= scope->sector_count - 8) {
++		slot->observed = true;
++		matched = true;
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	rcu_read_unlock();
++	return matched;
++}
++
++static bool swapz_mm_terminal_ready(void)
++{
++	return swapz_mm_area_drained && swapz_mm_terminal_closed &&
++	       !swapz_mm_terminal_debt.fault && !swapz_mm_terminal_debt.count &&
++	       !atomic_read_acquire(&swapz_mm_busy);
++}
++
++/* Retryable process-context fence, never a wait on a live I/O callback.
++ * Exact area retirement is mandatory; no caller-supplied zero/epoch proof.
++ * Target map/provider/worker and broker retirement remain separate joins. */
++int swapz_mm_trial_scope_join_external(u64 identity, u64 session,
++	u64 table_epoch, u64 target_epoch)
++{
++	unsigned long flags;
++	int error = -ESTALE;
++
++	mutex_lock(&swapz_mm_scope_lock);
++	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity ||
++	    session != swapz_mm_scope_storage.session ||
++	    table_epoch != swapz_mm_scope_storage.table_epoch ||
++	    target_epoch != swapz_mm_scope_storage.target_epoch)
++		goto unlock;
++	error = -EBUSY;
++	if (swapz_mm_scope_transition || !swapz_mm_scope_capture_stopped)
++		goto unlock;
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (swapz_mm_terminal_debt.fault)
++		error = -EUCLEAN;
++	else if (swapz_mm_area_drained) {
++		swapz_mm_terminal_closed = true;
++		error = 0;
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	if (error)
++		goto unlock;
++	swapz_mm_scope_transition = true;
++	mutex_unlock(&swapz_mm_scope_lock);
++	synchronize_rcu();
++	mutex_lock(&swapz_mm_scope_lock);
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	error = swapz_mm_terminal_debt.fault ? -EUCLEAN : -EBUSY;
++	if (swapz_mm_terminal_ready()) {
++		swapz_mm_terminal_joined = true;
++		error = 0;
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++	swapz_mm_scope_transition = false;
++unlock:
++	mutex_unlock(&swapz_mm_scope_lock);
++	return error;
++}
