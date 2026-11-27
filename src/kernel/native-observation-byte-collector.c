@@ -177,6 +177,23 @@ bool swapz_byte_unpin(struct swapz_byte_collector *collector, u64 operation, u64
 	return pin_event(collector, operation, descriptor, pin, sequence, UNPINNED, NULL, 0);
 }
 
+bool swapz_byte_classify(struct swapz_byte_collector *collector, u64 operation,
+			 enum swapz_byte_kind kind)
+{
+	unsigned long flags = 0;
+	struct swapz_byte_record *record;
+	bool ok;
+	LOCK(collector);
+	record = pending(collector, operation);
+	ok = record && collector->phase == ACCEPTED && record->kind == SWAPZ_BYTE_WRITE &&
+	     (kind == SWAPZ_BYTE_FALLBACK || kind == SWAPZ_BYTE_ERROR);
+	if (ok)
+		record->kind = kind;
+	finish(collector, ok);
+	UNLOCK(collector);
+	return ok;
+}
+
 bool swapz_byte_clone(struct swapz_byte_collector *collector, u64 operation, u64 clone,
 		      u64 descriptor, u64 sequence, unsigned int status)
 {
@@ -271,14 +288,26 @@ void swapz_byte_invalidate(struct swapz_byte_collector *collector)
 bool swapz_byte_stop(struct swapz_byte_collector *collector, swapz_byte_join join, void *context)
 {
 	unsigned long flags = 0;
-	bool joined, clean;
+	bool joined;
 	if (!join || (collector->state != ACTIVE && collector->state != RETAINED))
 		return false;
 	LOCK(collector);
 	collector->state = JOINING;
 	UNLOCK(collector);
 	joined = join(context);
+	return swapz_byte_stop_after_join(collector, joined);
+}
+
+bool swapz_byte_stop_after_join(struct swapz_byte_collector *collector, bool joined)
+{
+	unsigned long flags = 0;
+	bool clean;
 	LOCK(collector);
+	if (collector->state != ACTIVE && collector->state != JOINING &&
+	    collector->state != RETAINED) {
+		UNLOCK(collector);
+		return false;
+	}
 	collector->loss |= !joined || collector->phase != IDLE || !collector->count;
 	collector->state = joined ? SEALED : RETAINED;
 	clean = joined && !collector->loss;

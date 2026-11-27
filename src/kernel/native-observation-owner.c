@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "native-observation-owner.h"
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+#include "native-observation-byte-bridge.h"
+#endif
 
 #ifdef MODULE
 #error "trial observation owner must be built in"
@@ -119,19 +122,36 @@ bool swapz_trial_observation_start(const struct swapz_trial_observation_scope *s
 	bool result = false;
 
 	mutex_lock(&trial_control);
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+	if (!scope || !scope->page_count || scope->page_count > SWAPZ_BYTE_LOGICAL_PAGES)
+		goto unlock;
+#endif
 	if (trial_gate.used || !capacity || capacity > SWAPZ_OBSERVATION_MAX_RECORDS ||
 	    !scope_digest(scope, digest))
 		goto unlock;
 	records = kvcalloc(capacity, sizeof(*records), GFP_KERNEL);
 	if (!records)
 		goto unlock;
-	if (!swapz_observation_init(&trial_recorder, records, capacity, digest) ||
-	    !swapz_observation_publish(&trial_gate, &trial_recorder)) {
-		kvfree(records);
-		trial_recorder.records = NULL;
-		goto unlock;
+	if (!swapz_observation_init(&trial_recorder, records, capacity, digest))
+		goto free_records;
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+	/* Both bounded allocations must exist before publishing the recorder.
+	 * The collector gate stays inactive until exact validated scope bind.
+	 */
+	if (!swapz_byte_bridge_prepare(&trial_recorder, scope->first_logical, scope->page_count))
+		goto free_records;
+#endif
+	if (!swapz_observation_publish(&trial_gate, &trial_recorder)) {
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+		swapz_byte_bridge_abort();
+#endif
+		goto free_records;
 	}
 	result = true;
+	goto unlock;
+free_records:
+	kvfree(records);
+	trial_recorder.records = NULL;
 unlock:
 	mutex_unlock(&trial_control);
 	return result;
@@ -153,6 +173,10 @@ bool swapz_trial_observation_stop(swapz_trial_observation_join join, void *conte
 		if (!trial_joined)
 			atomic_or(SWAPZ_OBS_LOST_LATE, &trial_recorder.loss);
 	}
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+	/* Actual external callback ran once above with both gates live. */
+	swapz_byte_bridge_close(trial_joined);
+#endif
 	if (!swapz_observation_stop(&trial_gate) || !trial_joined)
 		goto unlock;
 	result = swapz_observation_seal(&trial_recorder);
@@ -172,16 +196,36 @@ bool swapz_trial_observation_export(swapz_observation_sink sink, void *context)
 	return result;
 }
 
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *context)
+{
+	bool result;
+
+	mutex_lock(&trial_control);
+	result = trial_joined && trial_recorder.records &&
+		swapz_byte_bridge_export(sink, context);
+	mutex_unlock(&trial_control);
+	return result;
+}
+#endif
+
 bool swapz_trial_observation_release(void)
 {
 	bool result = false;
 
 	mutex_lock(&trial_control);
 	if (trial_joined && trial_recorder.records && trial_recorder.drained) {
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+		if (!swapz_byte_bridge_release())
+			goto unlock;
+#endif
 		kvfree(trial_recorder.records);
 		trial_recorder.records = NULL;
 		result = true;
 	}
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+unlock:
+#endif
 	mutex_unlock(&trial_control);
 	return result;
 }

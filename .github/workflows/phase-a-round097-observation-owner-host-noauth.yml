@@ -48,12 +48,18 @@ jobs:
               "tests/tools/native-observation-export.py": "0c97be31dce2d7a049335189e114b2c73cd0074c",
               "tests/runtime/native/fixtures/native-observation-adapter-host-model.h": "3dac25d2edb2d7475af3231c98af753f09e4063f",
           }
+          # Preserve the historical proof at its immutable source, not by
+          # relabeling its pin as today's changed owner. The current guard-off
+          # owner is separately compiled and tested below against R103 adapter.
           for path, blob in pins.items():
-              assert subprocess.check_output(["git", "hash-object", path], text=True).strip() == blob, path
+              assert subprocess.check_output(["git", "rev-parse", freeze + ":" + path], text=True).strip() == blob, path
+          selected = "a9094f96e3fb2841ed0fa553102d98699950221d"
+          for path in pins:
+              assert subprocess.check_output(["git", "hash-object", path], text=True).strip() == subprocess.check_output(["git", "rev-parse", selected + ":" + path], text=True).strip(), path
           print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
-          print("selected frozen recorder/parser/shim pins", len(pins))
+          print("historical immutable and current selected recorder/parser/shim pins", len(pins))
           PY
-      - name: Actual owner and selected adapter using explicit host substitutes
+      - name: Actual current guard-off owner and R103 selected adapter using explicit host substitutes
         run: |
           set -Eeuo pipefail
           umask 077

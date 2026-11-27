@@ -1,4 +1,4 @@
-name: Round103 recorder and collector directed NO_AUTH
+name: Round104 built-in byte bridge directed NO_AUTH
 on:
   push:
     branches: [main]
@@ -10,6 +10,11 @@ on:
       - 'tests/tools/round103-private-byte-correlation.py'
       - 'tests/runtime/native/fixtures/round103-recorder-correlation.c'
       - 'tests/runtime/native/round103-recorder-correlation-test.py'
+      - 'src/kernel/native-observation-byte-bridge.c'
+      - 'src/kernel/native-observation-byte-bridge.h'
+      - 'src/kernel/native-observation-integration.h'
+      - 'tests/runtime/native/fixtures/round104-byte-bridge.c'
+      - 'tests/runtime/native/round104-byte-bridge-test.py'
       - 'src/kernel/native-observation-byte-collector.c'
       - 'src/kernel/native-observation-byte-collector.h'
       - 'tests/tools/round102-private-byte-reference.py'
@@ -20,7 +25,7 @@ on:
 permissions:
   contents: read
 jobs:
-  recorder-collector-only:
+  byte-bridge-only:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -34,24 +39,28 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
-          evidence="$RUNNER_TEMP/round103-agent2"
+          evidence="$RUNNER_TEMP/round104-agent2"
           mkdir -p "$evidence"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse HEAD^)" = "$PUSH_BEFORE"
           test "$(git branch --show-current)" = main
           test -z "$(git status --porcelain --untracked-files=all)"
           git diff --check HEAD^ HEAD
-          freeze=e65d7042b41880c6fef99069d7f65bf6fb4356d4
-          test "$(git rev-parse "$freeze^{tree}")" = 23a94d1726859c3536e16efd7de5212a68af6531
+          freeze=a9094f96e3fb2841ed0fa553102d98699950221d
+          test "$(git rev-parse "$freeze^{tree}")" = 554b80152c9ea277cd6e0f63069bfb8f8ba671b6
           for path in tests/tools/native-observation-byte-oracle.py \
                       tests/tools/native-observation-current-export.py \
                       tests/tools/native-observation-export.py \
                       tests/runtime/native/independent-byte-oracle-test.py \
                       tests/tools/round102-private-byte-reference.py \
+                      tests/tools/round103-private-byte-correlation.py \
+                      src/kernel/native-observation-adapter.c \
+                      src/kernel/native-observation-adapter.h \
                       tests/runtime/native/fixtures/native-observation-adapter-host-model.h \
                       tests/runtime/native/fixtures/native-observation-owner-host-model.h; do
             test "$(git hash-object "$path")" = "$(git rev-parse "$freeze:$path")"
           done
+          test "$(git hash-object src/kernel/native-observation-integration.h)" = e3bca3367459c7f79960105f63e9ddef4e95b4d6
           python3 -B - <<'PY'
           from pathlib import Path
           import subprocess
@@ -63,6 +72,10 @@ jobs:
           git rev-parse HEAD HEAD^ > "$evidence/source-parent.txt"
           git ls-files -s src/kernel/native-observation-adapter.{c,h} \
             src/kernel/native-observation-owner.{c,h} \
+            src/kernel/native-observation-byte-bridge.{c,h} \
+            src/kernel/native-observation-integration.h \
+            tests/runtime/native/fixtures/round104-byte-bridge.c \
+            tests/runtime/native/round104-byte-bridge-test.py \
             tests/tools/round103-private-byte-correlation.py \
             tests/runtime/native/fixtures/round103-recorder-correlation.c \
             tests/runtime/native/round103-recorder-correlation-test.py \
@@ -74,28 +87,6 @@ jobs:
             tests/runtime/native/round102-private-byte-reference-test.py \
             .github/workflows/phase-a-round102-native-byte-collector-noauth.yml \
             > "$evidence/source-blobs.txt"
-      - name: Strict GCC and Clang actual component and fresh private compatibility fixture
-        run: |
-          set -Eeuo pipefail
-          umask 077
-          evidence="$RUNNER_TEMP/round103-agent2"
-          scratch="$(mktemp -d)"
-          trap 'rm -rf "$scratch"' EXIT
-          for cc in gcc clang; do
-            "$cc" --version > "$evidence/$cc-version.txt"
-            flags=(-std=c17 -O2 -g -Wall -Wextra -Werror -pedantic -Wconversion -Wshadow
-                   -fsanitize=address,undefined -fno-sanitize-recover=all
-                   -fno-omit-frame-pointer -fno-pie -no-pie -pthread -Isrc/kernel)
-            "$cc" "${flags[@]}" src/kernel/native-observation-byte-collector.c \
-              tests/runtime/native/fixtures/round102-byte-collector.c \
-              -o "$scratch/collector" 2>&1 | tee "$evidence/$cc-host-compile.log"
-            "$scratch/collector" 2>&1 | tee "$evidence/$cc-host-run.log"
-            "$cc" "${flags[@]}" src/kernel/native-observation-byte-collector.c \
-              tests/runtime/native/fixtures/round102-byte-export-fixture.c \
-              -o "$scratch/export" 2>&1 | tee "$evidence/$cc-export-compile.log"
-            python3 -B tests/runtime/native/round102-private-byte-reference-test.py \
-              "$GITHUB_SHA" "$scratch/export" 2>&1 | tee "$evidence/$cc-private.log"
-          done
       - name: Provision real kernel build prerequisites on hosted runner
         run: |
           set -Eeuo pipefail
@@ -104,11 +95,11 @@ jobs:
             build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config clang \
             openssl perl python3 xz-utils cpio
           dpkg-query -W libelf-dev libssl-dev gcc binutils
-      - name: Changed ordinal and independent byte correlation cases
+      - name: Changed guarded bridge and independent byte correlation cases
         run: |
           set -Eeuo pipefail
           umask 077
-          evidence="$RUNNER_TEMP/round103-agent2"
+          evidence="$RUNNER_TEMP/round104-agent2"
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
           mkdir -p "$scratch/include/linux" "$scratch/include/crypto"
@@ -120,17 +111,18 @@ jobs:
           done
           printf '#include "native-observation-owner-host-model.h"\n' > "$scratch/include/crypto/sha2.h"
           for cc in gcc clang; do
+            "$cc" --version > "$evidence/$cc-version.txt"
             "$cc" -std=c2x -D_POSIX_C_SOURCE=200809L -DSWAPZ_NATIVE_OBSERVATION_ADAPTER \
-              -DSWAPZ_TRIAL_OBSERVATION "-DSWAPZ_OBSERVATION_BUILD_SOURCE=\"$GITHUB_SHA\"" \
+              -DSWAPZ_TRIAL_OBSERVATION -DSWAPZ_ROUND104_INTEGRATION_TEST "-DSWAPZ_OBSERVATION_BUILD_SOURCE=\"$GITHUB_SHA\"" \
               -O2 -g -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow \
               -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
               -fno-pie -no-pie -pthread -I"$scratch/include" -Isrc/kernel \
               -Itests/runtime/native/fixtures src/kernel/native-observation-adapter.c \
               src/kernel/native-observation-owner.c src/kernel/native-observation-byte-collector.c \
-              tests/runtime/native/fixtures/round103-recorder-correlation.c -lcrypto \
+              src/kernel/native-observation-byte-bridge.c \
+              tests/runtime/native/fixtures/round104-byte-bridge.c -lcrypto \
               -o "$scratch/correlation" 2>&1 | tee "$evidence/$cc-ordinal-compile.log"
-            timeout 30s "$scratch/correlation" sequence 2>&1 | tee "$evidence/$cc-ordinal.log"
-            python3 -B tests/runtime/native/round103-recorder-correlation-test.py \
+            python3 -B tests/runtime/native/round104-byte-bridge-test.py \
               "$GITHUB_SHA" "$scratch/correlation" 2>&1 | tee "$evidence/$cc-correlation.log"
           done
       - uses: actions/checkout@v4
@@ -139,31 +131,33 @@ jobs:
           ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
           path: frozen-linux
           persist-credentials: false
-      - name: Directed selected adapter, built-in owner and collector objects only, exact Linux SMP generated headers
+      - name: Directed selected adapter, built-in owner, collector and bridge objects only, exact Linux SMP generated headers
         run: |
           set -Eeuo pipefail
           umask 077
-          evidence="$RUNNER_TEMP/round103-agent2"
+          evidence="$RUNNER_TEMP/round104-agent2"
           linux="$GITHUB_WORKSPACE/frozen-linux"
           test "$(git -C "$linux" rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
           test -z "$(git -C "$linux" status --porcelain --untracked-files=all)"
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
           build="$scratch/build"
-          component="$linux/mm/round103-byte-observation"
+          component="$linux/mm/round104-byte-observation"
           test ! -e "$component"
           mkdir -p "$build" "$component"
-          for stem in native-observation-adapter native-observation-owner native-observation-byte-collector; do
+          for stem in native-observation-adapter native-observation-owner native-observation-byte-collector native-observation-byte-bridge; do
             for suffix in c h; do
               name="$stem.$suffix"
               cp "src/kernel/$name" "$component/"
               test "$(git hash-object "$component/$name")" = "$(git rev-parse "HEAD:src/kernel/$name")"
             done
           done
-          printf 'obj-y := native-observation-adapter.o native-observation-owner.o native-observation-byte-collector.o\n' > "$component/Makefile"
-          printf 'ccflags-y += -Werror -DSWAPZ_NATIVE_OBSERVATION_ADAPTER -DSWAPZ_TRIAL_OBSERVATION\n' >> "$component/Makefile"
+          cp src/kernel/native-observation-integration.h "$component/"
+          test "$(git hash-object "$component/native-observation-integration.h")" = e3bca3367459c7f79960105f63e9ddef4e95b4d6
+          printf 'obj-y := native-observation-adapter.o native-observation-owner.o native-observation-byte-collector.o native-observation-byte-bridge.o\n' > "$component/Makefile"
+          printf 'ccflags-y += -Werror -DSWAPZ_NATIVE_OBSERVATION_ADAPTER -DSWAPZ_TRIAL_OBSERVATION -DSWAPZ_ROUND104_INTEGRATION_TEST\n' >> "$component/Makefile"
           printf 'CFLAGS_native-observation-owner.o += -DSWAPZ_OBSERVATION_BUILD_SOURCE=\\"%s\\"\n' "$GITHUB_SHA" >> "$component/Makefile"
-          printf '\nobj-y += round103-byte-observation/\n' >> "$linux/mm/Makefile"
+          printf '\nobj-y += round104-byte-observation/\n' >> "$linux/mm/Makefile"
           # Independent selected objects need only genuine original Linux
           # headers; no MM/DM overlay or same-round peer implementation.
           make_args=(-C "$linux" O="$build" ARCH=x86_64 CC=gcc)
@@ -177,15 +171,15 @@ jobs:
           if grep -qx 'CONFIG_TINY_RCU=y' "$build/.config"; then exit 1; fi
           cp "$build/.config" "$evidence/effective.config"
           make "${make_args[@]}" -j2 modules_prepare 2>&1 | tee "$evidence/prepare.log"
-          for stem in native-observation-adapter native-observation-owner native-observation-byte-collector; do
-            make "${make_args[@]}" -j2 "mm/round103-byte-observation/$stem.o" \
+          for stem in native-observation-adapter native-observation-owner native-observation-byte-collector native-observation-byte-bridge; do
+            make "${make_args[@]}" -j2 "mm/round104-byte-observation/$stem.o" \
               2>&1 | tee "$evidence/$stem-object.log"
-            object="$build/mm/round103-byte-observation/$stem.o"
+            object="$build/mm/round104-byte-observation/$stem.o"
             test -s "$object"
             nm "$object" > "$evidence/$stem-symbols.txt"
             cp "$object" "$evidence/$stem.o"
           done
-          for symbol in start begin accept pin copy unpin clone upper complete invalidate stop export release; do
+          for symbol in start begin accept pin copy unpin classify clone upper complete invalidate stop stop_after_join export release; do
             grep -Eq " [Tt] swapz_byte_$symbol$" "$evidence/native-observation-byte-collector-symbols.txt"
           done
           if grep -Eq ' [Tt] swapz_byte_user$' "$evidence/native-observation-byte-collector-symbols.txt"; then exit 1; fi
@@ -193,13 +187,19 @@ jobs:
           grep -Eq ' T swapz_observation_append$' "$evidence/native-observation-adapter-symbols.txt"
           grep -Eq ' T swapz_trial_observation_append_sequence$' "$evidence/native-observation-owner-symbols.txt"
           grep -Eq ' T swapz_trial_observation_append$' "$evidence/native-observation-owner-symbols.txt"
+          for symbol in bind_scope active stage_input finish_input event invalidate; do
+            grep -Eq " T swapz_trial_byte_$symbol$" "$evidence/native-observation-byte-bridge-symbols.txt"
+          done
+          grep -F ' U swapz_byte_bridge_prepare' "$evidence/native-observation-owner-symbols.txt"
+          grep -F ' U swapz_byte_bridge_close' "$evidence/native-observation-owner-symbols.txt"
+          grep -F ' U swapz_byte_bridge_release' "$evidence/native-observation-owner-symbols.txt"
           (cd "$evidence"; sha256sum effective.config native-observation-*.o > SHA256SUMS; cat SHA256SUMS)
-          printf 'PASS directed selected adapter, owner and collector objects only; AUTH=0 Phase A BLOCKED\n'
+          printf 'PASS directed selected adapter, owner, collector and bridge objects only; AUTH=0 Phase A BLOCKED\n'
       - name: Retain bounded redacted evidence only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: round103-agent2-collector
-          path: ${{ runner.temp }}/round103-agent2/
+          name: round104-agent2-collector
+          path: ${{ runner.temp }}/round104-agent2/
           if-no-files-found: warn
           retention-days: 14

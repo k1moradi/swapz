@@ -59,4 +59,13 @@ bool swapz_trial_observation_stop(swapz_trial_observation_join join, void *conte
 bool swapz_trial_observation_export(swapz_observation_sink sink, void *context);
 bool swapz_trial_observation_release(void);
 
+#ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+#include "native-observation-byte-bridge.h"
+/* Private built-in cold sink only, no export symbol/user transport. Valid
+ * only after real joined seal with zero recorder and collector loss.
+ * Callback may not retain record pointers or reenter owner control.
+ */
+bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *context);
+#endif
+
 #endif

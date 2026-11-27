@@ -67,6 +67,11 @@ bool swapz_byte_copy(struct swapz_byte_collector *collector, u64 operation, u64 
 		     u64 pin, u64 sequence, const void *bytes, size_t length);
 bool swapz_byte_unpin(struct swapz_byte_collector *collector, u64 operation, u64 descriptor,
 		      u64 pin, u64 sequence);
+/* A provisional typed write may be classified once, before clone ACK.
+ * Bridge must prove the actual ordered outcome; this is not authorization.
+ */
+bool swapz_byte_classify(struct swapz_byte_collector *collector, u64 operation,
+			 enum swapz_byte_kind kind);
 bool swapz_byte_clone(struct swapz_byte_collector *collector, u64 operation, u64 clone,
 		      u64 descriptor, u64 sequence, unsigned int status);
 bool swapz_byte_upper(struct swapz_byte_collector *collector, u64 operation, u64 original,
@@ -88,6 +93,10 @@ bool swapz_byte_user(struct swapz_byte_collector *collector, u64 operation, u64 
 /* Report an observed gap even when there is no complete record to append. */
 void swapz_byte_invalidate(struct swapz_byte_collector *collector);
 bool swapz_byte_stop(struct swapz_byte_collector *collector, swapz_byte_join join, void *context);
+/* Cold owner already performed the genuine external join, exactly once.
+ * All admissions must be closed before this call; false retains storage.
+ */
+bool swapz_byte_stop_after_join(struct swapz_byte_collector *collector, bool joined);
 bool swapz_byte_export(const struct swapz_byte_collector *collector,
 		       const struct swapz_byte_record **records, unsigned int *count);
 bool swapz_byte_release(struct swapz_byte_collector *collector);
