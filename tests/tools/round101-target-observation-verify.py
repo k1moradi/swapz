@@ -12,7 +12,9 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 STAGE = ROOT / "tests/tools/round098-smp-directed-native-compile-verify.py"
 STAGE_PIN = "96e6750971c182dfe87e6e57eac048c7c3a529b6"
-TARGET_PIN = "ef9aa4208cd2f8783ed6eb6c03f91970cf7cad2a"
+TARGET_PIN = "46c2cb832ff0071a028a27b35f63daa84f29914f"
+PRIOR_SOURCE = "e8815d5720289639271d7e2ecb7f6b418d41aeba"
+PRIOR_TARGET = "ef9aa4208cd2f8783ed6eb6c03f91970cf7cad2a"
 PATCHES = {
     "round098-original-mm-scope-events.patch": ("3832b6aa76b783f3790b869cf40512b114d66cd6", {
         "mm/zswap.c": "cad0d9ba05cd614b95b335ed0c7d70d9e69d00f0",
@@ -76,6 +78,13 @@ def main():
             require(map_body.index("list_add_tail(&entry->list, &ctx->incoming);") <
                     map_body.index("swapz_scope_observe_plain_accept_locked(ctx, entry,"),
                     "core binding after actual FIFO admission")
+            require(map_body.index("swapz_round089_core_matches(ti, bio, candidate)") <
+                    map_body.index("spin_lock_irqsave(&ctx->queue_lock, flags)"),
+                    "normal core validation precedes normal queue lock")
+            require(map_body.index("swapz_scope_observe_map_refusal(ctx, bio);") <
+                    map_body.index("return map_refusal;") <
+                    map_body.index("INIT_LIST_HEAD(&entry->list);"),
+                    "separate refused map observation")
             require(map_body.count("swapz_scope_observe_plain_accept_locked(ctx, entry,") == 1,
                     "unique plain admission")
             require("SWAPZ_OBS_UPPER_ENDIO" not in source, "target must not emit original ACK")
@@ -93,6 +102,20 @@ def main():
                 ("swapz_scope_status","swapz_scope_observation_live","swapz_scope_observe_invalid",
                  "swapz_scope_observe_clone","swapz_scope_route_ready_locked",
                  "swapz_scope_observation_selected_locked")]
+            # Reuse the earlier exact 144+144 passing host case results only
+            # after proving every previously exercised target function equal.
+            prior = stage.git(ROOT,"show",PRIOR_SOURCE+":src/kernel/dm-target.c")
+            require(stage.blob(prior) == PRIOR_TARGET,"prior tested target pin")
+            prior_text = prior.decode()
+            for name in ("swapz_scope_status","swapz_scope_observation_live","swapz_scope_observe_invalid",
+                         "swapz_scope_observe_clone","swapz_scope_route_ready_locked",
+                         "swapz_scope_observation_selected_locked","swapz_scope_observe_plain_accept_locked",
+                         "swapz_end_io","swapz_read"):
+                require(function(source,name) == function(prior_text,name),"prior tested function drift:"+name)
+            state["prior_host_source"] = PRIOR_SOURCE
+            state["prior_host_job"] = 140253037507
+            state["prior_host_checks_per_compiler"] = 144
+            functions += [function(source,"swapz_scope_observe_map_refusal")]
             functions += [function(core,name) for name in
                 ("dm_swapz_original_observation_endio","dm_swapz_trial_observation_origin")]
             functions += [function(source,name) for name in
@@ -109,9 +132,9 @@ def main():
                      "-fsanitize=address,undefined","-fno-sanitize-recover=all","-fno-pie","-no-pie",
                      "-I"+str(scratch),str(ROOT/"tests/runtime/native/fixtures/round101-target-observation.c"),
                      "-o",str(binary)],timeout=90)
-                stage.step(state,evidence,compiler+"-host-execute",[str(binary)],timeout=30)
+                stage.step(state,evidence,compiler+"-host-execute",[str(binary),"refusal"],timeout=30)
                 result = (evidence/(compiler+"-host-execute.log")).read_text()
-                match = re.fullmatch(r"PASS target/core serial host checks=(\d+) AUTH=0\n", result)
+                match = re.fullmatch(r"PASS refusal-only serial host checks=(\d+) AUTH=0\n", result)
                 require(match is not None, compiler+" host result")
                 state["host"][compiler] = int(match[1])
                 print(compiler,result.strip(),flush=True)

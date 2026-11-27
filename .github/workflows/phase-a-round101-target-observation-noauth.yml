@@ -37,6 +37,14 @@ jobs:
           assert current.startswith(parent) and len(current)>len(parent)
           print("complete standards prefix",len(parent),len(current))
           PY
+      - name: Provision genuine compiler and kernel build prerequisites (runner only)
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config \
+            openssl perl python3 xz-utils cpio
+          dpkg-query -W libelf-dev libssl-dev gcc binutils
       - uses: actions/checkout@v4
         with:
           ref: 5a36cabf0989dfffc75de52a6ab8cc021092ebf6

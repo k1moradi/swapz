@@ -16196,6 +16196,22 @@ static bool swapz_scope_observation_selected_locked(const struct swapz_dm *ctx,
 	return bio_sectors(bio) > scope->first_sector - sector;
 }
 
+/* Early rejection is a separate terminal branch, not a candidate path.
+ * Do not move its scope lock ahead of the real normal admission lookup.
+ */
+static void swapz_scope_observe_map_refusal(struct swapz_dm *ctx,
+		const struct bio *bio)
+{
+	unsigned long flags;
+
+	if (!swapz_trial_observation_active())
+		return;
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (swapz_scope_observation_selected_locked(ctx, bio))
+		swapz_scope_observe_invalid();
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+}
+
 /* No carrier transfer here. The frozen core helper itself rejects any
  * original with a carrier borrow, so an MM ACK cannot acquire a second
  * core ACK. Call only at irrevocable map admission under queue_lock.
@@ -16384,12 +16400,7 @@ map_entry:
 	entry->observation_descriptor = 0;
 	entry->observation_extent = 0;
 	if (map_refusal != DM_MAPIO_SUBMITTED) {
-		if (swapz_trial_observation_active()) {
-			spin_lock_irqsave(&ctx->queue_lock, flags);
-			if (swapz_scope_observation_selected_locked(ctx, bio))
-				swapz_scope_observe_invalid();
-			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		}
+		swapz_scope_observe_map_refusal(ctx, bio);
 		return map_refusal;
 	}
 #endif

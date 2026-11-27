@@ -49,6 +49,8 @@ static bool recorder_active = true;
 #define CHECK(x) do { ++checks; if (!(x)) { \
     fprintf(stderr,"FIRST_ERROR line=%d: %s\n",__LINE__,#x); exit(77); } } while (0)
 #define lockdep_assert_held(x) CHECK(*(x))
+#define spin_lock_irqsave(lock, flags) do { CHECK(!*(lock)); *(lock) = true; (flags) = 0; } while (0)
+#define spin_unlock_irqrestore(lock, flags) do { CHECK(*(lock)); *(lock) = false; (void)(flags); } while (0)
 struct block_device { unsigned int id; };
 struct bio {
     struct { sector_t bi_sector; unsigned int bi_size, bi_idx, bi_offset; } bi_iter;
@@ -221,8 +223,44 @@ static void run_case(unsigned int op, unsigned int variant)
     CHECK(records == accept_count + 2U);
 }
 
-int main(void)
+static void refusal_cases(void)
 {
+    struct block_device mapper = {1}, foreign = {2};
+    struct swapz_dm ctx = {.original_scope = {.bdev=&mapper,.identity=17,
+        .first_sector=56,.sector_count=16}};
+    struct bio bio = {.bi_bdev=&mapper,.bi_iter={56,4096,0,0}};
+    loss = records = core_calls = minted = 0;
+    recorder_active = true;
+    swapz_scope_observe_map_refusal(&ctx,&bio);
+    CHECK(loss == 1 && !ctx.queue_lock);
+    bio.bi_iter.bi_sector = 55;
+    bio.bi_iter.bi_size = 1024;
+    swapz_scope_observe_map_refusal(&ctx,&bio);
+    CHECK(loss == 2 && !ctx.queue_lock);
+    bio.bi_iter.bi_size = 512;
+    swapz_scope_observe_map_refusal(&ctx,&bio);
+    CHECK(loss == 2 && !ctx.queue_lock);
+    bio.bi_iter.bi_sector = 72;
+    swapz_scope_observe_map_refusal(&ctx,&bio);
+    CHECK(loss == 2 && !ctx.queue_lock);
+    bio.bi_iter.bi_sector = 56;
+    bio.bi_bdev = &foreign;
+    swapz_scope_observe_map_refusal(&ctx,&bio);
+    CHECK(loss == 2 && !ctx.queue_lock);
+    bio.bi_bdev = &mapper;
+    recorder_active = false;
+    swapz_scope_observe_map_refusal(&ctx,&bio);
+    CHECK(loss == 2 && !ctx.queue_lock && !records && !core_calls && !minted);
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1],"refusal") == 0) {
+        refusal_cases();
+        printf("PASS refusal-only serial host checks=%u AUTH=0\n",checks);
+        return 0;
+    }
+    CHECK(argc == 1);
     for (unsigned int variant=0; variant<=11; ++variant)
         run_case(REQ_OP_WRITE,variant);
     run_case(REQ_OP_READ,0);
