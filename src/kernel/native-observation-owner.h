@@ -75,6 +75,22 @@ bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *con
  * No exported symbol, user endpoint, admission or activation.
  */
 bool swapz_trial_observation_export_private(swapz_observation_sink sink, void *context);
+
+/* Already-admitted retained session only. The caller owns one opaque
+ * snapshot, initially NULL, and serializes materialize/deliver/release.
+ * Exact independently retained scope is checked on both operations;
+ * identity comparison is NOT admission. No public or module endpoint.
+ * The completed allocation is independent of the sealed recorder lifetime.
+ * Failed delivery leaves snapshot unchanged; discard partial destination
+ * and retry from zero. Sink must not retain pointers or reenter this owner.
+ */
+struct swapz_private_snapshot;
+bool swapz_trial_observation_materialize(const struct swapz_trial_observation_scope *scope,
+					struct swapz_private_snapshot **snapshot);
+bool swapz_trial_observation_deliver(const struct swapz_trial_observation_scope *scope,
+				     const struct swapz_private_snapshot *snapshot,
+				     swapz_observation_sink sink, void *context);
+void swapz_trial_observation_snapshot_release(struct swapz_private_snapshot **snapshot);
 #endif
 
 #endif

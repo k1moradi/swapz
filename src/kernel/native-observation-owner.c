@@ -283,14 +283,13 @@ static bool private_record(void *context, const struct swapz_byte_record *record
 			SWAPZ_BYTE_PAGE));
 }
 
-bool swapz_trial_observation_export_private(swapz_observation_sink sink, void *context)
+static bool private_export_locked(swapz_observation_sink sink, void *context)
 {
 	struct private_export state = {.sink = sink, .context = context};
 	u8 header[PRIVATE_HEADER_BYTES], *output = header;
 	u32 count, wire_bytes;
 	bool result = false;
 
-	mutex_lock(&trial_control);
 	if (!sink || !trial_joined || !trial_recorder.records || !trial_recorder.sealed ||
 	    atomic_read(&trial_recorder.loss) ||
 	    !swapz_byte_bridge_export(private_measure, &state) || !state.count)
@@ -315,8 +314,114 @@ bool swapz_trial_observation_export_private(swapz_observation_sink sink, void *c
 		swapz_byte_bridge_export(private_record, &state) &&
 		sink(context, (const u8 *)"SWZPEND", 8);
 unlock:
+	return result;
+}
+
+bool swapz_trial_observation_export_private(swapz_observation_sink sink, void *context)
+{
+	bool result;
+
+	mutex_lock(&trial_control);
+	result = private_export_locked(sink, context);
 	mutex_unlock(&trial_control);
 	return result;
+}
+
+/* Independent allocation; length is bounded by the existing wire and
+ * collector limits. Never publish the caller's pointer until complete. */
+#define PRIVATE_MAX_BYTES (PRIVATE_HEADER_BYTES + SWAPZ_OBSERVATION_HEADER_BYTES + \
+	SWAPZ_OBSERVATION_MAX_RECORDS * SWAPZ_OBSERVATION_RECORD_BYTES + \
+	SWAPZ_OBSERVATION_FOOTER_BYTES + \
+	SWAPZ_BYTE_OPERATIONS * (PRIVATE_RECORD_BYTES + SWAPZ_BYTE_PAGE) + 8U)
+struct swapz_private_snapshot {
+	size_t length;
+	u8 digest[32];
+	u8 bytes[];
+};
+struct snapshot_writer {
+	struct swapz_private_snapshot *snapshot;
+	size_t length;
+};
+
+static void private_scrub(void *pointer, size_t length);
+
+static bool snapshot_write(void *context, const u8 *bytes, size_t length)
+{
+	struct snapshot_writer *writer = context;
+	size_t limit = writer->snapshot ? writer->snapshot->length : PRIVATE_MAX_BYTES;
+
+	if (!bytes || writer->length > limit || length > limit - writer->length)
+		return false;
+	if (writer->snapshot)
+		memcpy(writer->snapshot->bytes + writer->length, bytes, length);
+	writer->length += length;
+	return true;
+}
+
+bool swapz_trial_observation_materialize(const struct swapz_trial_observation_scope *scope,
+					struct swapz_private_snapshot **snapshot)
+{
+	struct snapshot_writer writer = {};
+	struct swapz_private_snapshot *candidate = NULL;
+	u8 digest[32];
+	size_t allocation = 0;
+	bool result = false;
+
+	if (!snapshot || *snapshot || !scope_digest(scope, digest))
+		return false;
+	mutex_lock(&trial_control);
+	if (memcmp(digest, trial_recorder.scope_sha256, sizeof(digest)) ||
+	    !private_export_locked(snapshot_write, &writer) || !writer.length)
+		goto unlock;
+	/* The first pass is bounded by PRIVATE_MAX_BYTES; sizeof + length
+	 * cannot overflow size_t on supported native architectures. */
+	allocation = sizeof(*candidate) + writer.length;
+	candidate = kvcalloc(1, allocation, GFP_KERNEL);
+	if (!candidate)
+		goto unlock;
+	candidate->length = writer.length;
+	memcpy(candidate->digest, digest, sizeof(digest));
+	writer.snapshot = candidate;
+	writer.length = 0;
+	if (!private_export_locked(snapshot_write, &writer) ||
+	    writer.length != candidate->length)
+		goto unlock;
+	*snapshot = candidate;
+	candidate = NULL;
+	result = true;
+unlock:
+	mutex_unlock(&trial_control);
+	if (candidate) {
+		private_scrub(candidate, allocation);
+		kvfree(candidate);
+	}
+	return result;
+}
+
+bool swapz_trial_observation_deliver(const struct swapz_trial_observation_scope *scope,
+				     const struct swapz_private_snapshot *snapshot,
+				     swapz_observation_sink sink, void *context)
+{
+	u8 digest[32];
+
+	if (!snapshot || !sink || !scope_digest(scope, digest) ||
+	    memcmp(digest, snapshot->digest, sizeof(digest)) ||
+	    !snapshot->length || snapshot->length > PRIVATE_MAX_BYTES)
+		return false;
+	/* Caller owns immutable storage and excludes concurrent release. */
+	return sink(context, snapshot->bytes, snapshot->length);
+}
+
+void swapz_trial_observation_snapshot_release(struct swapz_private_snapshot **snapshot)
+{
+	struct swapz_private_snapshot *owned;
+
+	if (!snapshot || !*snapshot)
+		return;
+	owned = *snapshot;
+	*snapshot = NULL;
+	private_scrub(owned, sizeof(*owned) + owned->length);
+	kvfree(owned);
 }
 
 bool swapz_trial_observation_export_bytes(swapz_byte_record_sink sink, void *context)
