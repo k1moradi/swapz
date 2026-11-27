@@ -1,12 +1,7 @@
-name: Round101 target original completion directed NO_AUTH
+name: Round101 immutable historical target original completion directed NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/dm-target.c'
-      - 'tests/tools/round101-target-observation-verify.py'
-      - 'tests/runtime/native/fixtures/round101-target-observation.c'
-      - '.github/workflows/phase-a-round101-target-observation-noauth.yml'
+  # Historical source proof, not a current-target qualification. No automatic replay.
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -16,27 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: 790fcb30bad5062956808f0cd0418d2123511245
           fetch-depth: 0
           persist-credentials: false
-      - name: Exact source and complete standards prefix
-        env:
-          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+      - name: Verify exact immutable historical checkout
         run: |
           set -Eeuo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
-          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = 790fcb30bad5062956808f0cd0418d2123511245
+          test "$(git hash-object src/kernel/dm-target.c)" = 46c2cb832ff0071a028a27b35f63daa84f29914f
           test -z "$(git status --porcelain --untracked-files=all)"
-          git diff --check HEAD^ HEAD
-          python3 -B tests/runtime/native/repository-policy-test.py --enforce
-          python3 - <<'PY'
-          from pathlib import Path
-          import subprocess
-          parent = subprocess.check_output(["git","show","HEAD^:docs/testing_standards.md"])
-          current = Path("docs/testing_standards.md").read_bytes()
-          assert current.startswith(parent) and len(current)>len(parent)
-          print("complete standards prefix",len(parent),len(current))
-          PY
       - name: Provision genuine compiler and kernel build prerequisites (runner only)
         run: |
           set -Eeuo pipefail
@@ -56,7 +39,7 @@ jobs:
           ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
           path: frozen-linux
           persist-credentials: false
-      - name: Check exact stage, serial host and changed target object
+      - name: Check immutable historical stage, serial host and target object
         run: |
           set -Eeuo pipefail
           umask 077

@@ -129,6 +129,8 @@ extern bool dm_swapz_trial_observation_origin(struct dm_target *, struct bio *, 
 #error "Controller stop requires the exact staged scoped producer and target"
 #endif
 #include "native-observation-controller.h"
+#include <linux/file.h>
+#include <linux/fs.h>
 #endif
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
@@ -1064,6 +1066,11 @@ struct swapz_dm {
 	 * Observation identity remains retained until a genuine external join. */
 	bool original_scope_capture_stopped;
 	int original_scope_stop_error;
+	/* Durable value identity and the independently retained opened mapper.
+	 * Route invalidation never consumes this ownership. Lifecycle serializes
+	 * install/stop; queue_lock publishes the retained identity with the route. */
+	struct swapz_trial_retained_scope original_retained_scope;
+	struct file *original_scope_file;
 #endif
 #endif
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
@@ -2880,6 +2887,10 @@ static void swapz_round089_revoke_route_locked(struct swapz_dm *ctx)
 	ctx->original_route = (struct swapz_round089_route){};
 #if defined(SWAPZ_ROUND098_SCOPED_TARGET_TEST)
 	ctx->original_scope = (struct swapz_mm_trial_scope){};
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	if (ctx->original_retained_scope.identity)
+		ctx->original_scope_capture_stopped = true;
+#endif
 	/* Do not reset used_session: the same route cannot be readmitted. */
 #endif
 }
@@ -13037,7 +13048,11 @@ static bool swapz_scope_key_matches_locked(const struct swapz_dm *ctx,
  * published and queryable. One hint per fresh session; no re-arm on revoke.
  */
 static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
-		const struct swapz_mm_trial_scope *scope)
+		const struct swapz_mm_trial_scope *scope
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+		, struct file *mapper_file
+#endif
+		)
 {
 	struct swapz_mm_route route;
 	u64 generation;
@@ -13055,6 +13070,10 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
 		return -EINVAL;
 	if (!ctx->original_trial || !ctx->accepting || ctx->failed ||
 	    !ctx->original_storage_ready || !ctx->original_cap.broker ||
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	    ctx->original_retained_scope.identity || ctx->original_scope_file ||
+	    ctx->original_scope_capture_stopped || !mapper_file ||
+#endif
 	    ctx->original_scope.identity || scope->session <= ctx->original_scope_used_session ||
 	    scope->broker != ctx->original_cap.broker ||
 	    scope->session != ctx->original_cap.session || scope->table_epoch != ctx->original_cap.epoch ||
@@ -13084,9 +13103,45 @@ static __maybe_unused int swapz_scope_install_locked(struct swapz_dm *ctx,
 	if (!error) {
 		ctx->original_scope = *scope;
 		ctx->original_scope_used_session = scope->session;
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+		ctx->original_retained_scope = (struct swapz_trial_retained_scope){
+			.identity = scope->identity, .session = scope->session,
+			.epoch = scope->table_epoch, .target_epoch = scope->target_epoch,
+			.registration_epoch = ctx->original_route.registration_epoch,
+		};
+		ctx->original_scope_file = mapper_file; /* transferred counted ref */
+#endif
 	}
 	return error;
 }
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+/* Cold target-local transaction for an independently admitted caller holding
+ * the live table/target lifecycle and an opened mapper. MM publication is
+ * independently checked by install_locked; the caller must already own it.
+ * No caller is wired until external admission and terminal join exist.
+ * A failed target install releases only this attempt's file reference, not
+ * the caller's independently published MM scope. No sleeping under queue_lock. */
+static __used noinline int swapz_scope_install(struct swapz_dm *ctx,
+		const struct swapz_mm_trial_scope *scope, struct file *mapper_file)
+{
+	unsigned long flags;
+	int error;
+
+	if (!ctx || !scope || !mapper_file || !scope->bdev ||
+	    !S_ISBLK(file_inode(mapper_file)->i_mode) ||
+	    file_bdev(mapper_file) != scope->bdev || bdev_is_partition(scope->bdev) ||
+	    !scope->sector_count || scope->first_sector > bdev_nr_sectors(scope->bdev) ||
+	    scope->sector_count > bdev_nr_sectors(scope->bdev) - scope->first_sector)
+		return -EINVAL;
+	get_file(mapper_file);
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	error = swapz_scope_install_locked(ctx, scope, mapper_file);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	if (error)
+		fput(mapper_file);
+	return error;
+}
+#endif
 #endif
 /* ROUND098_SCOPE_END */
 
@@ -15287,7 +15342,11 @@ static __maybe_unused int swapz_round089_register_route(
 		error = -ESHUTDOWN;
 		goto out;
 	}
-	if (ctx->original_route.registration_epoch) {
+	if (ctx->original_route.registration_epoch
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	    || ctx->original_retained_scope.identity || ctx->original_scope_file
+#endif
+	   ) {
 		error = -EALREADY;
 		goto out;
 	}
@@ -15544,6 +15603,11 @@ static void swapz_round090_unpublish_target(struct swapz_dm *ctx)
 	 * Lifecycle calls serialize; no new binding until later resume.
 	 */
 	release_cap = ctx->original_cap.broker != NULL;
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	/* Registry removal joins readers, not retained scope or external debt. */
+	if (ctx->original_retained_scope.identity || ctx->original_scope_file)
+		release_cap = false;
+#endif
 	if (release_cap) {
 		ctx->original_retired_cap = ctx->original_cap;
 		ctx->original_cap = (struct swapz_ticket_cap){};
@@ -15817,6 +15881,10 @@ static int swapz_round094_setup(struct swapz_dm *ctx)
 
 	if (!ctx->original_trial || ctx->failed)
 		return -EOPNOTSUPP;
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	if (ctx->original_retained_scope.identity || ctx->original_scope_file)
+		return -EBUSY;
+#endif
 	if (ctx->original_cap.broker)
 		return -EALREADY;
 	/* Refuse reuse of an unsuccessfully closed storage/decoder lifetime. */
@@ -15971,6 +16039,14 @@ static void swapz_round094_teardown_work(struct work_struct *work)
 	struct swapz_dm *ctx = container_of(work, struct swapz_dm, original_teardown_work);
 	int error, storage_error;
 
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+	/* Defense in depth for all callers: no external join, no close. */
+	if (ctx->original_retained_scope.identity || ctx->original_scope_file) {
+		if (!ctx->original_teardown_error)
+			ctx->original_teardown_error = -EBUSY;
+		return;
+	}
+#endif
 	/* Registry grace and candidate-release work were joined by drain.
 	 * Fence and drop the cap first, finish only after decoder/storage close.
 	 */
@@ -16786,7 +16862,7 @@ static void swapz_scope_stop_capture(struct swapz_dm *ctx)
 	int error;
 
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	identity = ctx->original_scope.identity;
+	identity = ctx->original_retained_scope.identity;
 	if (identity)
 		ctx->original_scope_capture_stopped = true;
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -16810,7 +16886,7 @@ static void swapz_presuspend(struct dm_target *ti)
  * recycle the optional owner or release the target carrying its identity. */
 static bool swapz_scope_external_join_missing(const struct swapz_dm *ctx)
 {
-	return ctx->original_scope.identity != 0;
+	return ctx->original_retained_scope.identity != 0 || ctx->original_scope_file != NULL;
 }
 #endif
 
@@ -16934,8 +17010,9 @@ static void swapz_drain(struct dm_target *ti)
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
 		if (swapz_scope_external_join_missing(ctx)) {
 			/* Preserve scope ownership; no synthetic external join. */
-			ctx->original_teardown_error = ctx->original_scope_stop_error ?
-				ctx->original_scope_stop_error : -EBUSY;
+			if (!ctx->original_teardown_error)
+				ctx->original_teardown_error = ctx->original_scope_stop_error ?
+					ctx->original_scope_stop_error : -EBUSY;
 			swapz_scope_observe_invalid();
 		} else
 #endif
@@ -17095,7 +17172,7 @@ static bool swapz_round096_target_can_free(const struct swapz_dm *ctx,
 	(void)independent_retry;
 	return
 #if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
-	       !ctx->original_scope.identity &&
+	       !ctx->original_retained_scope.identity && !ctx->original_scope_file &&
 #endif
 	       (!ctx->original_trial || ctx->original_target_drained) &&
 	       swapz_round097_target_debt_free(ctx) &&
@@ -17156,6 +17233,17 @@ static void swapz_dtr(struct dm_target *ti)
 	 */
 	if (!swapz_round096_target_can_free(ctx, false)) {
 		DMERR("guarded owner teardown quarantined errno=%d", ctx->original_teardown_error);
+#if defined(SWAPZ_ROUND102_CONTROLLER_TEST)
+		/* The registry and target work have been drained. A detached
+		 * quarantine is not a reusable live table. Drop the table-owned
+		 * device reference here, never dereference a destroyed target.
+		 * No recovery entry is supplied without an external join. */
+		if (ctx->backing) {
+			dm_put_device(ti, ctx->backing);
+			ctx->backing = NULL;
+		}
+		ctx->target = NULL;
+#endif
 		goto detach;
 	}
 #endif
