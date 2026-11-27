@@ -1,0 +1,163 @@
+{
+  "round": 107,
+  "agent": 11,
+  "issue": 225,
+  "status": "PRIVATE_SEAM_IMPLEMENTED_LOCAL_ACTUAL_EXTRACTED_HOST_PASS_HOSTED_PENDING",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "freeze": "0c908d5506f75a430171c627cd28b9994ff5765e",
+  "freeze_tree": "726cdb128b39ec60087a2f14cf9d81522d1940ee",
+  "task": "e7716a8d44c23f7c209b9c2f34ccd04af81efa36",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "previous_scoped_qualification": [
+    {
+      "round": 105,
+      "run": 45973757313,
+      "job": 140420275640,
+      "observed": "completed_success"
+    },
+    {
+      "round": 106,
+      "run": 45973756806,
+      "job": 140420273912,
+      "observed": "completed_success"
+    },
+    {
+      "round": 106,
+      "agent": 3,
+      "run": 45980012289,
+      "job": 140441228713,
+      "observed": "completed_success"
+    }
+  ],
+  "publication": {
+    "source": "96e36c5fddffceab35b382d98182e6ee895499ed",
+    "parent": "0f6859c137d1946b137c56bf282fb3b6622a6861",
+    "tree": "3024088600c2929f49795e6c673720a8c0abd1c6",
+    "sole_parent": true,
+    "main": true,
+    "force": false,
+    "expected_head": true,
+    "readback": true,
+    "standards_old": "2583643d691afa9b42e9d910469eba0ec6166492",
+    "standards_old_bytes": 1931644,
+    "standards_new": "14bddbafad1769a53c2d616113be2fb8e67db5cd",
+    "standards_exact_prefix_verified": true
+  },
+  "source_overlay": {
+    "path": "tests/tools/round107-original-dm-final-removal.patch",
+    "blob": "7d761ce14c8f452c277d945381e15a02227ed2c2",
+    "images": {
+      "drivers/md/dm.c": [
+        "6912eb7ec5a9ef325f7282ef9c9226b39265f01d",
+        "332fc3faf1ad05f3756bf7d90b476f28bd50a012"
+      ]
+    },
+    "unchanged_ioctl": "8f945f0aeda5d6af52134a1c2920d16af9fe7980",
+    "guard": "SWAPZ_ROUND107_FINAL_REMOVAL_TEST",
+    "guard_off": "UNCHANGED except insertion blank lines",
+    "connector_exact_roundtrip": "PASS",
+    "hosted_full_checkout": "PENDING",
+    "caller_count": 0,
+    "exported": false,
+    "controller": "556b99a0d04e3027c3027c387a0a9552e22a19ec",
+    "controller_header": "dac2e2844d893b0090b4c1da3614e4a8d0cc2253",
+    "target": "b17a17c1096eaa6f43bf42a18c009b8d379e080b",
+    "integration_header": "e3bca3367459c7f79960105f63e9ddef4e95b4d6"
+  },
+  "verifier_blob": "895129f6e14dd30c91fdb37d4c10a8e5e6e96856",
+  "workflow_blob": "00104ff9bd2a911f102cc5f845cc77c7b09f9ee4",
+  "fixture_blob": "7f3bebc2706e47a1686be321899a665c6979b74a",
+  "fixture_sha256": "ea91a0ea55c89b1e73c2930e3a5ad1584a8a00b8ffee2b4f7e49a07acd3fe726",
+  "extracted_blob": "b44742c3850abb7dc94736b7d25f992b778b16b1",
+  "extracted_sha256": "3a94359473120ee6f378caf684ed0cb0c239d7bd8909e4841214d084d94042db",
+  "host": {
+    "status": "PASS_ACTUAL_EXTRACTED_HOST_ONLY",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "flags": "-std=gnu11 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -fno-omit-frame-pointer -fno-pie -no-pie -fsanitize=address,undefined -fno-sanitize-recover=all",
+    "unused_parameter_exception": "Pinned native dm_blk_open signature's mode is unused.",
+    "local_exact_fixture_and_header_blob_reproduced": true,
+    "mode_checks_per_compiler": {
+      "guard-off-ordinary": 44,
+      "guard-on-ordinary": 56,
+      "preflight": 139,
+      "close-wait": 233,
+      "reentry": 107,
+      "retry": 127,
+      "quarantine": 80,
+      "stale-key": 55,
+      "stale-after": 39,
+      "late-pending": 71
+    },
+    "checks_per_compiler": 951,
+    "total_checks": 1902,
+    "mutants_per_compiler": 16,
+    "total_mutant_rejections": 32,
+    "mutant_exit": 77,
+    "mutant_failure_lines": {
+      "false-close": 377,
+      "native-open-bypass": 263,
+      "normal-suspend-gate": 312,
+      "resume-race": 355,
+      "replace-race": 157,
+      "second-remover": 354,
+      "fresh-open": 353,
+      "missing-holder": 229,
+      "double-holder-drop": 290,
+      "holder-drop-under-lock": 121,
+      "stale-registration": 346,
+      "stale-table-after-callback": 448,
+      "callback-error-retry": 281,
+      "repeat-retired-callback": 281,
+      "ignore-late-pending": 453,
+      "premature-dtr-proof": 210
+    },
+    "local_mutants_results_sha256": "2d0d5ded334355b06beacaf75fad9435b89b0c387c1412388ace9907847597ac",
+    "first_error": null,
+    "limits": "actual extracted source; explicit deterministic substitutes for locks, SRCU, md/table lifetime, external owner, controller and native close; no native concurrency or actual admission"
+  },
+  "native": {
+    "status": "NOT_RUN_YET_HOSTED_QUEUED",
+    "run": 46019577473,
+    "job": 140575414125,
+    "attempt": 1,
+    "head_sha": "96e36c5fddffceab35b382d98182e6ee895499ed",
+    "observed_status": "queued",
+    "full_stage": "PENDING",
+    "config_sha256": null,
+    "objects": null,
+    "artifact": null,
+    "request": "only drivers/md/dm.o guard on and guard off, exact historical source chain, SMP TREE_RCU NR_CPUS=4, default-off",
+    "native_link": "NOT_RUN",
+    "first_error": null,
+    "blocker": "Local git ls-remote failed DNS (Could not resolve host: github.com); automatic hosted runner remains queued. No manual or duplicate dispatch."
+  },
+  "decisions_and_limits": {
+    "authority": "No actual trusted grant or native caller. Static __used noinline seam only, compiled under explicit built-in development guard.",
+    "caller_contract": "Future separately admitted owner must retain independent live md/table/target lifetime and exact immutable key, fence all external upper producers and selected-area activity, enter without conflicting locks and drop its independent refs before ordinary removal. Exact key and registration not admission authority.",
+    "retained_holder": "Exactly one reservation-owned md holder until READY; EBUSY retry and permanent-error quarantine intentionally retain it and exact identity; no public reset/recovery.",
+    "deferred_close": "Success from retire_registered is not final close. Check real open count and deferred/requeue debt, keep fence and avoid replay after success, never force close.",
+    "ordinary_deletion": "Existing native gate remains mandatory and only consumes readiness after real open count zero; competing selected removal gets EAGAIN, never falsely acknowledges deferred; unrelated and guard-off paths unchanged.",
+    "forced_direct_destroy": "Pinned built-in ordinary/deferred path uses native gate; forced dm_hash_remove_all(0) is init-failure/module-exit path. Defensive __dm_destroy guard refuses unexpected bypass before destructive side effects; void ABI cannot report an error to a hypothetical future direct caller already past hash unlink. Intentional fail-closed retention, not general recovery; review any future bypass before composition.",
+    "destruction_witness": "DESTROYED is table destruction return, not final mapped-device close/free or CLEANUP proof; no table/target pointer used after dtr. free_dev follows.",
+    "first_error": "Permanent callback error preserved; retryable EBUSY not permanent. Stale initial complete key rejected by frozen callback, reservation quarantined; no guessed-key positive grant."
+  },
+  "safety": {
+    "full_connected_build": false,
+    "vm": false,
+    "boot": false,
+    "install": false,
+    "module_load": false,
+    "activation": false,
+    "physical_mutation": false,
+    "branches": false,
+    "prs": false,
+    "manual_duplicate_dispatch": false,
+    "same_round_peer_dependencies": false
+  },
+  "acceptance_owner": "Agent 1"
+}
