@@ -21093,3 +21093,6 @@ Use immutable shared declaration header e3bca3367459c7f79960105f63e9ddef4e95b4d6
 
 ### Round 104 Agent 1 — exact MM query linkage correction
 Original built-in MM exact scope query is called by the DM module but lacked GPL export. Add immutable zero-context overlay after R104, exact reconstructed pre/postimage 1ecc86d30f20790f1fae7506a3f55d612200831a -> 2bfc139f380461c71da78a8c7f9469d1e7eb0b22. Both historical original overlays remain unchanged. Require strict apply/reverse/reapply and actual connected vmlinux/modules modpost. Query remains read-only, guard-only, non-authorizing. No runtime or authorization, AUTH0.
+
+### Round 105 Agent 10 — single connected frozen compile/link
+Reuse unchanged historical staging verifiers, stage R104 and the exact Agent 1 GPL query export with strict apply/reverse/reapply, and select the frozen recorder/bridge/controller plus real DM module in one output. Require real native prerequisites, uniform integration guards, actual preflight module imports, full vmlinux/modules and same-output genuine external modpost; never suppress undefined symbols or use old objects. Retain source, config, compiler, imports/exports, artifacts, first errors and resource evidence. No repeat full build or activation; AUTH0 Phase A BLOCKED.
