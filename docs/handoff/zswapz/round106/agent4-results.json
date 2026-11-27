@@ -1,0 +1,115 @@
+{
+  "round": 106,
+  "agent": 4,
+  "conclusion": "PARTIAL_EXACT_SOURCE_REGEX_MUTATION_PREFLIGHT_PASS_HOSTED_QUALIFICATION_PENDING",
+  "frozen_commit": "8a83828717ea3000d102043ead78fd86ad0391a8",
+  "frozen_tree": "1d175df983eb17b8611624ec8b83ea8ddc89b2e8",
+  "task_commit": "7eb880eb84474f75037acb9f33b95d92d861000c",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "target_blob": "d3cb8525f482321c975cefd91a03aa73fcb7bef2",
+  "publication_parent": "b0379c6fca4af6f5ddc378f5776da80c1fad834e",
+  "publication_parent_tree": "8d26e072e3424c6d4f65d4c6bc67de0d7b5d06dc",
+  "changed_test": {
+    "path": "tests/runtime/native/zswap-origin-consumer-source-test.py",
+    "preimage": "fcfaf16d7e4647fde1a3303674f5a09b0b7f95dd",
+    "postimage": "1a47643fb9242bae9e3d3f6abfe7d9acc88890c1"
+  },
+  "standards": {
+    "preimage": "0d333a26b4e32838da196d128853d4540011b632",
+    "postimage": "e0ed33917dff4bf95c48503fb6c5874928df8d69",
+    "complete_raw_prefix_verified": true,
+    "append_ascii_bytes": 737
+  },
+  "r105_prior_repair": {
+    "tested_commit": "db57f87498a0b20d298136f3f947c42051c899af",
+    "product_run": 45965786889,
+    "product_four_jobs": "SUCCESS",
+    "r092_run": 45965787010,
+    "r092_job": 140394013041,
+    "r092_status": "SUCCESS",
+    "project_goals_run": 45965787208,
+    "project_goals_seven_jobs": "SUCCESS",
+    "aggregate_job": 140403458197
+  },
+  "r105_target_failures": {
+    "source": "19ef78fff9f862fa6774b7580538cffbcf009b7b",
+    "jobs": [
+      140394630351,
+      140394630390,
+      140394629116,
+      140394629505
+    ],
+    "first_error": "typed terminal owner versus ordinary fallback: expected one source occurrence, got 0"
+  },
+  "r106_frozen_automatic": {
+    "tested_commit": "8a83828717ea3000d102043ead78fd86ad0391a8",
+    "product_run": 45968194294,
+    "exact_c_failed_jobs": [
+      140401870625,
+      140401870991
+    ],
+    "first_error": "typed terminal owner versus ordinary fallback: expected one source occurrence, got 0",
+    "compile_only_success_jobs": [
+      140401871023,
+      140401871185
+    ],
+    "project_goals_run": 45968194427,
+    "project_goals_aggregate_job": 140416335274,
+    "project_goals_seven_jobs": "SUCCESS",
+    "a11_run": 45968194407,
+    "a11_status": "FAILURE_OUTSIDE_A4_LANE"
+  },
+  "historical_infrastructure": {
+    "job": 140393590583,
+    "first_error": "apt packages.microsoft.com Ubuntu noble InRelease HTTP 403 Forbidden; exit 100",
+    "classification": "INFRASTRUCTURE"
+  },
+  "focused_preflight": {
+    "method": "Connector full exact frozen target bytes and generated Python rule/mutation expressions evaluated by JavaScript mirror; not Python execution, not compiled or loaded kernel.",
+    "raw_target_reproduced": true,
+    "baseline_current": "PASS",
+    "baseline_historical": "PASS",
+    "historical_target": "8a84ac4d395e2f635ae3e4216bade471c03618de",
+    "current_groups_rejected": {
+      "legacy": 24,
+      "typed": 6,
+      "scoped_typed": 4,
+      "guarded_fallback": 16,
+      "total": 50
+    },
+    "historical_groups_rejected": {
+      "legacy": 24,
+      "typed": 6,
+      "scoped_typed": 4,
+      "total": 34
+    },
+    "additional_stale_anchor": "RAW commit hook must follow successful authority finish; old immediate if(!error) no longer follows preserve_first_error because of guarded observer",
+    "local_checkout": "BLOCKED: git ls-remote exit128 Could not resolve host github.com; raw download unavailable",
+    "python_execution": "NOT_RUN_LOCALLY",
+    "native_helper_execution": "NOT_RUN_LOCALLY"
+  },
+  "automatic_ci": {
+    "x86_64": "NOT_YET_OBSERVED",
+    "arm64": "NOT_YET_OBSERVED",
+    "r092": "NOT_YET_OBSERVED",
+    "project_goals": "NOT_YET_OBSERVED",
+    "matched_consumer": "NOT_YET_OBSERVED",
+    "manual_dispatches": 0
+  },
+  "production_defect": "No product semantic defect demonstrated in audited terminal/fallback branches; no runtime or lifecycle conclusion.",
+  "limitations": [
+    "Static source/regex preflight only; actual Python interpreter, original C commit helper, compiler, full historical host composition and complete exact-SHA jobs await hosted results.",
+    "Independent work uses only frozen target/preimage. Automatic current main jobs may include intervening peer code, which is not independent frozen full qualification.",
+    "No connected build, runtime, activation, module loading, VM or physical activity."
+  ],
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "full_build": false,
+  "vm": false,
+  "module_loading": false,
+  "activation": false,
+  "physical_io": false
+}

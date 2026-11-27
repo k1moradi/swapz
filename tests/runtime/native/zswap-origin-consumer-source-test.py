@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Rootless production-source contract check, not a kernel/runtime test."""
+from functools import lru_cache
 from pathlib import Path
 import re
 import shutil
@@ -94,6 +95,183 @@ def typed_commit_region(source: str) -> str:
     return source.split(start, 1)[1].split(end, 1)[0]
 
 
+# The legacy target has no cancellation witness flag. On newer targets the
+# flag may suppress evidence loss only after the exact reserved credit is
+# canceled successfully. Keep both canonical shapes, not an optional wildcard.
+LEGACY_DECLINE = (
+    r"if \(entry->observation_operation\)\s*swapz_scope_observe_invalid\(\);")
+GUARDED_DECLINE = (
+    r"if \(entry->observation_operation\s*"
+    r"#if defined\(SWAPZ_ROUND104_INTEGRATION_TEST\)\s*"
+    r"&& !entry->observation_fallback\s*#endif\s*\)\s*"
+    r"swapz_scope_observe_invalid\(\);")
+
+
+def has_guarded_fallback(source: str) -> bool:
+    # Removing the flag alone must not silently select the historical path.
+    return any(marker in source for marker in (
+        "observation_fallback", "observation_plain_write",
+        "observation_claim_lower_failed", "swapz_scope_retire"))
+
+
+@lru_cache(maxsize=1)
+def masked_c(source: str) -> str:
+    return re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\\n])*"|'
+                  r"'(?:\\.|[^'\\\n])*'",
+                  lambda match: re.sub(r"[^\n]", " ", match.group()), source)
+
+
+def exact_function(source: str, name: str) -> str:
+    """Extract one complete static definition; never audit a truncated prefix."""
+    masked = masked_c(source)
+    matches = list(re.finditer(r"(?m)^static (?:bool|void|int) " +
+                               re.escape(name) + r"\(", masked))
+    if len(matches) != 1:
+        raise AssertionError("ambiguous function: " + name)
+    start = matches[0].start()
+    opening = masked.find("{", matches[0].end())
+    if opening < 0 or ";" in masked[matches[0].end():opening]:
+        raise AssertionError("malformed signature: " + name)
+    depth = 0
+    for brace in re.finditer(r"[{}]", masked[opening:]):
+        position = opening + brace.start()
+        depth += 1 if brace.group() == "{" else -1
+        if not depth:
+            if (masked[position - 1] != "\n" or
+                    masked[position + 1:position + 2] != "\n" or
+                    re.search(r"(?m)^static ", masked[opening + 1:position])):
+                raise AssertionError("malformed function boundary: " + name)
+            return source[start:position + 1]
+    raise AssertionError("unterminated function: " + name)
+
+
+def verify_guarded_fallback(source: str, region: str) -> None:
+    """Verify actual scoped transaction, retained clone and completion paths."""
+    transaction = exact_function(source, "swapz_scope_transaction")
+    # Reserve failure has no credit: only integrity/I/O errors are terminal.
+    # The other refusal must cancel the *same* credit before fallback.
+    exactly_one(transaction,
+        r"\*error = swapz_shared_storage_reserve\(ctx->original_storage, spec, input, &credit\);\s*"
+        r"if \(\*error\) \{\s*#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*"
+        r"swapz_scope_observe_simple\(entry, SWAPZ_OBS_REFUSE, 0, \*error\);\s*"
+        r"if \(\*error != -EUCLEAN && \*error != -EIO\) \{\s*"
+        r"swapz_scope_observe_simple\(entry, SWAPZ_OBS_FALLBACK, 0, 0\);\s*"
+        r"#if defined\(SWAPZ_ROUND104_INTEGRATION_TEST\)\s*"
+        r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*swapz_scope_observe_invalid\(\);\s*"
+        r"#endif\s*\}\s*#endif\s*return \*error == -EUCLEAN \|\| \*error == -EIO;\s*\}",
+        "reserve failure without credit must not claim cancellation proof")
+    exactly_one(transaction,
+        r"refused = swapz_round091_claim_reserved\(claim, credit\);\s*if \(refused\) \{\s*"
+        r"#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*"
+        r"swapz_scope_observe_simple\(entry, SWAPZ_OBS_REFUSE, 0, refused\);\s*#endif\s*"
+        r"\*error = swapz_shared_storage_cancel_reserved\(ctx->original_storage, credit\);\s*"
+        r"#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*if \(!\*error\) \{\s*"
+        r"swapz_scope_observe_credit\(entry, SWAPZ_OBS_CANCEL, credit\);\s*"
+        r"swapz_scope_observe_simple\(entry, SWAPZ_OBS_FALLBACK, 0, 0\);\s*"
+        r"#if defined\(SWAPZ_ROUND104_INTEGRATION_TEST\)\s*"
+        r"entry->observation_fallback = true;\s*#endif\s*\} else\s*"
+        r"swapz_scope_observe_invalid\(\);\s*#endif\s*return \*error != 0;\s*\}",
+        "exact cancellation before fallback; cancellation failure remains terminal")
+    commit = "*error = swapz_shared_storage_commit_reserved(ctx->original_storage, credit);"
+    if (transaction.count(commit) != 1 or
+            transaction.count("swapz_shared_storage_reserve(") != 1 or
+            transaction.count("swapz_shared_storage_cancel_reserved(") != 1 or
+            transaction.count("swapz_round091_claim_reserved(") != 1 or
+            transaction.count("SWAPZ_OBS_FALLBACK") != 2 or
+            transaction.count("SWAPZ_OBS_CANCEL") != 1 or
+            transaction.count("return ") != 3 or
+            transaction.count("goto ") != 0):
+        raise AssertionError("typed scoped transaction has ambiguous ownership")
+    committed = transaction[transaction.index(commit):]
+    exactly_one(committed, r"return true;\s*\}$", "postclaim commit is always terminal")
+    if ("SWAPZ_OBS_FALLBACK" in committed or
+            "swapz_shared_storage_cancel_reserved(" in committed or
+            transaction.index("return *error != 0;") > transaction.index(commit)):
+        raise AssertionError("postclaim fallback or cancellation")
+    # One guarded witness writer and one descriptor reset, even on reuse.
+    if (source.count("entry->observation_fallback = true;") != 1 or
+            source.count("entry->observation_fallback = false;") != 1):
+        raise AssertionError("fallback witness writer/reset not unique")
+    mapping = exact_function(source, "swapz_map")
+    exactly_one(mapping,
+        r"entry->observation_plain_write = false;\s*entry->observation_fallback = false;\s*"
+        r"entry->observation_claim_lower_failed = false;",
+        "fallback witness reset at descriptor reuse")
+    # Historical unscoped branch retains the same credit and terminal contract.
+    legacy = exact_function(source, "swapz_round091_reserve_claim_commit")
+    exactly_one(legacy,
+        r"\*error = swapz_shared_storage_reserve\(storage, spec, input, &credit\);\s*"
+        r"if \(\*error\)\s*return \*error == -EUCLEAN \|\| \*error == -EIO;\s*"
+        r"if \(try_claim\(context, credit\)\) \{\s*"
+        r"\*error = swapz_shared_storage_cancel_reserved\(storage, credit\);\s*"
+        r"return \*error != 0;\s*\}\s*/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*"
+        r"\*error = swapz_shared_storage_commit_reserved\(storage, credit\);\s*"
+        r"return true;\s*\}$", "legacy credit ownership and terminal commit")
+    if legacy.count("return ") != 3:
+        raise AssertionError("ambiguous legacy terminal ownership")
+    # The accepted clone is the sole completion owner. The original is used
+    # only for MM candidate lookup, never completed by the typed path.
+    candidate = exact_function(source, "swapz_round090_candidate_get")
+    exactly_one(candidate,
+        r"origin = dm_swapz_round090_selected_origin\(ti, bio\);\s*"
+        r"if \(!origin \|\| swapz_mm_candidate_get\(origin, ref\)\)\s*return;",
+        "selected original lookup is distinct from clone completion")
+    claim = exact_function(source, "swapz_round091_claim_reserved")
+    exactly_one(claim,
+        r"selected = dm_swapz_round091_accepted_clone_matches\(ctx->target, entry->bio\) &&",
+        "claim uses retained accepted clone")
+    process = exact_function(source, "swapz_process")
+    exactly_one(process,
+        r"struct swapz_bio_ref \*entry = dm_per_bio_data\(bio, sizeof\(\*entry\)\);\s*"
+        r"#if defined\(SWAPZ_ROUND098_SCOPED_TARGET_TEST\)\s*"
+        r"if \(swapz_round091_process_candidate\(ctx, entry,\s*entry->original_scope_identity != 0\)\)\s*"
+        r"#else\s*if \(swapz_round091_process_candidate\(ctx, entry,\s*"
+        r"swapz_round091_ordered_claim_permitted\(\)\)\)\s*#endif\s*return;\s*\}\s*#endif",
+        "typed terminal return prevents ordinary continuation")
+    completion = exact_function(source, "swapz_complete")
+    release = "swapz_round091_release_candidate(ctx, entry);"
+    if (completion.count(release) != 1 or completion.count("bio_endio(bio);") != 1 or
+            completion.index(release) >= completion.index("bio_endio(bio);") or
+            region.count(release) != 1 or
+            region.count("return true;") != 1 or region.count("return false;") != 2 or
+            len(re.findall(r"\breturn\b", masked_c(region))) != 3):
+        raise AssertionError("typed terminal/release ownership ambiguous")
+    release_body = exact_function(source, "swapz_round091_release_candidate")
+    exactly_one(release_body,
+        r"if \(!entry->original_candidate.broker\)\s*return;\s*"
+        r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*"
+        r"ctx->original_release_ref = entry->original_candidate;\s*"
+        r"#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*"
+        r"ctx->observation_release_operation = entry->observation_operation;\s*"
+        r"ctx->observation_release_descriptor = entry->observation_descriptor;\s*#endif\s*"
+        r"entry->original_candidate = \(struct swapz_ticket_ref\)\{\};\s*"
+        r"entry->original_view = \(struct swapz_ticket_view\)\{\};\s*"
+        r"entry->original_registration_epoch = 0;\s*entry->original_claimed = false;\s*"
+        r"WARN_ON_ONCE\(!queue_work\(system_unbound_wq, &ctx->original_release_work\)\);\s*\}$",
+        "candidate lease transfer and descriptor clear before queued put")
+    release_worker = exact_function(source, "swapz_round090_release_work")
+    exactly_one(release_worker,
+        r"#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*"
+        r"int error = swapz_ticket_put\(&ctx->original_release_ref\);\s*"
+        r"swapz_scope_observe_release\(ctx->observation_release_operation,\s*"
+        r"ctx->observation_release_descriptor, error\);\s*"
+        r"ctx->observation_release_operation = 0;\s*"
+        r"ctx->observation_release_descriptor = 0;\s*"
+        r"if \(WARN_ON_ONCE\(error\)\)\s*return;\s*"
+        r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*#else\s*"
+        r"if \(WARN_ON_ONCE\(swapz_ticket_put\(&ctx->original_release_ref\)\)\)\s*return;\s*"
+        r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*#endif\s*"
+        r"atomic_set_release\(&ctx->original_release_busy, 0\);\s*\}$",
+        "actual candidate put before release slot reuse")
+    # No extra transfer/claim/completion path can be inserted into the typed
+    # owner after the transaction decision.
+    terminal_start = region.index("#if defined(SWAPZ_ROUND098_SCOPED_TARGET_TEST)",
+                                  region.index("swapz_invalidate_read_caches(ctx);"))
+    terminal = region[terminal_start:]
+    if terminal.count("goto decline;") != 2 or terminal.count("goto complete;") != 0:
+        raise AssertionError("unexpected postclaim branch in typed terminal owner")
+
+
 def verify_typed_foreground_commit(source: str) -> None:
     region = typed_commit_region(source)
     # R098 adds an exclusive scoped transaction branch; both real branches
@@ -116,12 +294,15 @@ def verify_typed_foreground_commit(source: str) -> None:
         r"\s*swapz_fail\(ctx, error \? error : -EUCLEAN\);"
         r"\s*if \(!error\)\s*error = -EUCLEAN;\s*\}\s*complete:",
         "typed unclaimed terminal invariant failure is quarantined")
+    guarded = has_guarded_fallback(source)
+    decline = GUARDED_DECLINE if guarded else LEGACY_DECLINE
     exactly_one(region, r"complete:\s*swapz_complete\(entry->bio, error\);\s*return true;"
                  r"\s*decline:\s*#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*"
-                 r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*"
-                 r"if \(entry->observation_operation\)\s*swapz_scope_observe_invalid\(\);"
+                 r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*" + decline +
                  r"\s*#endif\s*swapz_round091_release_candidate\(ctx, entry\);\s*return false;",
                  "typed terminal owner versus ordinary fallback")
+    if guarded:
+        verify_guarded_fallback(source, region)
     if region.count("swapz_complete(") != 1 or region.count(
             "swapz_count_verified_zswap_writeback_commit(") != 1:
         raise AssertionError("typed owner duplicate completion/accounting")
@@ -211,6 +392,40 @@ def replace_pattern_once(source: str, expression: str, new: str) -> str:
     return source[:match.start()] + new + source[match.end():]
 
 
+def verify_guarded_raw_commit(source: str) -> None:
+    """The intervening observer must not modify the authority result."""
+    raw = exact_function(source, "swapz_raw_write")
+    exactly_one(raw,
+        r"bool witness = observed && \(entry->observation_plain_write \|\| entry->observation_fallback\) &&\s*"
+        r"!entry->original_claimed && \(bio->bi_opf & REQ_FUA\);\s*"
+        r"if \(observed && !witness\)\s*swapz_scope_observe_invalid\(\);",
+        "ordinary RAW/FUA witness excludes claimed typed requests")
+    exactly_one(raw,
+        r"finish_error = swapz_finish_raw\(&ctx->authority, transaction, ctx->input_page,\s*"
+        r"completed, error\);\s*error = swapz_preserve_first_error\(error, finish_error\);\s*"
+        r"#if defined\(SWAPZ_ROUND104_INTEGRATION_TEST\)\s*if \(witness\) \{\s*"
+        r"const struct swapz_map \*map = &ctx->maps\[logical\];\s*"
+        r"if \(!error && map->valid && map->raw &&\s*"
+        r"map->start_block == transaction->start_block &&\s*"
+        r"map->generation == transaction->records\[0\]\.generation &&\s*"
+        r"map->payload_length == SWAPZ_BLOCK_BYTES\) \{\s*"
+        r"struct swapz_observation_record record = \{\s*"
+        r"\.event = SWAPZ_OBS_PUBLISH, \.operation = entry->observation_operation,\s*"
+        r"\.extent = entry->observation_extent, \.new_generation = map->generation,\s*"
+        r"\.compressed_length = SWAPZ_BLOCK_BYTES, \.decoded_length = SWAPZ_BLOCK_BYTES,\s*\};\s*"
+        r"memcpy\(record.compressed_sha256, entry->observation_compressed_sha256, 32\);\s*"
+        r"memcpy\(record.page_sha256, entry->observation_compressed_sha256, 32\);\s*"
+        r"if \(logical && logical <= SWAPZ_ROUND094_GENERATION_PAGES\)\s*"
+        r"memset\(&ctx->observation_extent_by_page\[logical - 1U\],\s*"
+        r"0, sizeof\(ctx->observation_extent_by_page\[0\]\)\);\s*"
+        r"swapz_scope_observe_event\(&record, NULL, 0\);\s*\} else \{\s*"
+        r"swapz_scope_observe_invalid\(\);\s*\}\s*\}\s*#endif\s*"
+        r"if \(!error\) \{\s*ctx->raw_pages\+\+;\s*"
+        r"ctx->logical_write_bytes \+= SWAPZ_BLOCK_BYTES;\s*"
+        r"swapz_count_verified_zswap_writeback_commit\(ctx, bio\);\s*\}\s*return error;\s*\}$",
+        "RAW commit hook must follow successful authority finish and non-mutating witness")
+
+
 def verify_strict_phase_a_contract(source: str) -> None:
     exactly_one(source,
         r"#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN\n"
@@ -232,13 +447,16 @@ def verify_strict_phase_a_contract(source: str) -> None:
     if source.count('DMEMIT(" origin_carrier_compiled=1");') != 1 or \
        source.count('DMEMIT(" origin_carrier_compiled=0");') != 1:
         raise AssertionError("origin carrier compilation fallback missing")
-    exactly_one(source,
-        r"swapz_finish_raw\([^;]*\);\s*"
-        r"error\s*=\s*swapz_preserve_first_error\(error,\s*finish_error\);\s*"
-        r"if\s*\(!error\)\s*\{\s*ctx->raw_pages\+\+;\s*"
-        r"ctx->logical_write_bytes\s*\+=\s*SWAPZ_BLOCK_BYTES;\s*"
-        r"swapz_count_verified_zswap_writeback_commit\(ctx,\s*bio\);",
-        "RAW commit hook must follow successful authority finish")
+    if has_guarded_fallback(source):
+        verify_guarded_raw_commit(source)
+    else:
+        exactly_one(source,
+            r"swapz_finish_raw\([^;]*\);\s*"
+            r"error\s*=\s*swapz_preserve_first_error\(error,\s*finish_error\);\s*"
+            r"if\s*\(!error\)\s*\{\s*ctx->raw_pages\+\+;\s*"
+            r"ctx->logical_write_bytes\s*\+=\s*SWAPZ_BLOCK_BYTES;\s*"
+            r"swapz_count_verified_zswap_writeback_commit\(ctx,\s*bio\);",
+            "RAW commit hook must follow successful authority finish")
     exactly_one(source,
         r"ctx->zero_elided_pages\+\+;\s*"
         r"swapz_count_verified_zswap_writeback_commit\(ctx,\s*bio\);\s*\}\s*"
@@ -296,8 +514,10 @@ def run_negative_mutations(source: str) -> int:
         ("sync commit missing", lambda: replace_pattern_once(source,
             sync_hook, "swapz_complete(bio, 0);")),
         ("RAW error counted", lambda: replace_exactly_once(source,
-            "error = swapz_preserve_first_error(error, finish_error);\n\tif (!error) {",
-            "error = swapz_preserve_first_error(error, finish_error);\n\tif (error) {")),
+            "#endif\n\tif (!error) {\n\t\tctx->raw_pages++;" if has_guarded_fallback(source)
+            else "error = swapz_preserve_first_error(error, finish_error);\n\tif (!error) {",
+            "#endif\n\tif (error) {\n\t\tctx->raw_pages++;" if has_guarded_fallback(source)
+            else "error = swapz_preserve_first_error(error, finish_error);\n\tif (error) {")),
         ("zero success count missing", lambda: replace_pattern_once(source,
             zero_hook, "ctx->zero_elided_pages++;")),
         ("commit count ignores origin", lambda: replace_exactly_once(
@@ -369,9 +589,58 @@ def run_scoped_typed_negative_mutations(source: str) -> int:
         ("unclaimed terminal quarantine skipped", lambda: replace_exactly_once(
             source, "swapz_fail(ctx, error ? error : -EUCLEAN);\n\t\tif (!error)",
             "if (!error)")),
-        ("incomplete scoped fallback accepted", lambda: replace_exactly_once(
-            source, "if (entry->observation_operation)\n\t\tswapz_scope_observe_invalid();\n#endif\n\tswapz_round091_release_candidate(ctx, entry);",
+        ("incomplete scoped fallback accepted", lambda: replace_pattern_once(
+            source, (GUARDED_DECLINE if has_guarded_fallback(source) else LEGACY_DECLINE) +
+            r"\s*#endif\s*swapz_round091_release_candidate\(ctx, entry\);",
             "swapz_round091_release_candidate(ctx, entry);\n#endif")),
+    ]
+    return reject_mutations(source, controls)
+
+
+def run_guarded_fallback_negative_mutations(source: str) -> int:
+    """Mutate actual R105 path independently of the 34 historical groups."""
+    if not has_guarded_fallback(source):
+        return 0
+    cancel = "*error = swapz_shared_storage_cancel_reserved(ctx->original_storage, credit);"
+    commit = "*error = swapz_shared_storage_commit_reserved(ctx->original_storage, credit);"
+    release = "swapz_round091_release_candidate(ctx, entry);"
+    controls = [
+        ("postclaim fallback", lambda: replace_exactly_once(
+            source, commit, commit + "\n\treturn false;")),
+        ("missing exact cancel", lambda: replace_exactly_once(source, cancel, "*error = 0;")),
+        ("wrong cancel credit", lambda: replace_exactly_once(
+            source, cancel, cancel.replace(", credit)", ", credit + 1)"))),
+        ("cancel failure falls back", lambda: replace_exactly_once(
+            source, cancel + "\n#if", cancel + "\n\treturn false;\n#if")),
+        ("fallback before cancel", lambda: replace_exactly_once(
+            source, cancel, "entry->observation_fallback = true;\n\t\t" + cancel)),
+        ("duplicate terminal completion", lambda: replace_exactly_once(
+            source, "complete:\n\tswapz_complete(entry->bio, error);",
+            "complete:\n\tswapz_complete(entry->bio, error);\n\tswapz_complete(entry->bio, error);")),
+        ("omitted decline candidate release", lambda: replace_exactly_once(
+            source, release + "\n\treturn false;", "return false;")),
+        ("omitted terminal candidate release", lambda: replace_exactly_once(
+            source, release + "\n#endif", "\n#endif")),
+        ("stale fallback witness", lambda: replace_exactly_once(
+            source, "entry->observation_fallback = false;", "")),
+        ("wrong clone terminal owner", lambda: replace_exactly_once(
+            source, "complete:\n\tswapz_complete(entry->bio, error);",
+            "complete:\n\tswapz_complete(original, error);")),
+        ("inverted decline witness gate", lambda: replace_exactly_once(
+            source, "&& !entry->observation_fallback", "&& entry->observation_fallback")),
+        ("omitted actual candidate put", lambda: replace_exactly_once(
+            source, "int error = swapz_ticket_put(&ctx->original_release_ref);", "int error = 0;")),
+        ("RAW witness accepts claimed typed BIO", lambda: replace_exactly_once(
+            source, "!entry->original_claimed && (bio->bi_opf & REQ_FUA)", "(bio->bi_opf & REQ_FUA)")),
+        ("RAW witness clears authority error", lambda: replace_exactly_once(
+            source, "if (witness) {\n\t\tconst struct swapz_map *map = &ctx->maps[logical];",
+            "if (witness) {\n\t\tconst struct swapz_map *map = &ctx->maps[logical];\n\t\terror = 0;")),
+        ("RAW witness publishes on error", lambda: replace_exactly_once(
+            source, "if (!error && map->valid && map->raw &&", "if (map->valid && map->raw &&")),
+        ("duplicate ordinary fallback witness", lambda: replace_exactly_once(
+            source, "entry->observation_fallback = true;",
+            "swapz_scope_observe_simple(entry, SWAPZ_OBS_FALLBACK, 0, 0);\n"
+            "\t\t\tentry->observation_fallback = true;")),
     ]
     return reject_mutations(source, controls)
 
@@ -503,8 +772,10 @@ def main() -> int:
     legacy_detected = run_negative_mutations(source)
     typed_detected = run_typed_negative_mutations(source)
     scoped_detected = run_scoped_typed_negative_mutations(source)
-    detected = legacy_detected + typed_detected + scoped_detected
+    guarded_detected = run_guarded_fallback_negative_mutations(source)
+    detected = legacy_detected + typed_detected + scoped_detected + guarded_detected
     print(f"PASS: legacy={legacy_detected} typed={typed_detected} scoped_typed={scoped_detected} mutation groups")
+    print(f"PASS: guarded_fallback={guarded_detected} mutation groups")
     compiled = compile_actual_origin_commit_helper(source)
     print(f"PASS: real production-C Phase A source contract; {detected} negative mutations rejected")
     print(f"PASS: {compiled} real C compiler(s) exercised extracted guarded commit helper")
