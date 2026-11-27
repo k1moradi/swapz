@@ -1,0 +1,183 @@
+{
+  "round": 108,
+  "agent": 2,
+  "issue": 226,
+  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "freeze": "f600b79e0e1a812cae4c1c0ae8ab9f68c3d34da3",
+  "freeze_tree": "e577889d015f85115b1dc1a9845e472e95884c01",
+  "task": "32e841f773cdf6fc0519f6747f255d7b4980a4f4",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "6243f45a5f0f8d432bcb3ee5769f227c65ec3345",
+  "source_parent": "32e841f773cdf6fc0519f6747f255d7b4980a4f4",
+  "source_tree": "674c84a848f32a6467436e7848c8993ef40548ce",
+  "qualification_source": "5ed7c52ceb03a503e57783bfc5b08bba8f38c6e6",
+  "qualification_parent": "6243f45a5f0f8d432bcb3ee5769f227c65ec3345",
+  "qualification_tree": "96a8510164d0cca714e9993a0860f5a0a7f3b4d4",
+  "changes": {
+    "src/kernel/native-observation-byte-bridge.c": {
+      "pre": "81b86699c4790672ab6d35f1ac6ddbc70b9a165d",
+      "post": "902507cb065828bfa9a8b732edd61fb26ca2f08d"
+    },
+    "tests/runtime/native/fixtures/round106-private-delivery.c": {
+      "pre": "e7650577ab1142853a88c9277c3a06c4091e6149",
+      "post": "bee7ff71ca2b89996568cebcf18a7f238d7e385a"
+    },
+    "tests/runtime/native/round106-private-delivery-test.py": {
+      "pre": "5cf488b2da37d8523f91aedd0cfd1a2c075f1d99",
+      "post": "9a55e450ab8137b233ac8c9dcbcc45d6c3500f18"
+    },
+    ".github/workflows/phase-a-round102-native-byte-collector-noauth.yml": {
+      "pre": "e8ec80a40b2cf77730469359fdde411156d8edcf",
+      "post": "66b642572ff5a33e73fbb19b2048f403fb58452f"
+    },
+    "tests/runtime/native/fixtures/round108-terminal-byte.c": {
+      "pre": null,
+      "post": "8ecb8105291825ef6f16f9ca654993819c59903c"
+    },
+    "tests/tools/round108-terminal-byte-mutants.py": {
+      "pre": null,
+      "post": "3a7acbed2548bb1a7a99f41621a93a9a8ab672cb"
+    }
+  },
+  "immutable_pins": {
+    "integration_h": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
+    "bridge_h": "8105f87229b3aac1d0d3f9798a59915af0232526",
+    "owner_c": "088b9ba8ad59cff94510dbd0452df734c96590bb",
+    "owner_h": "dad3cbe3ff93ef2a2bf56bb2b7eef4a6a64e60cb",
+    "collector_c": "d363f40f537722783777956f8920415b97639b93",
+    "collector_h": "75a07d2913f8d7dd8071234c98463d444f98d9bd",
+    "adapter_c": "00700206f1c6df7e0494cdbfe9da86ec209b5ce3",
+    "adapter_h": "ffa547fbecad79b3fabf0ded4bb182c201e4a33d",
+    "controller_c": "0ea943f55449cacae473c182f33e75c48eb371bb"
+  },
+  "standards": {
+    "source_before": "87075de87c2668006077aac4e4eeb571c002f47b",
+    "source_after": "fa5c52c0faffca01b22a7a2cba2b253511f8240a",
+    "corrected": "3ca5c4cba656aa9d7ffaa7cee8cf584935423d0c",
+    "source_before_bytes": 1935222,
+    "source_after_bytes": 1936753,
+    "exact_prefix_verified": true
+  },
+  "publication": {
+    "main_only": true,
+    "force": false,
+    "expected_head_verified": true,
+    "source_readback": "6243f45a5f0f8d432bcb3ee5769f227c65ec3345",
+    "correction_readback": "5ed7c52ceb03a503e57783bfc5b08bba8f38c6e6",
+    "no_peer_implementation": true
+  },
+  "first_run": {
+    "id": 46029977657,
+    "source": "6243f45a5f0f8d432bcb3ee5769f227c65ec3345",
+    "attempt": 1,
+    "conclusion": "failure",
+    "jobs": 0,
+    "first_error": "Malformed workflow YAML tail from replacement-string expansion, found by exact blob readback; no job or compiler executed."
+  },
+  "hosted": {
+    "run": 46030111164,
+    "job": 140611454673,
+    "attempt": 1,
+    "source": "5ed7c52ceb03a503e57783bfc5b08bba8f38c6e6",
+    "status": "in_progress",
+    "conclusion": null,
+    "steps": [
+      {
+        "name": "Set up job",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Source, frozen oracle and complete standards prefix",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Provision real kernel build prerequisites on hosted runner",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Changed private delivery and actual frozen transition contracts",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "name": "Directed changed bridge object only, exact Linux SMP generated headers",
+        "status": "pending",
+        "conclusion": null
+      },
+      {
+        "name": "Retain bounded redacted evidence only",
+        "status": "pending",
+        "conclusion": null
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null
+      }
+    ],
+    "first_error": null,
+    "host_checks": null,
+    "mutants_killed": null,
+    "native_object": null,
+    "config_sha256": null,
+    "artifact": null
+  },
+  "planned": {
+    "host_compilers": [
+      "GCC",
+      "Clang"
+    ],
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ],
+    "strict_werror": true,
+    "mutants": [
+      "pending_finish",
+      "unrepresented",
+      "late_finish_internal",
+      "quarantine_debt",
+      "close_pending"
+    ],
+    "native": "changed bridge object only",
+    "current_controller": "source shape only",
+    "historical_extraction": "R106 actual historical producer transition functions with modeled primitives"
+  },
+  "local": {
+    "git_checkout": "BLOCKED_DNS",
+    "compiled": false
+  },
+  "limitations": [
+    "Host and native directed results not yet qualified",
+    "No actual native runtime/terminal CLEANUP or workload provenance",
+    "White-box impossible debt is test-only; no production setter",
+    "Historical claimed-error oracle unchanged; nonzero quarantine refuses current private delivery",
+    "A10 owns full build; no full link by A2"
+  ],
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO",
+  "manual_dispatch": false,
+  "activation": false
+}
