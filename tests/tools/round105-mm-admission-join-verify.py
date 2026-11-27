@@ -23,9 +23,9 @@ FIXTURE = ROOT / "tests/runtime/native/fixtures/round105-mm-admission-join.c"
 PATCHES = (
     ("round105-original-mm-exact-query-export.patch", "3048e05e3f594dbaa6a10241fe1fa9c6092fbb54",
      {TERMINAL: ("1ecc86d30f20790f1fae7506a3f55d612200831a", "2bfc139f380461c71da78a8c7f9469d1e7eb0b22")}),
-    ("round105-original-mm-terminal-correlation.patch", "183cbc21e1004a8d75086f4e165e436bfb901306",
+    ("round105-original-mm-terminal-correlation.patch", "ff20785a8b12780d94778b49aeaf0526ebfa1b80",
      {TERMINAL: ("2bfc139f380461c71da78a8c7f9469d1e7eb0b22", "b0acebd01b19ea0900300a609ffbf9448aec51d3")}),
-    ("round105-original-mm-admission-join.patch", "8c9c73bcb017202efb049e85da116443f848ffff",
+    ("round105-original-mm-admission-join.patch", "c7870a4dca498b08b5fe42ab1d37325c6cffdd44",
      {TERMINAL: ("b0acebd01b19ea0900300a609ffbf9448aec51d3", "697f3c9fc51738fedabc58cefc4eee6fddc8358c"),
       MM: ("e088dd706763bec377d09a81905cf5de9b371c6a", "058389456ee1586f5a26d40f78cd5cde99312060"),
       SWAPFILE: ("031a93193886b093045e4aa15456016da49a7a43", "d20a7f0003405bd1450cc52af63a773c91ee86b6"),

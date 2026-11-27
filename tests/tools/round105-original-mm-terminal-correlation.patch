@@ -2,41 +2,22 @@ diff --git a/mm/swapz-trial-terminal.inc b/mm/swapz-trial-terminal.inc
 index 2bfc139f380461c71da78a8c7f9469d1e7eb0b22..b0acebd01b19ea0900300a609ffbf9448aec51d3 100644
 --- a/mm/swapz-trial-terminal.inc
 +++ b/mm/swapz-trial-terminal.inc
-@@ -147,12 +147,17 @@
- #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
- 	struct swapz_trial_debt_slot *slot;
- 	struct swapz_observation_record record = {};
+@@ -149,0 +150,1 @@
 +	bool missing_correlation = false;
- #endif
- 
- 	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
- #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
- 	slot = swapz_trial_debt_find(&swapz_mm_terminal_debt, bio, SWAPZ_TRIAL_DM);
+@@ -155,1 +156,5 @@
 -	if (slot && slot->operation && slot->original)
 +	/* An admitted origin without final DM correlation is evidence loss,
 +	 * not permission to manufacture an ACK or skip its real callback. */
 +	missing_correlation = slot && slot->observed &&
 +		(!slot->operation || !slot->original);
 +	if (slot && slot->observed && slot->operation && slot->original)
- 		record = (struct swapz_observation_record){
- 			.event = SWAPZ_OBS_UPPER_ENDIO, .operation = slot->operation,
- 			.original = slot->original,
-@@ -165,9 +170,9 @@
- 	bio->bi_end_io = endio;
- 	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
- #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
+@@ -168,1 +173,1 @@
 -	if (record.operation)
 +	if (ticket && record.operation)
- 		swapz_mm_observation_emit(&record);
+@@ -170,1 +175,1 @@
 -	if (!ticket)
 +	if (!ticket || missing_correlation)
- 		swapz_trial_byte_invalidate();
- #endif
- 	if (endio)
-@@ -271,8 +276,17 @@
- #endif
- 	    !(sector & 7) && sector >= scope->first_sector &&
- 	    sector - scope->first_sector <= scope->sector_count - 8) {
+@@ -274,2 +279,11 @@
 -		slot->observed = true;
 -		matched = true;
 +		/* Keep callback debt after swapoff starts, but never mint a
@@ -50,6 +31,3 @@ index 2bfc139f380461c71da78a8c7f9469d1e7eb0b22..b0acebd01b19ea0900300a609ffbf944
 +		else
 +			invalidate = true;
 +#endif
- 	}
- 	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
- 	rcu_read_unlock();

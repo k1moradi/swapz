@@ -2,10 +2,7 @@ diff --git a/mm/swapz-trial-terminal.inc b/mm/swapz-trial-terminal.inc
 index b0acebd01b19ea0900300a609ffbf9448aec51d3..697f3c9fc51738fedabc58cefc4eee6fddc8358c 100644
 --- a/mm/swapz-trial-terminal.inc
 +++ b/mm/swapz-trial-terminal.inc
-@@ -7,6 +7,24 @@
- static struct file *swapz_mm_area_file;
- static bool swapz_mm_area_invalidated, swapz_mm_area_drained;
- static bool swapz_mm_terminal_closed, swapz_mm_terminal_joined;
+@@ -9,0 +10,18 @@
 +/* Protected by the cold scope mutex. Detached retains only the exact
 + * scalar identity and independent broker cap, not an open mapper file. */
 +static bool swapz_mm_scope_files_detached;
@@ -24,25 +21,13 @@ index b0acebd01b19ea0900300a609ffbf9448aec51d3..697f3c9fc51738fedabc58cefc4eee6f
 +	       table_epoch == swapz_mm_scope_storage.table_epoch &&
 +	       target_epoch == swapz_mm_scope_storage.target_epoch;
 +}
- 
- #ifdef SWAPZ_ROUND104_INTEGRATION_TEST
- /* Published scope storage and mapper file remain live until observation
-@@ -341,10 +359,7 @@
- 	int error = -ESTALE;
- 
- 	mutex_lock(&swapz_mm_scope_lock);
+@@ -344,4 +362,1 @@
 -	if (!swapz_mm_scope_file || identity != swapz_mm_scope_storage.identity ||
 -	    session != swapz_mm_scope_storage.session ||
 -	    table_epoch != swapz_mm_scope_storage.table_epoch ||
 -	    target_epoch != swapz_mm_scope_storage.target_epoch)
 +	if (!swapz_mm_trial_scope_retained_exact(identity, session, table_epoch, target_epoch))
- 		goto unlock;
- 	error = -EBUSY;
- 	if (swapz_mm_scope_transition || !swapz_mm_scope_capture_stopped)
-@@ -373,5 +388,127 @@
- 	swapz_mm_scope_transition = false;
- unlock:
- 	mutex_unlock(&swapz_mm_scope_lock);
+@@ -375,0 +391,122 @@
 +	return error;
 +}
 +
@@ -165,8 +150,6 @@ index b0acebd01b19ea0900300a609ffbf9448aec51d3..697f3c9fc51738fedabc58cefc4eee6f
 +	swapz_mm_scope_transition = false;
 +unlock:
 +	mutex_unlock(&swapz_mm_scope_lock);
- 	return error;
- }
 diff --git a/mm/zswap.c b/mm/zswap.c
 index e088dd706763bec377d09a81905cf5de9b371c6a..058389456ee1586f5a26d40f78cd5cde99312060 100644
 --- a/mm/zswap.c
