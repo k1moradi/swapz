@@ -1,14 +1,7 @@
 name: Round104 A3 controller target integration AUTH0
+# Immutable historical R104 source qualification; do not redispatch on R105.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/dm-target.c'
-      - 'src/kernel/native-observation-controller.c'
-      - 'src/kernel/native-observation-controller.h'
-      - 'tests/tools/round104-controller-target-verify.py'
-      - 'tests/runtime/native/fixtures/round104-controller-target.c'
-      - '.github/workflows/phase-a-round104-controller-target-noauth.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

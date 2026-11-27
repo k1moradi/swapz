@@ -20,6 +20,8 @@ int swapz_trial_controller_stop_capture(u64 identity);
 
 #if defined(SWAPZ_ROUND104_INTEGRATION_TEST)
 struct file;
+struct module;
+struct dm_target;
 struct swapz_mm_trial_scope;
 struct swapz_trial_observation_scope;
 
@@ -30,10 +32,33 @@ struct swapz_trial_observation_scope;
 typedef int (*swapz_trial_target_install)(void *context,
 		const struct swapz_mm_trial_scope *scope, struct file *mapper_file,
 		u64 registration_epoch);
-int swapz_trial_controller_begin(const struct swapz_mm_trial_scope *scope,
+/* A single module-lifetime registration, never a target pointer or module
+ * self-pin. Withdrawal synchronously fences calls. The positive built-in
+ * entry requires independent live table/target refs and lifecycle exclusion;
+ * registration alone grants no admission. No userspace caller is supplied.
+ */
+struct swapz_trial_target_ops {
+	struct module *owner;
+	/* Read-only local preflight before recorder/MM publication. */
+	swapz_trial_target_install validate;
+	swapz_trial_target_install install;
+	int (*retire)(void *context, const struct swapz_trial_retained_scope *retained);
+};
+int swapz_trial_target_register(const struct swapz_trial_target_ops *ops);
+int swapz_trial_target_unregister(const struct swapz_trial_target_ops *ops);
+int swapz_trial_controller_begin_registered(const struct swapz_mm_trial_scope *scope,
 		const struct swapz_trial_observation_scope *observation,
-		struct file *mapper_file, size_t capacity,
-		swapz_trial_target_install install, void *context);
+		struct file *mapper_file, size_t capacity, struct dm_target *target);
+/* Only for an independently retained, already drained final table, before
+ * destruction can be blocked by the retained mapper file. Not normal suspend.
+ */
+int swapz_trial_controller_retire_registered(struct dm_target *target,
+		const struct swapz_trial_retained_scope *retained);
+/* Exact post-publication failed install only; no target was installed.
+ * Independent actual MM join and old-owner retirement remain required.
+ * Ambiguous/failed MM publication is not recoverable by this entry.
+ */
+int swapz_trial_controller_recover_uninstalled(const struct swapz_trial_retained_scope *retained);
 /* Exact external witness only, not target debt, revoke or retirement. */
 int swapz_trial_controller_join_external(const struct swapz_trial_retained_scope *retained);
 /* Negative-only exact transitions. Caller has closed target admission and

@@ -34,6 +34,7 @@ EXPORT_SYMBOL_GPL(swapz_trial_controller_stop_capture);
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/mutex.h>
+#include <linux/module.h>
 
 /* Built-in lifetime, serialized control, one shot. No retained callback,
  * target/module/table pointer or caller-owned scope pointer. After recorder
@@ -44,10 +45,11 @@ static struct swapz_mm_trial_scope swapz_controller_scope;
 static struct file *swapz_controller_mapper;
 static u64 swapz_controller_registration;
 static bool swapz_controller_used, swapz_controller_published;
+static bool swapz_controller_installed;
 static bool swapz_controller_external_joined, swapz_controller_mm_revoked;
 static int swapz_controller_first_error;
 
-int swapz_trial_controller_begin(const struct swapz_mm_trial_scope *scope,
+static int swapz_trial_controller_begin(const struct swapz_mm_trial_scope *scope,
 		const struct swapz_trial_observation_scope *observation,
 		struct file *mapper_file, size_t capacity,
 		swapz_trial_target_install install, void *context)
@@ -114,8 +116,10 @@ int swapz_trial_controller_begin(const struct swapz_mm_trial_scope *scope,
 		goto retain;
 	}
 	error = install(context, &selected, mapper_file, observation->registration_epoch);
-	if (!error)
+	if (!error) {
+		swapz_controller_installed = true;
 		goto put_area;
+	}
 retain:
 	if (!swapz_controller_first_error)
 		swapz_controller_first_error = error;
@@ -130,6 +134,95 @@ unlock:
 	mutex_unlock(&swapz_controller_lock);
 	if (area_file)
 		fput(area_file);
+	return error;
+}
+
+/* Registration is distinct from the controller's one-shot lock. Only the
+ * synchronous rendezvous takes both, registration -> controller. The caller
+ * already owns the live table and lifecycle, not any controller/target spinlock.
+ * No table/target/file is kept by the registry; a module ref lasts only across
+ * each callback. Registration cannot start a scope.
+ */
+static DEFINE_MUTEX(swapz_target_ops_lock);
+static const struct swapz_trial_target_ops *swapz_target_ops;
+
+int swapz_trial_target_register(const struct swapz_trial_target_ops *ops)
+{
+	int error = -EBUSY;
+
+	if (!ops || !ops->validate || !ops->install || !ops->retire)
+		return -EINVAL;
+	mutex_lock(&swapz_target_ops_lock);
+	if (!swapz_target_ops) {
+		swapz_target_ops = ops;
+		error = 0;
+	}
+	mutex_unlock(&swapz_target_ops_lock);
+	return error;
+}
+EXPORT_SYMBOL_GPL(swapz_trial_target_register);
+
+int swapz_trial_target_unregister(const struct swapz_trial_target_ops *ops)
+{
+	int error = -ESTALE;
+
+	mutex_lock(&swapz_target_ops_lock);
+	if (ops && swapz_target_ops == ops) {
+		swapz_target_ops = NULL;
+		error = 0;
+	}
+	mutex_unlock(&swapz_target_ops_lock);
+	return error;
+}
+EXPORT_SYMBOL_GPL(swapz_trial_target_unregister);
+
+/* Private built-in rendezvous; no exported positive entry. The original
+ * caller still must acquire independent admission and live target/table refs.
+ */
+int swapz_trial_controller_begin_registered(const struct swapz_mm_trial_scope *scope,
+		const struct swapz_trial_observation_scope *observation,
+		struct file *mapper_file, size_t capacity, struct dm_target *target)
+{
+	const struct swapz_trial_target_ops *ops;
+	struct module *owner = NULL;
+	int error = -ENODEV;
+
+	if (!target || !scope || !observation || !mapper_file)
+		return -EINVAL;
+	mutex_lock(&swapz_target_ops_lock);
+	ops = swapz_target_ops;
+	if (ops && try_module_get(ops->owner)) {
+		owner = ops->owner;
+		error = ops->validate(target, scope, mapper_file,
+				observation->registration_epoch);
+		if (!error)
+			error = swapz_trial_controller_begin(scope, observation, mapper_file,
+					capacity, ops->install, target);
+	}
+	mutex_unlock(&swapz_target_ops_lock);
+	if (owner)
+		module_put(owner);
+	return error;
+}
+
+int swapz_trial_controller_retire_registered(struct dm_target *target,
+		const struct swapz_trial_retained_scope *retained)
+{
+	const struct swapz_trial_target_ops *ops;
+	struct module *owner = NULL;
+	int error = -ENODEV;
+
+	if (!target || !retained || !retained->identity)
+		return -EINVAL;
+	mutex_lock(&swapz_target_ops_lock);
+	ops = swapz_target_ops;
+	if (ops && try_module_get(ops->owner)) {
+		owner = ops->owner;
+		error = ops->retire(target, retained);
+	}
+	mutex_unlock(&swapz_target_ops_lock);
+	if (owner)
+		module_put(owner);
 	return error;
 }
 
@@ -253,4 +346,27 @@ unlock:
 	return error;
 }
 EXPORT_SYMBOL_GPL(swapz_trial_controller_finish);
+
+/* Recovery of the precisely known failed target installation. No target
+ * pointer is retained and a successful install can never use this path.
+ * A failed/ambiguous MM publish is deliberately left retained. */
+int swapz_trial_controller_recover_uninstalled(const struct swapz_trial_retained_scope *retained)
+{
+	int error = -ESTALE;
+
+	mutex_lock(&swapz_controller_lock);
+	if (!swapz_controller_installed && swapz_controller_matches_locked(retained)) {
+		error = swapz_controller_join_locked(retained);
+		if (!error && !swapz_controller_mm_revoked) {
+			error = swapz_mm_trial_scope_revoke(retained->identity);
+			if (!error)
+				swapz_controller_mm_revoked = true;
+		}
+	}
+	swapz_controller_record_error(error);
+	mutex_unlock(&swapz_controller_lock);
+	/* No target was installed. Its independently closed old owner, not
+	 * this failed startup, must prove that all target cap debt is gone. */
+	return error ? error : swapz_trial_controller_finish(retained);
+}
 #endif
