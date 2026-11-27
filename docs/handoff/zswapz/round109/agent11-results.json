@@ -1,0 +1,161 @@
+{
+  "round": 109,
+  "agent": 11,
+  "issue": 227,
+  "status": "PASS_SCALAR_PREFLIGHT_HOST_AND_DIRECTED_ONLY_ADMISSION_BLOCKED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "freeze": "6394bf9aec7709744caf294f8bd7e935ca481dcd",
+  "freeze_tree": "780198718469ec268f9b588ad5b36c63bc1b1806",
+  "task": "4f48a24e3282cbab147acd62fe9ca751c8fd1ae9",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "publication": {
+    "source": "57ec2de08548f7e6a58cbe630ff1fc89e7537902",
+    "parent": "af88e2f5f1622bc37b48db4bd2ad994a648a3eaa",
+    "tree": "b705c035612f2765f5478db4dc77eb912ac0f141",
+    "main": true,
+    "expected_head": true,
+    "nonforce": true,
+    "readback": true,
+    "standards_old": "6274149988a546a359ec9ab4b5c69ae7d744cda1",
+    "standards_old_bytes": 1940156,
+    "standards_new": "e2b6e0fccbad4b06f721db272b417f77203cf1ac",
+    "standards_exact_prefix_verified": true
+  },
+  "overlay": {
+    "path": "tests/tools/round109-original-mm-area-preflight.patch",
+    "blob": "3c38d165804cb62c7f0d99e27e1ed303987ec90e",
+    "images": {
+      "mm/swapfile.c": [
+        "d20a7f0003405bd1450cc52af63a773c91ee86b6",
+        "8b9826f09f7b3127d4cb739a072102763d8e1ecd"
+      ],
+      "include/linux/swapz_mm_carrier.h": [
+        "bd88db905e5009e0e6161cad1d09b6d33bde2560",
+        "8d369c402780e06ffd317919acdd6bbd4802646e"
+      ]
+    },
+    "guard": "SWAPZ_ROUND109_AREA_PREFLIGHT_TEST",
+    "connector_exact_apply_reverse_reapply": "PASS",
+    "guard_off": "BYTE_EXACT",
+    "historical_area_get": "BYTE_EXACT",
+    "mm_zswap_unchanged": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+    "dm_unchanged": "332fc3faf1ad05f3756bf7d90b476f28bd50a012",
+    "retained_refs": "NONE",
+    "installed_caller": false,
+    "exported": false,
+    "authority": "NONE"
+  },
+  "fixture": {
+    "blob": "af24dc4430f157f8ca23707354ad948d365f1ef0",
+    "sha256": "adfa854a77cf65b2382bf0661a5fed3389d2c4eb288aa81235bca64ffcea7768",
+    "extracted_blob": "c439ff707fd4b1e7bb1fa2934ed56c89b77d6b6d",
+    "extracted_sha256": "618e2790221af458d39943be5134a29dcc81cab05cab73967be858d53280712c",
+    "exact_local_git_hash_object_verified": true
+  },
+  "verifier_blob": "22034b79d0c8d590337a3eaff358c6977b965c13",
+  "workflow_blob": "baf3386974bbcd6871ef9b8c40aa3bb19faa0898",
+  "historical_stage_helper": "b6139ba044ce06c71e732187905dab8572415e90",
+  "host": {
+    "status": "PASS_ACTUAL_EXTRACTED_HOST_ONLY",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "flags": "-std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-omit-frame-pointer -fno-pie -no-pie -fsanitize=address,undefined -fno-sanitize-recover=all",
+    "cases_per_compiler": {
+      "guard-off-historical": 24,
+      "guard-on-historical": 24,
+      "invalid": 79,
+      "range": 139,
+      "mismatch": 140,
+      "races": 59
+    },
+    "checks_per_compiler": 465,
+    "total_checks": 930,
+    "mutants_per_compiler": 13,
+    "total_mutant_rejections": 26,
+    "mutant_exit": 77,
+    "mutant_failure_lines": {
+      "missing-epoch": 134,
+      "retained-reference": 137,
+      "no-output-clear": 135,
+      "page-zero": 134,
+      "range-bound": 134,
+      "overflow": 134,
+      "capacity": 134,
+      "area-max": 134,
+      "mapping": 134,
+      "offline": 134,
+      "partition": 134,
+      "read-only": 134,
+      "path-file": 76
+    },
+    "mutant_results_sha256": "b750470da36d98b40c25d8254ce0276f7323354bbbfe6ae342361f3f73151146",
+    "first_error": null,
+    "limits": "Actual extracted functions and historical counted get; explicit host substitutes for locks, active list, block/file identities, epoch and close. No actual native race execution."
+  },
+  "native": {
+    "status": "PASS_CHANGED_SWAPFILE_OBJECT_GUARD_ON_AND_OFF",
+    "run": 46045775835,
+    "job": 140664551572,
+    "head_sha": "57ec2de08548f7e6a58cbe630ff1fc89e7537902",
+    "observed_status": "completed_success",
+    "observed_steps": "all steps success; exact hosted stage, host and directed objects PASS",
+    "full_stage": "PASS_EXACT_APPLY_REVERSE_REAPPLY",
+    "config_sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf",
+    "objects": {
+      "guard-off": {
+        "blob": "594e7d059c021e812dd6b5aa8c6fbf1231a157cd",
+        "sha256": "be5ce6e7257c5403c811d42d6ccad3c73b7941f5c443a7e6df7ee5bc5d8cee69",
+        "bytes": 71928
+      },
+      "guard-on": {
+        "blob": "b04d58afe40d707db8ba925a9ee64ad48f26db8c",
+        "sha256": "b88e021e7219ed30f7662020bef0b0207b6c875e78ebe6e13f6bf1e335524236",
+        "bytes": 73432
+      }
+    },
+    "artifact": {
+      "id": 15222935474,
+      "bytes": 171440,
+      "sha256": "f8106bd8a48e6a047aecb6623a08181da9a204ab6d46de7419182d4571175fff",
+      "verification": "downloaded archive; exact digest, CRC clean, results source/config/object digests independently checked"
+    },
+    "request": "mm/swapfile.o guard on/off only, SMP TREE_RCU NR_CPUS4 default-off",
+    "full_link": "NOT_RUN",
+    "first_error": null,
+    "local_blocker": "git ls-remote exit128 Could not resolve host github.com; exact upstream and historical overlay reconstruction via connector",
+    "logs": "terminal logs inspected, R109_A11_PASS AUTH0 HOST_AND_DIRECTED_ONLY",
+    "dispatch": "one automatic changed-source workflow, no manual rerun",
+    "config_bytes": 46577,
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "host_compilers": {
+      "gcc": "13.3.0",
+      "clang": "18.1.3"
+    },
+    "host_assertions": 930,
+    "host_mutants_rejected": 26
+  },
+  "decisions": {
+    "separate_query": "Historical area_get and final scope epoch check untouched; separate stricter read-only validation avoids behavior change. No DM topology proof inferred from a supplied block file; future trusted caller must independently hold exact mapper file, prove mapper/table identity and admission.",
+    "output": "Both scalar fields zero on error with nonnull output; type zero is valid, nonzero epoch distinguishes success.",
+    "snapshot": "swap_lock protects active list, SWP_WRITEOK, area file and epoch transitions. Read capacity once; capacity/RO may change independently; scalar result can stale immediately and must be revalidated at final admission.",
+    "no_new_runtime": "No installed caller, no pointer/reference returned or positive grant; original AUTH0 denial unchanged."
+  },
+  "safety": {
+    "full_connected_build": false,
+    "duplicate_dispatch": false,
+    "vm": false,
+    "boot": false,
+    "install": false,
+    "module_load": false,
+    "activation": false,
+    "physical_mutation": false,
+    "branches": false,
+    "prs": false,
+    "same_round_peer_dependencies": false
+  },
+  "acceptance_owner": "Agent 1"
+}
