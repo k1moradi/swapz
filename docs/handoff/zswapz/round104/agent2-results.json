@@ -1,0 +1,195 @@
+{
+  "round": 104,
+  "agent": 2,
+  "issue": 222,
+  "status": "PASS_GUARDED_BRIDGE_HOST_AND_DIRECTED_OBJECTS_ONLY",
+  "freeze": "a9094f96e3fb2841ed0fa553102d98699950221d",
+  "freeze_tree": "554b80152c9ea277cd6e0f63069bfb8f8ba671b6",
+  "task": "3ec158e2870170bd58fc13dfc340722a89f51cae",
+  "task_header_blob": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+  "source_parent": "3ec158e2870170bd58fc13dfc340722a89f51cae",
+  "source_tree": "d1e187b3ed918e16abae704aec377c32321a74db",
+  "changes": {
+    "src/kernel/native-observation-owner.c": {
+      "pre": "e99ffb797f02b355b23358d663339fc8d3a49d03",
+      "post": "50271d7a08763efff55b8767489ea323a3dbf381"
+    },
+    "src/kernel/native-observation-owner.h": {
+      "pre": "9e44829f3920167829fc364fdb6a95bfa0930805",
+      "post": "68750e6b7e78f5bb236c968b3694a429bff6813f"
+    },
+    "src/kernel/native-observation-byte-collector.c": {
+      "pre": "32311b53d289ca422530eabdf1f98b52779c5295",
+      "post": "d363f40f537722783777956f8920415b97639b93"
+    },
+    "src/kernel/native-observation-byte-collector.h": {
+      "pre": "b3c83e38726e3a202700d0d41bc13f32c8066013",
+      "post": "75a07d2913f8d7dd8071234c98463d444f98d9bd"
+    },
+    "src/kernel/native-observation-byte-bridge.c": {
+      "pre": null,
+      "post": "6b3446f6b90257e704052dbf5a73979c64b6399f"
+    },
+    "src/kernel/native-observation-byte-bridge.h": {
+      "pre": null,
+      "post": "8105f87229b3aac1d0d3f9798a59915af0232526"
+    },
+    "tests/runtime/native/fixtures/round104-byte-bridge.c": {
+      "pre": null,
+      "post": "d67233b466f22a031a16893c1b9ee6a81e9ae56d"
+    },
+    "tests/runtime/native/round104-byte-bridge-test.py": {
+      "pre": null,
+      "post": "2323927f1632468bc81173fc0f28e4fdcba9dc2e"
+    },
+    ".github/workflows/phase-a-round102-native-byte-collector-noauth.yml": {
+      "pre": "1cfa57d953c2356c4f98573805a171d57ec90e8c",
+      "post": "ddad40c757ebc5a1b644478f2e17c27142048b2d"
+    },
+    ".github/workflows/phase-a-round097-observation-owner-host-noauth.yml": {
+      "pre": "0b054f3fb47e7f5579cfbe711dceeaa2c460a8c0",
+      "post": "213f96331efb95240f2cbad04ead497a4016938c"
+    }
+  },
+  "selected_adapter": {
+    "c": "00700206f1c6df7e0494cdbfe9da86ec209b5ce3",
+    "h": "ffa547fbecad79b3fabf0ded4bb182c201e4a33d",
+    "unchanged": true
+  },
+  "standards": {
+    "before": "514cff1ab80ade146c213a606a4575049219d625",
+    "after": "a253b3423c55107140ddaccc3568d6721a1f710f",
+    "parent_bytes": 1906316,
+    "current_bytes": 1909502,
+    "exact_complete_prefix": true
+  },
+  "publication": {
+    "branch": "main",
+    "force": false,
+    "expected_parent": "3ec158e2870170bd58fc13dfc340722a89f51cae",
+    "verified_readback": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+    "no_peer_source": true
+  },
+  "r103": {
+    "source": "2d9d611cafe65507e901368d55a0511a626b4b38",
+    "run": 45927027376,
+    "job": 140270642307,
+    "attempt": 1,
+    "terminal": "SUCCESS",
+    "private_checks_each": 17,
+    "directed_objects": "PASS",
+    "artifact": {
+      "id": 15167800976,
+      "bytes": 29211,
+      "sha256": "e0a3a22326c86b5b06b8ff793d522ef9bcadcf9a0ac23f86286da4e1f347d78d",
+      "archive_independently_extracted": false
+    }
+  },
+  "r097_repair": {
+    "previous_failed_job": 140270642587,
+    "previous_first_error": "AssertionError: src/kernel/native-observation-adapter.c",
+    "historical_pin_source": "f7cb6969db189c03d592a89cae43e5464946c716",
+    "current_adapter_source": "a9094f96e3fb2841ed0fa553102d98699950221d",
+    "run": 45954371135,
+    "job": 140357334709,
+    "attempt": 1,
+    "conclusion": "success",
+    "source": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+    "checks_each": {
+      "clean": 237,
+      "join": 118,
+      "overflow": 63,
+      "invalid": 63,
+      "total": 481
+    },
+    "current_scope_and_correlation_cases": 22,
+    "artifact": {
+      "id": 15178082187,
+      "bytes": 2069,
+      "sha256": "95661a10ed208f0bb1f4d44d530e2efefa734f21d3bcc11e9bf06e1b393480a9",
+      "archive_independently_verified": true
+    },
+    "first_error": null
+  },
+  "hosted": {
+    "run": 45954371230,
+    "job": 140357335343,
+    "attempt": 1,
+    "source": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+    "conclusion": "success",
+    "host": {
+      "gcc": "13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1)",
+      "clang": "18.1.3 (Ubuntu 1ubuntu1)",
+      "checks_each": 17,
+      "clean_operations": 7,
+      "claimed_error_operations": 8,
+      "flags": "-std=c2x -O2 -g -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie -pthread",
+      "host_substitutes": true
+    },
+    "directed": {
+      "status": "PASS",
+      "compiler": "GCC 13.3.0",
+      "arch": "x86_64",
+      "config": {
+        "bytes": 40737,
+        "sha256": "72b6e69c29a768b51e678662ff577d9426b32542827099677fd2bf26e6da453d",
+        "SMP": true,
+        "TREE_RCU": true,
+        "NR_CPUS": 4,
+        "MODULES": true,
+        "TINY_RCU": false
+      },
+      "objects": {
+        "native-observation-adapter.o": {
+          "bytes": 7768,
+          "sha256": "3bc7ca9ad32af45cf02aa49b185ea20727d3a7ce9da0d3a83d53305e1763f732"
+        },
+        "native-observation-byte-bridge.o": {
+          "bytes": 19048,
+          "sha256": "d914dd010b567db817388bc047fa74649425f21002f73f65f91c093b108a57e2"
+        },
+        "native-observation-byte-collector.o": {
+          "bytes": 10200,
+          "sha256": "7405a5143e8a7be262fc470d18cb799929dac2b6bc86e7fa4f875d3df4b0b0be"
+        },
+        "native-observation-owner.o": {
+          "bytes": 10432,
+          "sha256": "a349da9a55788ea56ad2c7eeb70f4d67aaba9bf8a3d0f6c27ae55a43633e3a6c"
+        }
+      },
+      "elf_type": 1,
+      "elf_machine": 62,
+      "owner_bridge_imports_verified": true,
+      "task_symbols_exported": true,
+      "kernel_user_seam_absent": true,
+      "peer_link": "NOT_RUN"
+    },
+    "artifact": {
+      "id": 15177987430,
+      "bytes": 35266,
+      "sha256": "adc63d8361c798dc9bccfbc1b392d2b9f6ebc6cd07ec1541c2b6c33abb1b00bb",
+      "archive_independently_verified": true,
+      "object_hashes_independently_verified": true,
+      "source_parent_and_blobs_verified": true
+    },
+    "first_error": null,
+    "manual_dispatch": false
+  },
+  "local": {
+    "git_exit": 128,
+    "first_environment_error": "Could not resolve host: github.com",
+    "source_compile": "NOT_RUN_LOCALLY",
+    "artifact_inspection": "PASS"
+  },
+  "native_capture": false,
+  "connected_link": "NOT_RUN",
+  "integration": "BUILT_IN_OWNER_ONLY_PEER_CALL_SITES_NOT_JOINED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO"
+}
