@@ -94,6 +94,18 @@ def source_body(symbol: str, source: str) -> str:
         source, match.end(), "source function: " + symbol)
 
 
+def read_call_position(source: str, independent: bool) -> tuple[int, bool]:
+    """Recognize the historical call or the exact R104 conditional argument."""
+    value = "true" if independent else "false"
+    pattern = (r"(?m)^[ \t]*error = swapz_read\(ctx, bio"
+               r"(\n#if defined\(SWAPZ_ROUND104_INTEGRATION_TEST\)"
+               r"\n[ \t]*, " + value + r"\n#endif\n[ \t]*)?\);$")
+    matches = list(re.finditer(pattern, source))
+    if len(matches) != 1 or len(re.findall(r"\bswapz_read\s*\(", source)) != 1:
+        raise AssertionError("Missing, malformed or duplicate swapz_read call")
+    return matches[0].start(), matches[0].group(1) is not None
+
+
 def status_format_sequence(source: str = "") -> str:
     """Reconstruct INFO status text across bounded DMEMIT calls."""
     if not source:
@@ -6147,6 +6159,24 @@ int main(void)
         self.assertNotIn("window_first_ns", mapping)
         self.assertNotIn("hrtimer_start", mapping)
 
+    def test_read_call_guard_boundaries(self):
+        legacy = "\t\terror = swapz_read(ctx, bio);"
+        guarded = ("\t\terror = swapz_read(ctx, bio\n"
+                   "#if defined(SWAPZ_ROUND104_INTEGRATION_TEST)\n"
+                   "\t\t\t, true\n#endif\n\t\t\t);")
+        self.assertEqual(read_call_position(legacy, True), (0, False))
+        self.assertEqual(read_call_position(guarded, True), (0, True))
+        self.assertEqual(read_call_position(guarded.replace(", true", ", false"),
+                                            False), (0, True))
+        for malformed in (guarded + "\n" + legacy,
+                          guarded.replace("#endif\n", ""),
+                          guarded.replace(", true", ", false"),
+                          guarded.replace("ROUND104", "ROUND103"),
+                          guarded.replace("error =", "other =")):
+            with self.subTest(malformed=malformed):
+                with self.assertRaises(AssertionError):
+                    read_call_position(malformed, True)
+
     def test_retained_reads_require_independence_and_abort_on_failure(self):
         self.assertNotIn("swapz_read_is_independentstatic bool", DM)
         independent = body("swapz_read_is_independent")
@@ -6181,9 +6211,10 @@ int main(void)
                                        independent_read)]
         self.assertIn("swapz_read_is_independent(ctx, bio)", bypass)
         self.assertIn("ctx->retained_wave_read_seen = true", bypass)
-        self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
+        read_position, guarded_read = read_call_position(bypass, independent=True)
+        self.assertLess(read_position,
                         bypass.index("ctx->retained_wave_read_seen = true"))
-        self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
+        self.assertLess(read_position,
                         bypass.index('swapz_fail_at(ctx, error, "read"'))
         self.assertIn('"independent-read"', bypass)
         self.assertLess(bypass.index('swapz_fail_at(ctx, error, "read"'),
@@ -6202,8 +6233,7 @@ int main(void)
         note_bypass = bypass.index("swapz_note_single_tail_read_bypass(ctx)")
         service_shift = bypass.index("ctx->window_first_ns += read_elapsed")
         completion = bypass.index("swapz_complete(bio, error)")
-        self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
-                        had_lower_io)
+        self.assertLess(read_position, had_lower_io)
         self.assertLess(wave_read_seen, had_lower_io)
         self.assertLess(had_lower_io, note_bypass)
         self.assertIn("ctx->batch_count || ctx->retained_chain_completed", bypass)
@@ -6238,6 +6268,8 @@ int main(void)
         self.assertIn("swapz_refresh_accepted_followup(ctx)", process)
         normal_read = process[process.index("case REQ_OP_READ:"):
                               process.index("case REQ_OP_DISCARD:")]
+        _, normal_guarded = read_call_position(normal_read, independent=False)
+        self.assertEqual(guarded_read, normal_guarded)
         self.assertIn("swapz_refresh_accepted_followup(ctx)", normal_read)
         self.assertNotIn("ctx->retained_window_read_bypasses++", normal_read)
         self.assertNotIn("swapz_note_single_tail_read_bypass(ctx)", normal_read)

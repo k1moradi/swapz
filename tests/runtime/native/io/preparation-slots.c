@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef int64_t s64;
@@ -442,37 +443,97 @@ static int test_closed_admission_suppresses_producer_owner_wake(void)
 	return 0;
 }
 
+/* Bound the captured production body independently of the stack and reject
+ * duplicate, truncated or unterminated definitions instead of auditing a prefix. */
+enum { DRAIN_SOURCE_CAPACITY = 64 * 1024 };
+
+struct drain_source_capture {
+	char *body;
+	size_t capacity;
+	size_t bytes;
+	unsigned int starts;
+	int active;
+};
+
+static int capture_drain_source_line(struct drain_source_capture *capture,
+				    const char *line)
+{
+	static const char start[] = "static void swapz_drain(";
+	size_t length = strlen(line);
+
+	if (!length || line[length - 1] != '\n')
+		return -1;
+	if (!strncmp(line, start, sizeof(start) - 1)) {
+		if (capture->starts || capture->active)
+			return -1;
+		capture->starts++;
+		capture->active = 1;
+	} else if (capture->active && !strncmp(line, "static ", 7)) {
+		return -1;
+	}
+	if (!capture->active)
+		return 0;
+	if (capture->bytes >= capture->capacity ||
+	    length >= capture->capacity - capture->bytes)
+		return -1;
+	memcpy(capture->body + capture->bytes, line, length);
+	capture->bytes += length;
+	capture->body[capture->bytes] = '\0';
+	if (!strcmp(line, "}\n"))
+		capture->active = 0;
+	return 0;
+}
+
+static int drain_source_complete(const struct drain_source_capture *capture)
+{
+	return capture->starts == 1 && !capture->active && capture->bytes > 0;
+}
+
+static int test_drain_capture_boundaries(void)
+{
+	char body[128];
+	struct drain_source_capture capture = { .body = body, .capacity = sizeof(body) };
+	const char *start = "static void swapz_drain(struct dm_target *ti)\n";
+
+	CHECK(!capture_drain_source_line(&capture, start));
+	CHECK(!drain_source_complete(&capture));
+	CHECK(!capture_drain_source_line(&capture, "{\n"));
+	CHECK(capture_drain_source_line(&capture, "static void other(void)\n") != 0);
+	CHECK(capture_drain_source_line(&capture, "truncated") != 0);
+	CHECK(!capture_drain_source_line(&capture, "}\n"));
+	CHECK(drain_source_complete(&capture));
+	CHECK(capture_drain_source_line(&capture, start) != 0);
+	CHECK(!strcmp(body, "static void swapz_drain(struct dm_target *ti)\n{\n}\n"));
+	capture = (struct drain_source_capture){ .body = body, .capacity = 8 };
+	CHECK(capture_drain_source_line(&capture, start) != 0);
+	return 0;
+}
+
 /*
  * Kernel-side locking is not exercised by the pure preparation-slot policy.
  * Read the actual target source to guard both wake/close critical sections
  * and the first-terminal-error release-publication order.
  */
-static int test_production_failure_and_wake_gates(void)
+static int check_production_failure_and_wake_gates(FILE *source, char *drain_body,
+						  size_t drain_capacity)
 {
-	static const char marker[] = "tests/runtime/native/io/preparation-slots.c";
-	static const char target[] = "src/kernel/dm-target.c";
-	char source_path[4096], line[1024], failure_body[2048] = { 0 };
-	char drain_body[6144] = { 0 };
-	const char *marker_position = strstr(__FILE__, marker);
+	char line[1024], failure_body[2048] = { 0 };
+	struct drain_source_capture drain = {
+		.body = drain_body, .capacity = drain_capacity,
+	};
 	const char *lock_position, *condition_position, *error_position;
 	const char *publication_position, *unlock_position, *log_position;
 	const char *drain_lock, *admission_close, *drain_unlock, *submitter_wait;
 	const char *first_preparation_drain, *ordered_flush, *ordered_drain;
 	const char *last_preparation_drain, *reclaim_check;
-	FILE *source;
-	size_t failure_bytes = 0, drain_bytes = 0;
+	size_t failure_bytes = 0;
 	unsigned int wake_guards = 0, wake_publications = 0;
-	int in_producer = 0, in_failure = 0, in_drain = 0;
+	int in_producer = 0, in_failure = 0;
 	int producer_locked = 0;
-	int pending_wake = 0, path_length;
+	int pending_wake = 0;
 
-	CHECK(marker_position != NULL);
-	path_length = snprintf(source_path, sizeof(source_path), "%.*s%s",
-			       (int)(marker_position - __FILE__), __FILE__, target);
-	CHECK(path_length > 0 && (size_t)path_length < sizeof(source_path));
-	source = fopen(source_path, "r");
-	CHECK(source != NULL);
 	while (fgets(line, sizeof(line), source)) {
+		CHECK(!capture_drain_source_line(&drain, line));
 		if (strstr(line, "static void swapz_preparation_worker("))
 			in_producer = 1;
 		if (strstr(line, "static void swapz_order_window_greedy("))
@@ -489,17 +550,6 @@ static int test_production_failure_and_wake_gates(void)
 			failure_bytes += length;
 			if (line[0] == '}')
 				in_failure = 0;
-		}
-		if (strstr(line, "static void swapz_drain("))
-			in_drain = 1;
-		if (in_drain) {
-			size_t length = strlen(line);
-
-			CHECK(drain_bytes + length < sizeof(drain_body));
-			memcpy(drain_body + drain_bytes, line, length);
-			drain_bytes += length;
-			if (line[0] == '}')
-				in_drain = 0;
 		}
 		if (!in_producer)
 			continue;
@@ -524,9 +574,8 @@ static int test_production_failure_and_wake_gates(void)
 		}
 	}
 	CHECK(!ferror(source));
-	CHECK(!fclose(source));
-	CHECK(!in_failure && !in_drain && !pending_wake);
-	CHECK(drain_bytes > 0);
+	CHECK(!in_failure && !pending_wake);
+	CHECK(drain_source_complete(&drain));
 	CHECK(wake_guards == 2 && wake_publications == 2);
 	lock_position = strstr(failure_body, "spin_lock_irqsave(&ctx->queue_lock, flags)");
 	condition_position = strstr(failure_body, "if (!ctx->failed)");
@@ -567,6 +616,35 @@ static int test_production_failure_and_wake_gates(void)
 	      ordered_drain < last_preparation_drain &&
 	      last_preparation_drain < reclaim_check);
 	return 0;
+}
+
+static int test_production_failure_and_wake_gates(void)
+{
+	static const char marker[] = "tests/runtime/native/io/preparation-slots.c";
+	static const char target[] = "src/kernel/dm-target.c";
+	char source_path[4096];
+	const char *marker_position = strstr(__FILE__, marker);
+	char *drain_body;
+	FILE *source;
+	int path_length, result, close_result;
+
+	CHECK(marker_position != NULL);
+	path_length = snprintf(source_path, sizeof(source_path), "%.*s%s",
+			       (int)(marker_position - __FILE__), __FILE__, target);
+	CHECK(path_length > 0 && (size_t)path_length < sizeof(source_path));
+	drain_body = malloc(DRAIN_SOURCE_CAPACITY);
+	CHECK(drain_body != NULL);
+	source = fopen(source_path, "r");
+	if (!source) {
+		free(drain_body);
+		CHECK(source != NULL);
+	}
+	result = check_production_failure_and_wake_gates(source, drain_body,
+							DRAIN_SOURCE_CAPACITY);
+	close_result = fclose(source);
+	free(drain_body);
+	CHECK(!close_result);
+	return result;
 }
 
 /*
@@ -1409,6 +1487,7 @@ int main(void)
 	CHECK(!test_ready_publication_wins_raw_cas());
 	CHECK(!test_thread_published_terminal_metadata_after_failed_cas());
 	CHECK(!test_closed_admission_suppresses_producer_owner_wake());
+	CHECK(!test_drain_capture_boundaries());
 	CHECK(!test_production_failure_and_wake_gates());
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_two_producers_reclaim_only_after_final_consumer());

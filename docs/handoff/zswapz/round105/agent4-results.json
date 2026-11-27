@@ -1,0 +1,106 @@
+{
+  "round": 105,
+  "agent": 4,
+  "conclusion": "PARTIAL_FOCUSED_HELPERS_PASS_BROAD_CI_UNQUALIFIED",
+  "frozen_commit": "ae7dc02e5db07fc6d133e02ffd558cb68c8e3159",
+  "frozen_tree": "3cc943f1e9dd46d6174f18e5adf7519a7e2f3f7c",
+  "task_commit": "5148f7f941fa9144d01c51b047fec16a7b9e557f",
+  "publication_parent": "5de15cca2d911510d2d8d64f90d228826ebdecdc",
+  "publication_parent_tree": "453bdcc7a5a1090802425b0fec3851f610ad6e49",
+  "target_blob": "8a84ac4d395e2f635ae3e4216bade471c03618de",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical_io": false,
+  "vm": false,
+  "module_loading": false,
+  "activation": false,
+  "full_build": false,
+  "changed_blobs": [
+    {
+      "path": "tests/runtime/native/io/preparation-slots.c",
+      "old": "c7065c0f8ad9f2095dc480fd4f90b40a073e420d",
+      "sha": "afedeb4225f67ee3c49c968f918c29add4d01176"
+    },
+    {
+      "path": "tests/runtime/native/source-contract-test.py",
+      "old": "87d89bec22370c4fdef32d76e8809448d7beb504",
+      "sha": "91f6dd8cb559f274495ebad3e62f0fa7ffbe8f90"
+    },
+    {
+      "path": "tests/tools/round091-selected-dm-ordered-verify.py",
+      "old": "7b73911f892bdec5d89e31d0e1396403b9d87c13",
+      "sha": "5d47aecc616abd23e8234f28e15b8f31f7177f0c"
+    }
+  ],
+  "standards": {
+    "prior": "9584681e9431ba8d56be6400b4e81f739fdac0bf",
+    "post": "e8c8776b482eb31aa7a4ea32dddd7b903ec84f65",
+    "complete_prefix_verified": true,
+    "append_ascii_bytes": 619
+  },
+  "historical_failures": [
+    {
+      "job": 140359182597,
+      "error": "preparation-slots.c:498 drain_bytes + length < sizeof(drain_body)"
+    },
+    {
+      "job": 140359182514,
+      "error": "same drain buffer assertion per R104 checkpoint"
+    },
+    {
+      "job": 140359182034,
+      "error": "IndexError old swapz_read signature extraction"
+    },
+    {
+      "job": 140359182292,
+      "error": "ValueError substring not found in test_retained_reads_require_independence_and_abort_on_failure"
+    },
+    {
+      "job": 140359181982,
+      "error": "make test-lower-io exit 2"
+    },
+    {
+      "job": 140365142027,
+      "error": "native/focused dependency failures"
+    }
+  ],
+  "local": {
+    "checkout": "BLOCKED: Could not resolve host: github.com",
+    "method": "connector raw pins, manually transferred focused helpers; not complete checkout",
+    "gcc": "14.2.0 ASan/UBSan focused drain capture PASS",
+    "clang": "17.0.0 ASan/UBSan focused drain capture PASS",
+    "python": "focused READ call helper 3 positives 5 negatives; typed READ helper 4 mutant kills on exact frozen fragment",
+    "read_fragment_blob": "31611f9d71eeb805d116d9e42547f3c47b708e56",
+    "drain_fragment_blob": "0477541e0bcf12bc8616cd765abf2c871929155d",
+    "drain_bytes": 6264,
+    "old_drain_capacity": 6144,
+    "drain_order_offsets": [
+      652,
+      697,
+      1017,
+      1611,
+      2704,
+      2750,
+      3047,
+      3437,
+      3699
+    ]
+  },
+  "automatic_ci": {
+    "x86_64": "NOT_YET_VERIFIED",
+    "arm64": "NOT_YET_VERIFIED",
+    "r092_full_host_composition": "NOT_YET_VERIFIED",
+    "project_goals": "NOT_YET_VERIFIED",
+    "manual_dispatches": 0
+  },
+  "production_defect": "None demonstrated by these historical failures; no runtime conclusion",
+  "limitations": [
+    "Full native harness, full source-contract suite, existing semantic mutant suite, R092 composition and current exact-SHA gates require hosted execution; no PASS claimed.",
+    "Local C focused helper tests use synthetic boundary/expanded-length inputs, not complete production harness. Python typed fragment hash matches exact frozen bytes. No full kernel/module build.",
+    "Publication parent includes intervening peer commits. All changes and local checks use only freeze; frozen target and all three owned preimages verified unchanged at publication parent. Automatic main CI is current composition, not independent frozen full qualification."
+  ]
+}

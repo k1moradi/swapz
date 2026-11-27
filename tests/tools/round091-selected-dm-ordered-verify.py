@@ -103,7 +103,7 @@ def fragment(source, name):
 # Keep byte offsets while masking comments and literals. A malformed token
 # or function boundary is a failed audit, not a shorter accepted fragment.
 C_TOKEN = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'')
-DEFINITION = re.compile(r"(?m)^static (?:bool|int) (\w+)\(")
+DEFINITION = re.compile(r"(?m)^static (?:bool|int|void) (\w+)\(")
 
 
 def code_only(source):
@@ -244,6 +244,66 @@ def static_mutants(source):
     return killed
 
 
+def typed_read_checks(source):
+    read = complete_function(source, "swapz_read")
+    masked = code_only(source)
+    start = masked.index("static int swapz_read(")
+    signature = masked[start:masked.index("{", start)]
+    match = re.fullmatch(
+        r"static int swapz_read\(struct swapz_dm \*ctx, struct bio \*bio"
+        r"(\n#if defined\(SWAPZ_ROUND104_INTEGRATION_TEST\)\n"
+        r"[ \t]*, bool independent\n#endif\n[ \t]*)?\)\n", signature)
+    require(match is not None, "typed READ signature/conditional guard")
+    # R096 transfers the authoritative pin to the actual READ caller.
+    # Keep the original typed-before-cache assertion and prove the new
+    # release point is after the final upper BIO copy.
+    typed_call = "swapz_round096_read_original_pinned("
+    gated_call = "swapz_round097_read_original_pinned("
+    release = "swapz_shared_original_put(&ctx->authority, original_pin)"
+    anchors = ["SWAPZ_MAP_ORIGINAL"]
+    if match.group(1) or gated_call in read:
+        require(re.search(
+            r"#if defined\(SWAPZ_ROUND097_GATED_TARGET_TEST\)\s*"
+            r"error = swapz_round097_read_original_pinned\([^;]+;\s*"
+            r"#else\s*error = swapz_round096_read_original_pinned\([^;]+;\s*#endif",
+            read) is not None, "typed READ gated and historical alternatives")
+        anchors.append(gated_call)
+    anchors.extend((typed_call, "swapz_engine_read_page(",
+                    "swapz_copy_bio_accounted(", release))
+    ordered_once(read, anchors,
+                 "typed READ precedes ordinary cache and retains pin through upper copy")
+
+
+def typed_read_mutants(source):
+    start = source.index("static int swapz_read(")
+    end = source.index("\n}", start) + 2
+    original = source[start:end]
+    release = "release_error = swapz_shared_original_put(&ctx->authority, original_pin);"
+    copy = re.search(r"error = swapz_copy_bio_accounted\([^;]+;", original)
+    require(copy is not None and original.count(release) == 1,
+            "typed READ mutation anchors")
+    mutants = [
+        ("typed_read_missing_boundary", original[:-1]),
+        ("typed_read_duplicate_boundary", original + "\n" + original),
+        ("typed_read_release_before_copy",
+         original.replace(copy.group(), "", 1).replace(
+             release, release + "\n\t\t" + copy.group(), 1)),
+    ]
+    if "bool independent" in original:
+        mutants.append(("typed_read_wrong_signature_guard",
+                        original.replace("ROUND104_INTEGRATION_TEST",
+                                         "ROUND103_INTEGRATION_TEST", 1)))
+    killed = []
+    for name, changed in mutants:
+        try:
+            typed_read_checks(source[:start] + changed + source[end:])
+        except RuntimeError:
+            killed.append(name)
+        else:
+            raise RuntimeError("static mutant survived " + name)
+    return killed
+
+
 def static_checks(source, patch):
     anchor = "list_add_tail(&entry->list, &ctx->incoming);"
     require(source.count(anchor) == 1, "canonical FIFO")
@@ -268,18 +328,7 @@ def static_checks(source, patch):
             "tio->io->orig_bio, false)" in patch, "accepted clone transient length guard")
     require("swapz_shared_original_segment_pinned(a, segment)" in source and
             "swapz_shared_storage_relocate(ctx->original_storage" in source, "GC and TRIM guard")
-    read = source.split("static int swapz_read(struct swapz_dm *ctx, struct bio *bio)", 1)[1].split("static void swapz_read_slot_prepare(", 1)[0]
-    # R096 transfers the authoritative pin to the actual READ caller.
-    # Keep the original typed-before-cache assertion and prove the new
-    # release point is after the final upper BIO copy.
-    typed_call = "swapz_round096_read_original_pinned("
-    release = "swapz_shared_original_put(&ctx->authority, original_pin)"
-    require(typed_call in read and release in read,
-            "typed READ retained pin call/release")
-    require(read.index("SWAPZ_MAP_ORIGINAL") < read.index(typed_call) <
-            read.index("swapz_engine_read_page(") < read.index("swapz_copy_bio_accounted(") <
-            read.index(release),
-            "typed READ precedes ordinary cache and retains pin through upper copy")
+    typed_read_checks(source)
     require("bi_bvec_done" not in source, "obsolete bvec member")
 
 
@@ -396,7 +445,7 @@ def main():
         report["target_blob"] = git_blob(source.encode())
         patch = (ROOT / "tests/tools/round088-original-dm-selected-clone.patch").read_text()
         static_checks(source, patch)
-        report["static_mutants"] = static_mutants(source)
+        report["static_mutants"] = static_mutants(source) + typed_read_mutants(source)
         print("ORDERED_STATIC_PASS mutants=" + str(len(report["static_mutants"])), flush=True)
         fragments = fragment(source, "TRANSACTION") + fragment(source, "TYPED_READ")
         report["fragment_sha256"] = hashlib.sha256(fragments.encode()).hexdigest()
