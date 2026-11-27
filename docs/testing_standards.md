@@ -21117,3 +21117,6 @@ Use only the pinned R104 original Linux overlay chain, A1's exact query export c
 
 ### Round 105 Agent 1 — MM overlay context-only packaging repair
 Actual job 140396673331 failed at repository git diff --check before staging because normal unified context lines begin space-tab or contain a single space. Split both R105 A11 patches into zero-context change runs; identical changed lines and all original staged pre/postimage pins retained. Update only the two exact patch-file pins in the verifier; existing --unidiff-zero, strict whitespace, apply/reverse/reapply, host cases/mutants and native objects unchanged. No qualification claimed until the automatically triggered correction job completes. AUTH0, no live operation.
+
+### Round 105 Agent 1 — inherited pinned declaration census
+Corrected job 140400583022 passed exact full patch chain, then rejected deliberate R104 post-stage declaration overrides as unexpected unstaged changes. Verify the three immutable declaration hashes before/after, allow only their actual inherited unstaged tracked set unchanged, and require exact staged path union. No staged source, overlay or test-case changes; strict whitespace preserved. New automatic qualification only; AUTH0.

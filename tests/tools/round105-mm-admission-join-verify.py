@@ -77,6 +77,19 @@ def stage(state, evidence, frozen, baseline, linux):
     previous.stage_source(r103, helper, historical, history, frozen, baseline, linux)
     require(historical["stage"] == "PASS", "historical stage")
     state["historical_stage"] = historical
+    # R104 deliberately installs three pinned declarations after its clean
+    # staged-tree check. Preserve their exact worktree/index delta, not a
+    # blanket exception for unstaged files.
+    declarations = {
+        helper.GLUE_DIR + "/native-observation-integration.h": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
+        helper.GLUE_DIR + "/native-observation-adapter.h": "ffa547fbecad79b3fabf0ded4bb182c201e4a33d",
+        helper.GLUE_DIR + "/native-observation-owner.h": "68750e6b7e78f5bb236c968b3694a429bff6813f",
+    }
+    for relative, expected in declarations.items():
+        pin(linux / relative, expected)
+    inherited_unstaged = set(git(linux, "diff", "--name-only").decode().splitlines())
+    require(inherited_unstaged <= declarations.keys(), "unexpected inherited unstaged source")
+    inherited_staged = set(git(linux, "diff", "--cached", "--name-only").decode().splitlines())
     state["postimages"] = {}
     for name, expected, images in PATCHES:
         patch = TOOLS / name
@@ -92,7 +105,14 @@ def stage(state, evidence, frozen, baseline, linux):
                 pin(linux / relative, pair[side])
         state["postimages"].update({relative: pair[1] for relative, pair in images.items()})
     helper.step(state, evidence, "staged-diff-check", ["git", "diff", "--cached", "--check"], linux)
-    require(not git(linux, "diff", "--name-only"), "unexpected unstaged tracked changes")
+    require(set(git(linux, "diff", "--name-only").decode().splitlines()) ==
+            inherited_unstaged, "unexpected unstaged tracked changes")
+    require(set(git(linux, "diff", "--cached", "--name-only").decode().splitlines()) ==
+            inherited_staged | {relative for _, _, images in PATCHES for relative in images},
+            "unexpected staged path census")
+    for relative, expected in declarations.items():
+        pin(linux / relative, expected)
+    state["inherited_unstaged_declarations"] = sorted(inherited_unstaged)
     pin(linux / "include/linux/swapz_trial_debt.h", "d1d2fc65084936380c211094ce6f073273596338")
     # R105 frozen declarations, not moving-main peer implementations.
     glue = linux / helper.GLUE_DIR
