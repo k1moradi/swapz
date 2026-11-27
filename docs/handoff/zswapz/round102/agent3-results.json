@@ -1,0 +1,154 @@
+{
+  "round": 102,
+  "agent": 3,
+  "status": "SOURCE_PUBLISHED_PARTIAL_QUALIFICATION_PENDING",
+  "freeze": "d2baba1bda02b78eb7df265d22c5e9dbee09e2b1",
+  "task": "5635a75aa422eef52ed1bf50544bca50b4a9e75e",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "a92e3c8120c20db04dbd2c8c84e66fb611964d6c",
+  "source_parent": "dd9aad11d9e5cbae90a9ab4ae91f6c5858137439",
+  "source_tree": "6c5bd67cb9aa54654a9d60c792f77044f8d58e9d",
+  "evidence_parent": "43a7d3ddcd50fdb8127683326dfbe0a0ed4cd301",
+  "source_blobs": {
+    "src/kernel/dm-target.c": "087bec323ad59f365d77d3beaf1aa52907cfcfce",
+    "src/kernel/native-observation-controller.c": "daa9bfcb321b2cc378994717a12f87a2c67c9b28",
+    "src/kernel/native-observation-controller.h": "5dc62a0c7c3abc3999b8e16836a84bdbc2d8e061",
+    "tests/runtime/native/fixtures/round102-controller-stop.c": "af049d5dbab32a1a5b62ed4b64e2a77242466445",
+    "tests/tools/round102-controller-stop-verify.py": "b6288a5b3205c2dca41e81eabbda3de79f09688d",
+    ".github/workflows/phase-a-round102-controller-stop-noauth.yml": "4838f04244f2d34470ff617543e6c9faf7b79d53"
+  },
+  "frozen_target": "46c2cb832ff0071a028a27b35f63daa84f29914f",
+  "frozen_stage_verifier": "96e6750971c182dfe87e6e57eac048c7c3a529b6",
+  "frozen_r101_overlay": "4d34b0d771789c09967b38fdf84b0f2b6513cd60",
+  "r101_expected_postimages": {
+    "mm/zswap.c": "fcb2f7487cb7ed02ae8ca9a8d486909f721a2ef6",
+    "include/linux/swapz_mm_carrier.h": "f50911d4c1ff7f87b502cec042b90968ba3a282f",
+    "src/kernel/zswap-original-ticket.c": "e605bb0b8fbf5e6411a4d5d6182cab1a44d48bea",
+    "src/kernel/zswap-original-broker-owner.inc": "a6a025b1d56513919ac83f4367e9c306fa12c933",
+    "src/kernel/zswap-original-ticket.h": "6c79e41cb18082b925311bf62d0cfbed45a9e53b"
+  },
+  "standards": {
+    "parent": "0f270b3ae33c82859d3018e2f184a06212db3dfd",
+    "parent_bytes": 1894709,
+    "post": "30744f929c80a2c3709f072a7e75376823291f6d",
+    "post_bytes": 1895862,
+    "complete_raw_parent_blob_recreated": true,
+    "append_only": true
+  },
+  "qualification": {
+    "source_publication_verified": true,
+    "hosted_run": 45924563283,
+    "job": 140262775605,
+    "status": "in_progress",
+    "conclusion": null,
+    "job_steps": [
+      {
+        "name": "Set up job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 1
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 2
+      },
+      {
+        "name": "Exact source and complete standards prefix",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 3
+      },
+      {
+        "name": "Provision genuine compiler and kernel build prerequisites (runner only)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 4
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "in_progress",
+        "conclusion": null,
+        "number": 5
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 6
+      },
+      {
+        "name": "Check exact R101 stage, serial stop cases and changed objects",
+        "status": "pending",
+        "conclusion": null,
+        "number": 7
+      },
+      {
+        "name": "Retain bounded evidence",
+        "status": "pending",
+        "conclusion": null,
+        "number": 8
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 15
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "status": "pending",
+        "conclusion": null,
+        "number": 16
+      }
+    ],
+    "artifacts": [],
+    "compiler": null,
+    "host_checks": null,
+    "native_objects": null,
+    "config_actual": null,
+    "first_error": null,
+    "first_error_note": "No executed job logs verified at this snapshot; pending is not PASS.",
+    "intended_config": "x86_64 SMP=y TREE_RCU=y NR_CPUS=4 ZSWAP_DEFAULT_ON=n; exact pinned R101 overlay; changed built-in bridge and target objects only",
+    "other_automatic_workflows": "Not dispatched manually; their conclusions not qualified by this report."
+  },
+  "implemented": {
+    "guarded_stop_bridge": true,
+    "registered_presuspend": true,
+    "drain_fallback_stop": true,
+    "queue_lock_capture_inhibition": true,
+    "exact_mm_stop": true,
+    "original_bio_correlation_unchanged": true,
+    "sticky_first_stop_error": true,
+    "unproven_join_quarantine": true,
+    "scope_retained": true
+  },
+  "blocked": {
+    "trusted_independent_owner_admission": true,
+    "cold_start_recorder_mm_publish_target_install": true,
+    "area_publication_order": true,
+    "actual_external_area_and_original_bio_join": true,
+    "final_scope_revoke": true,
+    "retirement_witness_before_reopen": true,
+    "complete_cleanup": true,
+    "collector_integration": true,
+    "native_runtime": true
+  },
+  "peer_round102_source_consumed": false,
+  "local_clone": "Not attempted this round; frozen contract documents DNS blocker; connector and hosted checkout used.",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_raw": "OFF",
+  "import": "OFF",
+  "full_link": false,
+  "vm": false,
+  "module_load": false,
+  "activation": false,
+  "physical_mutation": false,
+  "manual_dispatches": 0,
+  "branches": 0,
+  "prs": 0,
+  "force_pushes": 0
+}
