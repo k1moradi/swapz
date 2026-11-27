@@ -1,0 +1,151 @@
+{
+  "round": 103,
+  "agent": 11,
+  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING",
+  "issue": 221,
+  "task_commit": "c036b9456a03236841274ca2f3f3980c2dc07502",
+  "engineering_freeze": "e65d7042b41880c6fef99069d7f65bf6fb4356d4",
+  "freeze_tree": "23a94d1726859c3536e16efd7de5212a68af6531",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_commit": "6a2085050de913ff239e034ff645fbc687a1cb58",
+  "source_parent": "ab9b2d11b931fa850432fcf188e19b9001eae25e",
+  "source_tree": "b759161a522ad43ffde5b368b7a74fc2b86c7b22",
+  "source_blobs": {
+    "tests/tools/round103-original-area-terminal-join.patch": "5c5e52add5976a96987de22d12cdaacad332f142",
+    "tests/tools/round103-external-join-verify.py": "d6ea4b20517172bc09c64f7d7d27d78640869bad",
+    "tests/runtime/native/fixtures/round103-external-join.c": "11f7d56a8d934118f633f49dfe10898262b9ad50",
+    ".github/workflows/phase-a-round103-external-join-noauth.yml": "aa708cbd79e566d879219d4403f3d27f6b2a7955",
+    "docs/testing_standards.md": "2c9d0d4e55130965057a968a349a8da3fc1d76fa"
+  },
+  "staged_pre_post_git_blobs": {
+    "mm/zswap.c": [
+      "fcb2f7487cb7ed02ae8ca9a8d486909f721a2ef6",
+      "833f089bc01e8803f427732975d706c894436eb3"
+    ],
+    "mm/page_io.c": [
+      "08c11d2f9a16a322093b305afa10ba011f67fc2b",
+      "5c3ebb46e2d885b0d3ab492a796996c004954d79"
+    ],
+    "mm/swapfile.c": [
+      "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+      "031a93193886b093045e4aa15456016da49a7a43"
+    ],
+    "drivers/md/dm.c": [
+      "f0c0cd4add03bf2b6f9bf37997444ecd08bbb83b",
+      "e07dfd963edcdfb438af2ae1f43e3023e54544b7"
+    ],
+    "include/linux/swapz_mm_carrier.h": [
+      "f50911d4c1ff7f87b502cec042b90968ba3a282f",
+      "7091e456b6c09f29d68140cfff3f072e940ccd2f"
+    ],
+    "include/linux/swapz_trial_debt.h": [
+      null,
+      "207cd1b7a87f493992938cfa00ed4f95c7196811"
+    ],
+    "mm/swapz-trial-terminal.inc": [
+      null,
+      "3f980d04958676c22d44a6ca2778c4bd40a464fb"
+    ]
+  },
+  "publication": {
+    "main": true,
+    "force": false,
+    "expected_head": "ab9b2d11b931fa850432fcf188e19b9001eae25e",
+    "verified": true,
+    "standards_previous_blob": "989a87d9788edbf1ecb6319860b5b71f978ca035",
+    "standards_prefix": "PASS complete exact raw historical content hash and append readback"
+  },
+  "prior_r102": {
+    "run_id": 45924444583,
+    "job_id": 140262410396,
+    "status": "completed",
+    "conclusion": "success",
+    "checks_per_compiler": 12708,
+    "static_mutants": 11,
+    "behavioral_mutants_per_compiler": 4,
+    "unified_stage": "PASS_STAGE_ONLY",
+    "artifacts": [
+      {
+        "id": 15165753564,
+        "bytes": 831,
+        "sha256": "d510fe6ef6ca19fa18a911c54c8d4bf15fe404ab6ae41448224324e65ac11d12"
+      },
+      {
+        "id": 15165788164,
+        "bytes": 75441,
+        "sha256": "c6d5dd01fafc1cf579a642b104217ef3bddc3cd3d8d35fa683f28ae19a710d03"
+      }
+    ],
+    "archive_independently_extracted": false
+  },
+  "checks": {
+    "preimages": "PASS exact connector reconstruction plus blob hashes, including absence for two new files",
+    "patch_roundtrip": "PASS line-level deterministic reconstruction, not hosted git apply",
+    "local_checkout": "BLOCKED git ls-remote exit128 Could not resolve host: github.com; raw download also unavailable",
+    "host_gcc": "NOT_VERIFIED",
+    "host_clang": "NOT_VERIFIED",
+    "host_modes": [
+      "normal",
+      "reopen",
+      "wrong-completion",
+      "split",
+      "late",
+      "overflow",
+      "publish-race",
+      "publish-quarantine"
+    ],
+    "host_counts": null,
+    "unified_stage": "NOT_VERIFIED",
+    "native_compile": "NOT_VERIFIED",
+    "native_objects_requested": [
+      "mm/zswap.o",
+      "mm/page_io.o",
+      "mm/swapfile.o",
+      "drivers/md/dm.o"
+    ],
+    "native_config": "REQUESTED x86_64 SMP TREE_RCU NR_CPUS=4 default-off",
+    "native_link": "NOT_RUN"
+  },
+  "ci": {
+    "run_id": 45927429520,
+    "job_id": 140271957716,
+    "status": "queued",
+    "conclusion": null,
+    "artifacts": [],
+    "steps": null,
+    "first_error": null,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45927429520/job/140271957716"
+  },
+  "limitations": [
+    "The external witness is intentionally stricter: real successful selected-area swapoff retirement is required; no runtime invocation, no generic area/root control.",
+    "Actual DM original callback interposition is scoped and retains original callback/private data; unsupported cloned/remapped ingress poisons qualification without replacing chain callback. No native concurrent or callback execution tested yet.",
+    "Only scoped tracked ingress is joined. Target/provider/map/worker/retained candidate and broker retirement proof still separate; no aggregate acceptance.",
+    "Frozen R101 historical stage target, not current integrated R103 target; frozen R103 target/controller/collector pin checks specified, no product objects compiled.",
+    "One guarded lane, no product changes or same-round peer source dependency."
+  ],
+  "interfaces": [
+    "int swapz_mm_trial_area_get(struct file *mapper_file, sector_t first, sector_t count, u32 *type, u64 *epoch, struct file **area_file)",
+    "u64 swapz_mm_trial_area_epoch(u32 type)",
+    "int swapz_mm_trial_scope_join_external(u64 identity, u64 session, u64 table_epoch, u64 target_epoch)",
+    "void swapz_mm_trial_mm_enter(struct block_device *bdev, u32 type, const void *sio)",
+    "u64 swapz_mm_trial_mm_take(const void *sio)",
+    "void swapz_mm_trial_mm_put(u64 ticket)",
+    "u64 swapz_mm_trial_dm_enter(struct bio *bio)",
+    "void swapz_mm_trial_dm_leave(u64 entrant)",
+    "bool swapz_mm_trial_dm_origin(const struct bio *bio, sector_t sector)"
+  ],
+  "safety": {
+    "AUTH": 0,
+    "phase_a": "BLOCKED",
+    "compressed_handoff": "OFF",
+    "forced_RAW": "OFF",
+    "import": "OFF",
+    "physical": "NO_GO",
+    "vm": false,
+    "activation": false,
+    "module_load": false,
+    "physical_mutation": false,
+    "full_disconnected_build": false,
+    "manual_duplicate_dispatch": false
+  }
+}
