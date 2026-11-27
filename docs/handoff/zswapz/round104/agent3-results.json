@@ -1,7 +1,7 @@
 {
   "round": 104,
   "agent": 3,
-  "status": "SOURCE_PUBLISHED_QUALIFICATION_PENDING_CONNECTED_BLOCKED",
+  "status": "PASS_HOST_AND_DIRECTED_ONLY_CONNECTED_BLOCKED",
   "freeze": "a9094f96e3fb2841ed0fa553102d98699950221d",
   "freeze_tree": "554b80152c9ea277cd6e0f63069bfb8f8ba671b6",
   "task": "3ec158e2870170bd58fc13dfc340722a89f51cae",
@@ -36,15 +36,79 @@
   "qualification": {
     "run_id": 45954959493,
     "job_id": 140359182202,
-    "status": "queued",
-    "conclusion": null,
-    "steps": null,
-    "artifacts": [],
-    "host_counts": null,
-    "mutants": null,
-    "native_objects": null,
-    "compiler": null,
-    "config": null,
+    "status": "completed",
+    "conclusion": "success",
+    "steps": "all completed success",
+    "artifacts": [
+      {
+        "id": 15179041346,
+        "name": "round104-agent3-controller-target",
+        "bytes": 184227,
+        "files": 59,
+        "sha256": "44dfbab052d35b7dc44c6b99757e6dfaa4a7a62c00353c860e364830eb442bd2",
+        "downloaded": true,
+        "crc_verified": true,
+        "sha256_verified": true,
+        "config_and_elf_hashes_verified": true
+      }
+    ],
+    "host_counts": {
+      "gcc": 528,
+      "clang": 528,
+      "total": 1056,
+      "cases_per_compiler": {
+        "normal": 109,
+        "bind-failure": 22,
+        "rollback": 28,
+        "typed-debt": 70,
+        "wrong-key": 116,
+        "retirement-busy": 127,
+        "failure": 56
+      }
+    },
+    "mutants": {
+      "gcc": {
+        "skip-exact": "KILLED",
+        "wrong-ordinal": "KILLED",
+        "skip-external": "KILLED",
+        "clear-retained": "KILLED"
+      },
+      "clang": {
+        "skip-exact": "KILLED",
+        "wrong-ordinal": "KILLED",
+        "skip-external": "KILLED",
+        "clear-retained": "KILLED"
+      },
+      "killed": 8,
+      "total": 8
+    },
+    "native_objects": {
+      "native-observation-controller.o": {
+        "blob": "f321edba051e91fffe4f882b95d25882d2c00642",
+        "bytes": 11024,
+        "sha256": "07f1d104d0c19c036d2a259d4e5bf644f445ac50658a406afdc3baf7f102f173"
+      },
+      "dm-target.o": {
+        "blob": "9a5d453dcaa0b0622fc564258740adc2297c62cf",
+        "bytes": 241064,
+        "sha256": "eac8935fc103aca26331b744a85f0c640430088d604f745b52840581d5e5ebc9"
+      }
+    },
+    "compiler": {
+      "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+      "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42"
+    },
+    "config": {
+      "blob": "303bd78252794a4283ee026569e84ddb84560cb4",
+      "bytes": 46577,
+      "sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf",
+      "x86_64": true,
+      "smp": true,
+      "tree_rcu": true,
+      "nr_cpus": 4,
+      "zswap_default_on": false
+    },
     "first_error": null,
     "host_modes": [
       "normal",
@@ -74,7 +138,18 @@
     ],
     "native_link": "NOT_RUN",
     "stage": "pinned R103 verifier 11ae07a68761d11160b649a3503af64eecd3ec4a, exact unified R101 chain + R103 overlay 5c5e52add5976a96987de22d12cdaacad332f142; frozen R103 recorder C/H overrides, task header, current A3 objects only",
-    "typed_read_test": "actual source ordering checks, not dynamically executed"
+    "typed_read_test": "actual source ordering checks, not dynamically executed",
+    "run_attempt": 1,
+    "event": "push",
+    "head_branch": "main",
+    "head_sha": "2d12a079104db9263518e7b20fa6ac36749e4a2e",
+    "native": "PASS_DIRECTED_ONLY_UNRESOLVED_PEER_SYMBOLS",
+    "stage_result": "PASS",
+    "elf_prerequisite": "PASS",
+    "openssl_prerequisite": "PASS",
+    "independent_nm_imports_match": true,
+    "artifact_results_sha256": "315c8dc1dfb9f8e534502eb3cda791790874935d129a4d20a288422d3507377a",
+    "unified_base_manifest_sha256": "fa35a04b96899097b4796f06e030f7b8a36840427037eb835c8420fb3be95618"
   },
   "limitations": [
     "Cold start has no independently admitted trusted caller and target callback remains unregistered; no live activation.",
@@ -83,7 +158,8 @@
     "Target negative revoke/finish exports require actual local debt gate; full cross-module lock/lifetime/ABI integration unqualified.",
     "Ordinary write input only single complete BIO page; ordinary lower/publish, discard, fallback, claimed-error and GC trace coverage incomplete; evidence loss remains fail closed; no clean trace or authentication.",
     "Typed read actual byte capture and lower events are source changes, no native execution or independent userspace witness; final page compared with decoded output and retained digest, not independent reference.",
-    "Source review and fixture construction not a completed host/native result; local clone not retried due frozen DNS blocker."
+    "Hosted actual-extracted host and directed native qualification completed; local archive verification only, no local source checkout/build replay.",
+    "Historical stage helper frozen_current_product_uncompiled fields identify older staging snapshots, not actual R104 current A3 source; current objects separately pinned and compiled."
   ],
   "peer_round104_source_consumed": false,
   "AUTH": 0,
@@ -100,5 +176,5 @@
   "branches": 0,
   "prs": 0,
   "force_pushes": 0,
-  "evidence_parent": "9cd015d8ad099388da080d383a0e0b8ea927f548"
+  "evidence_parent": "5d77297735aa36fac8df9468b4399b94ed30192f"
 }
