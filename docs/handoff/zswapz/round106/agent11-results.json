@@ -1,0 +1,135 @@
+{
+  "round": 106,
+  "agent": 11,
+  "issue": 224,
+  "status": "PARTIAL_NEGATIVE_BOUNDARY_HOST_PASS_NATIVE_PENDING_ADMISSION_BLOCKED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "freeze": "8a83828717ea3000d102043ead78fd86ad0391a8",
+  "freeze_tree": "1d175df983eb17b8611624ec8b83ea8ddc89b2e8",
+  "task": "7eb880eb84474f75037acb9f33b95d92d861000c",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "prior_R105": {
+    "run": 45968194407,
+    "job": 140401871453,
+    "conclusion": "failure",
+    "first_error": "R105_A11_FIRST_ERROR blob mismatch: /home/runner/work/swapz/swapz/linux/mm/round098-swapz/native-observation-owner.h",
+    "stage": "R103/R104 exact prior stages PASS; failed inherited declaration check before R105 overlay sequence",
+    "host": "NOT_RUN",
+    "native": "NOT_RUN",
+    "artifact": {
+      "id": 15183962790,
+      "bytes": 15684,
+      "sha256": "b7769f08b244f76169d6de1b9ff6f4053cc7985eb43504efac47627402c982f6",
+      "verification": "metadata only"
+    },
+    "correction": {
+      "old_verifier": "8dc136fc8db0d25ce1f66de871119bda278e01b1",
+      "new_verifier": "01ff882ddcdbdd27da6b354a078921169aebce38",
+      "inherited_owner": "9e44829f3920167829fc364fdb6a95bfa0930805",
+      "final_R105_owner": "68750e6b7e78f5bb236c968b3694a429bff6813f",
+      "run": 45973757313,
+      "job": 140420275640,
+      "observed_status": "queued",
+      "dispatch": "automatic changed-source, no manual rerun"
+    }
+  },
+  "publication": {
+    "source": "08679c441a0387d1bbc50a0cb508c808e7beb9d6",
+    "sole_parent": "266fe55f757be6b878c46f2134414bc40c25bc05",
+    "tree": "80827bf484983a95458562e3c65d8b68ce3d5e08",
+    "main": true,
+    "force": false,
+    "expected_head": true,
+    "readback": true,
+    "standards_old": "e0ed33917dff4bf95c48503fb6c5874928df8d69",
+    "standards_new": "09e5340020a76d9520dafa33e3a5969c856e2cea",
+    "standards_old_bytes": 1926898,
+    "standards_exact_prefix_verified": true
+  },
+  "patch": {
+    "path": "tests/tools/round106-original-mm-owner-boundary.patch",
+    "blob": "24b9c16de84e8e4795c8c2378220bf2e0dfae25e",
+    "images": {
+      "mm/zswap.c": [
+        "058389456ee1586f5a26d40f78cd5cde99312060",
+        "9e1efceae44c384370d0aa3e25748d127a5cd4ad"
+      ]
+    },
+    "stage": "exact connector reconstruction and deterministic apply/reverse/reapply PASS; actual full checkout git apply pending"
+  },
+  "frozen_audit": {
+    "terminal": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+    "dm_core": "6912eb7ec5a9ef325f7282ef9c9226b39265f01d",
+    "controller": "06cf0279cc449330e35873829aab1118a2bee151",
+    "target": "d3cb8525f482321c975cefd91a03aa73fcb7bef2",
+    "scope_provider": "requires installed scope; returned route lacks registration epoch; registered ops validate/install/retire only",
+    "dm_deletion": "dm_open_count checked under minor spinlock before marking deleting; __dm_destroy postsuspend, table SRCU release and holders wait precede table destruction; target retains mapper until retirement",
+    "positive_admitted_owner": "NOT_IMPLEMENTED: no independent trusted grant or pre-install route identity source",
+    "pre_destruction_caller": "NOT_IMPLEMENTED: no independently retained exact target/registration key and no safe lock-free final removal rendezvous in frozen ABI",
+    "gate": "explicit SWAPZ_ROUND106_ADMITTED_OWNER_TEST only; deny EACCES before MM dereference/retention, not before controller recorder publication",
+    "post_grace_revoke": "recheck joined, retired/closed, fault, real terminal count and carrier busy under terminal gate before broker release; retain cap/files on failure"
+  },
+  "fixture": {
+    "blob": "90e53cebafbee7dfaf816d3119590fdfdbb4880a",
+    "sha256": "d3a453b510cc50c305a80528aa34fb97d27acc95958a008751e63a972a2010e4",
+    "actual_scope_control_blob": "605d3023ddae7b2e609f6d7ca7c8918dd7788fcf",
+    "actual_terminal_helpers_blob": "fbafa9241d63afee4167f039589c42610f38e42c"
+  },
+  "verifier_blob": "56bad5e8e15eedebb147981d780d57d3d928da22",
+  "workflow_blob": "bfbba10b222c00342994709c869f67d9b8cb8b89",
+  "host": {
+    "status": "PASS_ACTUAL_EXTRACTED_HOST_ONLY",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "flags": "-std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-omit-frame-pointer -fno-pie -no-pie -fsanitize=address,undefined -fno-sanitize-recover=all",
+    "cases_per_compiler": {
+      "denied": 9,
+      "late-fault": 26,
+      "late-debt": 26,
+      "late-carrier": 26,
+      "late-unjoin": 26,
+      "retry": 45,
+      "detached": 21
+    },
+    "checks_per_compiler": 179,
+    "total": 358,
+    "mutants_per_compiler": {
+      "no-admission-denial": 117,
+      "no-post-grace-check": 168,
+      "ignore-debt-count": 172,
+      "ignore-carrier": 176,
+      "ignore-joined": 180
+    },
+    "mutant_exit": 77,
+    "total_mutant_rejections": 10,
+    "first_local_fixture_error": "puts counter collided with stdio puts; renamed file_gets/file_puts before final verified fixture",
+    "limits": "Exact extracted functions, deterministic simulated grace/reentry/late fault/count/busy, modeled old retained scope, no native positive admission or concurrency."
+  },
+  "native": {
+    "status": "PENDING",
+    "run": 45973756806,
+    "job": 140420273912,
+    "observed_status": "in_progress toolchain prerequisites; source/standards precheck success",
+    "object": "mm/zswap.o",
+    "artifact": "not yet available",
+    "native_link": "NOT_RUN",
+    "local_blocker": "git ls-remote exit 128 Could not resolve host: github.com; upstream contents HTTP429, exact blobs accessible via supported GitHub connector",
+    "dispatch": "one automatic changed source R106, separate R105 correction source job; no manual dispatch, rerun or full build"
+  },
+  "safety": {
+    "full_build": false,
+    "vm": false,
+    "module_loading": false,
+    "activation": false,
+    "physical_mutation": false,
+    "branches": false,
+    "prs": false,
+    "manual_duplicate_dispatch": false,
+    "same_round_peer_dependencies": false
+  },
+  "acceptance_owner": "Agent 1"
+}
