@@ -1,0 +1,90 @@
+name: Round109 A10 one connected frozen kernel and module link AUTH0
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round109-connected-build-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  connected-frozen-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and direct main parent
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 -B - <<'PY'
+          import ast
+          import runpy
+          import subprocess
+          from pathlib import Path
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(previous) and len(current) > len(previous)
+          verifier = Path("tests/tools/round109-connected-build-verify.py")
+          assert subprocess.check_output(["git", "hash-object", str(verifier)], text=True).strip() == "dc6478212a008c9e2eea24b022b69ad17b503366"
+          ast.parse(verifier.read_bytes(), filename=str(verifier))
+          runpy.run_path(str(verifier))["symbol_census_selftest"]()
+          PY
+      - name: Hosted toolchain prerequisites
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config openssl perl python3 xz-utils cpio kmod
+      - uses: actions/checkout@v4
+        with:
+          ref: 6394bf9aec7709744caf294f8bd7e935ca481dcd
+          path: frozen
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: d2baba1bda02b78eb7df265d22c5e9dbee09e2b1
+          path: historical
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5a36cabf0989dfffc75de52a6ab8cc021092ebf6
+          path: baseline
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: One connected exact stage and full compile link
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B swapz/tests/tools/round109-connected-build-verify.py frozen historical baseline linux r109-build r109-a10-evidence
+      - name: Bounded native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round109-agent10-connected-build
+          path: |
+            r109-a10-evidence/
+          if-no-files-found: warn
+          retention-days: 14
