@@ -8,7 +8,7 @@
 #endif
 #include "native-observation-adapter.h"
 
-/* Only these three guarded GPL symbols cross the built-in/DM boundary.
+/* Only these four guarded GPL symbols cross the built-in/DM boundary.
  * Active is a hint, not a lifetime pin or authorization. Build the record
  * only after active; mint/append recheck the permanent one-shot RCU gate.
  * A zero token or false append loses evidence, never changes I/O success.
@@ -16,6 +16,8 @@
 bool swapz_trial_observation_active(void);
 u64 swapz_trial_observation_mint(void);
 bool swapz_trial_observation_append(const struct swapz_observation_record *record);
+/* Same append, not a second record: zero on refusal/late stop. */
+u64 swapz_trial_observation_append_sequence(const struct swapz_observation_record *record);
 
 /* Fixed ASCII hex, no NUL required, no raw device/host identity. All
  * fields are independent, caller-supplied scope assertions. The build's

@@ -223,16 +223,16 @@ static bool event_fields_valid(const struct swapz_observation_record *record)
 }
 #undef OBS_BIT
 
-bool swapz_observation_append(struct swapz_observation_gate *gate,
+u64 swapz_observation_append_sequence(struct swapz_observation_gate *gate,
 			      const struct swapz_observation_record *record)
 {
 	struct swapz_observation_recorder *recorder = enter(gate);
 	struct swapz_observation_record *destination;
 	unsigned token_high, sequence;
-	bool result = false;
+	u64 result = 0;
 
 	if (!recorder)
-		return false;
+		return 0;
 	token_high = (unsigned)atomic_read(&recorder->token_high);
 	if (!record || record->sequence || record->event < SWAPZ_OBS_CAPTURE ||
 	    record->event > SWAPZ_OBS_CLEANUP || !event_fields_valid(record) ||
@@ -259,12 +259,18 @@ bool swapz_observation_append(struct swapz_observation_gate *gate,
 	 */
 	*destination = *record;
 	smp_store_release(&destination->sequence, (u64)sequence);
-	result = true;
+	result = sequence;
 out:
 	if (!check_late_stop(recorder))
-		result = false;
+		result = 0;
 	rcu_read_unlock();
 	return result;
+}
+
+bool swapz_observation_append(struct swapz_observation_gate *gate,
+			      const struct swapz_observation_record *record)
+{
+	return swapz_observation_append_sequence(gate, record) != 0;
 }
 
 bool swapz_observation_stop(struct swapz_observation_gate *gate)

@@ -129,6 +129,14 @@ bool swapz_observation_publish(struct swapz_observation_gate *gate,
 			       struct swapz_observation_recorder *recorder);
 /* IDs are monotonically minted run-local integers, never pointer-derived. */
 u64 swapz_observation_mint(struct swapz_observation_gate *gate);
+/* Exact reservation ordinal after release publication, or zero on refusal
+ * (including a published but late-stop slot). Assign the return value, never
+ * infer it from count. Nonzero is not a clean-loss or semantic verdict;
+ * reservation order is not completion order. Existing bool ABI unchanged.
+ * The caller still owns the input record and external entrant lifetime.
+ */
+u64 swapz_observation_append_sequence(struct swapz_observation_gate *gate,
+				       const struct swapz_observation_record *record);
 bool swapz_observation_append(struct swapz_observation_gate *gate,
 			      const struct swapz_observation_record *record);
 /*

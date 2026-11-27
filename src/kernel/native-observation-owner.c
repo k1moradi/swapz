@@ -46,6 +46,12 @@ bool swapz_trial_observation_append(const struct swapz_observation_record *recor
 }
 EXPORT_SYMBOL_GPL(swapz_trial_observation_append);
 
+u64 swapz_trial_observation_append_sequence(const struct swapz_observation_record *record)
+{
+	return swapz_observation_append_sequence(&trial_gate, record);
+}
+EXPORT_SYMBOL_GPL(swapz_trial_observation_append_sequence);
+
 static bool hex_field(const char *field, size_t length)
 {
 	bool nonzero = false;

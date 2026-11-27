@@ -27,10 +27,13 @@ struct swapz_byte_record {
 	u64 accept_sequence, pin_sequence, copy_sequence, release_sequence, clone_sequence, upper_sequence;
 	u32 logical;
 	enum swapz_byte_kind kind;
-	unsigned int user_status;
+	unsigned int user_status; /* v2 completion status, not a user observation */
 	unsigned char input_page[SWAPZ_BYTE_PAGE];
 	unsigned char final_copy[SWAPZ_BYTE_PAGE];
+#ifndef __KERNEL__
+	/* Historical R102 synthetic fixture only; never kernel storage. */
 	unsigned char user_page[SWAPZ_BYTE_PAGE];
+#endif
 };
 /* Cold caller-owned zeroed storage (not stack); never relocate or reuse.
  * One controller serializes start/stop/export/release. Caller gates entry
@@ -68,8 +71,15 @@ bool swapz_byte_clone(struct swapz_byte_collector *collector, u64 operation, u64
 		      u64 descriptor, u64 sequence, unsigned int status);
 bool swapz_byte_upper(struct swapz_byte_collector *collector, u64 operation, u64 original,
 		      u64 clone, u64 descriptor, u64 sequence, unsigned int status);
+/* Complete kernel evidence after actual original ACK, without any user
+ * pointer or claimed user status. Independent userspace joins offline.
+ */
+bool swapz_byte_complete(struct swapz_byte_collector *collector, u64 operation, u64 original);
+#ifndef __KERNEL__
+/* Historical synthetic fixture only; not a kernel entry point. */
 bool swapz_byte_user(struct swapz_byte_collector *collector, u64 operation, u64 original,
 		     unsigned int status, const void *bytes, size_t length);
+#endif
 /* Join is synchronous, non-reentrant, outside append lock. Failed join
  * retains storage and sticks loss; retry must perform a genuine join.
  * Export borrows immutable storage until release, only after clean join.

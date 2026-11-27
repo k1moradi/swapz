@@ -222,6 +222,22 @@ bool swapz_byte_upper(struct swapz_byte_collector *collector, u64 operation, u64
 	return ok;
 }
 
+bool swapz_byte_complete(struct swapz_byte_collector *collector, u64 operation, u64 original)
+{
+	unsigned long flags = 0;
+	struct swapz_byte_record *record;
+	bool ok;
+	LOCK(collector);
+	record = pending(collector, operation);
+	ok = record && collector->phase == UPPER && record->original == original;
+	if (ok)
+		collector->phase = IDLE;
+	finish(collector, ok);
+	UNLOCK(collector);
+	return ok;
+}
+
+#ifndef __KERNEL__
 bool swapz_byte_user(struct swapz_byte_collector *collector, u64 operation, u64 original,
 		     unsigned int status, const void *bytes, size_t length)
 {
@@ -241,6 +257,8 @@ bool swapz_byte_user(struct swapz_byte_collector *collector, u64 operation, u64 
 	UNLOCK(collector);
 	return ok;
 }
+
+#endif /* historical synthetic user fixture */
 
 void swapz_byte_invalidate(struct swapz_byte_collector *collector)
 {
