@@ -1,0 +1,197 @@
+{
+  "round": 110,
+  "agent": 11,
+  "issue": 228,
+  "status": "PASS_COMPOSED_PREFLIGHT_HOST_AND_DIRECTED_ONLY_ADMISSION_BLOCKED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "physical": "NO_GO",
+  "freeze": "1ede7cfc7be8e870cadf34afec7a655d4630750e",
+  "freeze_tree": "aca15a12f4691651fd6918935816d67620ac571e",
+  "task": "62e5ae4bd5fe07cd0c0dfe0f1c3ea3068d570b50",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "connected_freeze": "6394bf9aec7709744caf294f8bd7e935ca481dcd",
+  "publication": {
+    "source": "453f9edf969d852067231908271f86b56175b2a4",
+    "parent": "62e5ae4bd5fe07cd0c0dfe0f1c3ea3068d570b50",
+    "tree": "fcf8ad96a46d05af86362117172c95ab1cdb6ef1",
+    "main": true,
+    "expected_head": true,
+    "nonforce": true,
+    "sole_parent": true,
+    "remote_readback": true,
+    "standards_old": "2db29305a1e87908469062d46493e2f938c4cd05",
+    "standards_old_bytes": 1943054,
+    "standards_new": "4a5a26f4502fde6a00a6dd9f76601a2d54fb7758",
+    "standards_exact_prefix_verified": true
+  },
+  "source_overlay": {
+    "path": "tests/tools/round110-original-dm-composed-preflight.patch",
+    "blob": "61a83b92c43be93d0a3ebffe614de4bc8ebe8660",
+    "images": {
+      "drivers/md/dm.c": [
+        "332fc3faf1ad05f3756bf7d90b476f28bd50a012",
+        "5e446e6b80f5744e082ed13a506506499ecb854f"
+      ]
+    },
+    "guard": "SWAPZ_ROUND110_COMPOSED_PREFLIGHT_TEST",
+    "inserted_lines": 128,
+    "connector_exact_apply_reverse_reapply": "PASS",
+    "guard_off": "BYTE_EXACT",
+    "extracted_blob": "7f3c7493373219340c489d3a6baf88bd747ae4e2",
+    "caller": false,
+    "export": false,
+    "retained_refs": false,
+    "admission": false
+  },
+  "inputs": {
+    "a1_stage_helper": "b2ab565043799e96adc374aeb4cdaacbce45c1df",
+    "connected_verifier": "dc6478212a008c9e2eea24b022b69ad17b503366",
+    "historical": "d2baba1bda02b78eb7df265d22c5e9dbee09e2b1",
+    "baseline": "5a36cabf0989dfffc75de52a6ab8cc021092ebf6",
+    "mm_area_patch": "3c38d165804cb62c7f0d99e27e1ed303987ec90e",
+    "swapfile": "8b9826f09f7b3127d4cb739a072102763d8e1ecd",
+    "carrier_header": "8d369c402780e06ffd317919acdd6bbd4802646e",
+    "mm_zswap": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+    "controller": "0ea943f55449cacae473c182f33e75c48eb371bb",
+    "controller_header": "df0112eaa70989a827c5964ae42fecbd51c9860a",
+    "target": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d"
+  },
+  "fixture_blob": "4c50c74227e401e34c901c0ebccc02c91067ca7a",
+  "verifier_blob": "23101df83bef1d5669a5d6943df53639e7de8022",
+  "workflow_blob": "4e2649b9aab4efe27d393185f7aca904d91cb7c1",
+  "qualification": {
+    "run": 46051073041,
+    "job": 140682225544,
+    "attempt": 1,
+    "head_sha": "453f9edf969d852067231908271f86b56175b2a4",
+    "conclusion": "success",
+    "status": "completed",
+    "composition": "PASS_R110_COMPOSED_SOURCE_ONLY",
+    "host": "PASS_ACTUAL_EXTRACTED_HOST_ONLY",
+    "directed": "PASS_CHANGED_DM_OBJECT_GUARD_ON_AND_OFF",
+    "full_link": "NOT_RUN",
+    "native_runtime": "NOT_RUN",
+    "first_error": null,
+    "artifact": {
+      "id": 15223983473,
+      "bytes": 267515,
+      "sha256": "5ac0a2c56b7fc1f51acc6740e404d5d8da0a2bcd5702d0451e826e165ad6df2e",
+      "results_sha256": "946ebd4ac5cc3515f081089afcfa8920177ebd5f316e39835884ae8a34774d6f",
+      "members": 239,
+      "verified": "downloaded, exact archive SHA256 and bytes, CRC clean, source/freeze, results/config/object blob and SHA256 checked; local nm/readelf on extracted actual ELF objects independently verified"
+    },
+    "local_blocker": "git ls-remote exit128 Could not resolve host github.com",
+    "local_compiler_tests": "NOT_RUN",
+    "precheck": "all checkouts, direct-main, full standards prefix and toolchain PASS",
+    "connected_historical_stage": "PASS_CONNECTED_SOURCE",
+    "composition_census": {
+      "linux_paths": 34,
+      "module_paths": 57
+    },
+    "stage": "PASS_EXACT_R110_COMPOSITION_AND_DM_ROUNDTRIP",
+    "host_results": {
+      "compilers": {
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)"
+      },
+      "flags": "-std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-omit-frame-pointer -fno-pie -no-pie -fsanitize=address,undefined -fno-sanitize-recover=all",
+      "modes_per_compiler": {
+        "success": 73,
+        "invalid": 86,
+        "lifecycle": 261,
+        "topology": 235,
+        "failures": 275,
+        "races": 125
+      },
+      "checks_per_compiler": 1055,
+      "checks_total": 2110,
+      "mutants_per_compiler": 20,
+      "mutants_total_rejected": 40,
+      "mutant_exit": 77,
+      "mutant_names": [
+        "deferred",
+        "final-reservation",
+        "late-lifecycle",
+        "late-table",
+        "mm-epoch",
+        "mm-type",
+        "no-borrow-release",
+        "no-clear",
+        "overflow",
+        "page-zero",
+        "partition",
+        "range-bound",
+        "release-order",
+        "suspend",
+        "table-range",
+        "target-epoch",
+        "target-range",
+        "wrong-disk",
+        "wrong-table-owner",
+        "wrong-target"
+      ],
+      "first_error_lines": {
+        "default": 208,
+        "no-borrow-release": 100,
+        "release-order": 100,
+        "no-clear": {
+          "gcc": 213,
+          "clang": 214
+        },
+        "page-zero": 158,
+        "range-bound": 174,
+        "table-range": 174
+      }
+    },
+    "config": {
+      "blob": "6d368f5e8210f8a6ad4e3ecadc4e76c4c97131eb",
+      "bytes": 46655,
+      "sha256": "baa7cf07515c4b99940628ce10959efff5a01a04560e27cb8d10b602a0976a9d"
+    },
+    "native_compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "objects": {
+      "guard-off": {
+        "blob": "c1d788e275dd0013afb0a8b7cd0e68c969708534",
+        "bytes": 94552,
+        "sha256": "a09d2d795bffcf60c066180e531a031250649965fe50e4cb5f7c10bc2397c764"
+      },
+      "guard-on": {
+        "blob": "b33d18df8d9432833ae248820c178bedea8b611d",
+        "bytes": 97416,
+        "sha256": "8e80adf223715fc586548f8e53ffe1c9942ff6addfbc37b2ac243cf72034be78"
+      }
+    },
+    "native_symbol_check": {
+      "guard_off": "new local symbol and both imports absent",
+      "guard_on": "local t dm_swapz_combined_preflight; both imports undefined in relocatable object; no export",
+      "actual_readelf_relocations": [
+        "0x4755 R_X86_64_PLT32 swapz_mm_trial_area_preflight - 4",
+        "0x477a R_X86_64_PLT32 swapz_trial_controller_query_registered - 4",
+        "0x47de R_X86_64_PLT32 swapz_mm_trial_area_preflight - 4"
+      ]
+    }
+  },
+  "decisions": {
+    "composition_order": "Local full checkout unavailable. Authored guarded candidate from exact preimage and published one source-triggered workflow; first gate executes A1 helper on full clean pinned checkouts, aborts before applying new DM overlay or testing if helper fails. No helper changes or bypass; full compose not executed before authoring.",
+    "lock_order": "Caller holds independent opened file and md lifetime. suspend_lock precedes minor short checks and SRCU borrow. Frozen controller query registry mutex then target queue spinlock then RCU; no reverse suspend acquire or file release in callback. MM swap_lock acquired and released separately before and after target query. No spinlock spans callback. SRCU released before suspend unlock. Native ordinary removal gate needs zero open count; independently pinned actual opened mapper prevents normal deletion; deferred removal can be marked and is rechecked.",
+    "snapshot": "Exact live BIO DM disk/part0, nonpath block file, actual single swapz target starting at sector0 and covering table, data range 1..16 pages excluding page0, aligned and overflow-safe. Read MM, target, MM; both MM scalar identities match and nonzero epoch, all target scalars nonzero and range exact, live table/lifecycle rechecked. Optional expected broker omitted (NULL); no broker lifetime inferred.",
+    "limitations": "Not atomic across MM and target; target state or area may change immediately. Final admission must independently revalidate all identities and establish trusted owner. No native concurrency/runtime proof. No new pointers or retained references returned, no installed caller, no positive authority."
+  },
+  "safety": {
+    "full_connected_build": false,
+    "duplicate_dispatch": false,
+    "vm": false,
+    "boot": false,
+    "load": false,
+    "activation": false,
+    "physical_mutation": false,
+    "branches": false,
+    "prs": false,
+    "peer_dependency": false
+  },
+  "acceptance_owner": "Agent 1"
+}
