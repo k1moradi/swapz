@@ -1,0 +1,2 @@
+# R112 — diagnostic recovery and concrete admission readiness
+Issue [#230](https://github.com/k1moradi/swapz/issues/230). Freeze 7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1, tree 5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0. [R111 A1 closeout](../round111/agent1-terminal-checkpoint.md). Two workers: [A4 codec recovery](agent4-codec-recovery-p0.md), [A11 native readiness decision](agent11-native-readiness-p0.md). [Contract](frozen-contract.md) · [Notification](notification.md). A1 owns acceptance; reports here and #230. No repeat connected build.
