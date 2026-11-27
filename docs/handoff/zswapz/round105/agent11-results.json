@@ -1,0 +1,159 @@
+{
+  "round": 105,
+  "agent": 11,
+  "issue": 223,
+  "status": "PARTIAL_HOST_PASS_NATIVE_PENDING_ADMISSION_BLOCKED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "frozen_source": "ae7dc02e5db07fc6d133e02ffd558cb68c8e3159",
+  "frozen_tree": "3cc943f1e9dd46d6174f18e5adf7519a7e2f3f7c",
+  "task_commit": "5148f7f941fa9144d01c51b047fec16a7b9e557f",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "publication": {
+    "source_commit": "5930e2eea64f6a8904fc8739981deb5820b7cd18",
+    "parent": "a01da21e043440406e2beb0de379462da1fde138",
+    "tree": "528ec36e65f02f751e67f66413ceb9b9f8626e4b",
+    "branch": "main",
+    "force": false,
+    "expected_head_checked": true,
+    "remote_readback_verified": true,
+    "standards_prefix_blob": "73c521408da078cea3a87f5983c77baff49015be",
+    "standards_post_blob": "e97816a777fc21712b5d480e74e1bf0379176e3f",
+    "standards_prefix_roundtrip_verified": true
+  },
+  "overlays": [
+    {
+      "path": "tests/tools/round105-original-mm-exact-query-export.patch",
+      "blob": "3048e05e3f594dbaa6a10241fe1fa9c6092fbb54",
+      "owner": "A1 frozen",
+      "pre": "1ecc86d30f20790f1fae7506a3f55d612200831a",
+      "post": "2bfc139f380461c71da78a8c7f9469d1e7eb0b22"
+    },
+    {
+      "path": "tests/tools/round105-original-mm-terminal-correlation.patch",
+      "blob": "183cbc21e1004a8d75086f4e165e436bfb901306",
+      "pre": "2bfc139f380461c71da78a8c7f9469d1e7eb0b22",
+      "post": "b0acebd01b19ea0900300a609ffbf9448aec51d3"
+    },
+    {
+      "path": "tests/tools/round105-original-mm-admission-join.patch",
+      "blob": "8c9c73bcb017202efb049e85da116443f848ffff",
+      "images": {
+        "mm/swapz-trial-terminal.inc": [
+          "b0acebd01b19ea0900300a609ffbf9448aec51d3",
+          "697f3c9fc51738fedabc58cefc4eee6fddc8358c"
+        ],
+        "mm/zswap.c": [
+          "e088dd706763bec377d09a81905cf5de9b371c6a",
+          "058389456ee1586f5a26d40f78cd5cde99312060"
+        ],
+        "mm/swapfile.c": [
+          "031a93193886b093045e4aa15456016da49a7a43",
+          "d20a7f0003405bd1450cc52af63a773c91ee86b6"
+        ],
+        "include/linux/swapz_mm_carrier.h": [
+          "b930f6f04a21d3f2b8b6f2279e028a94cfc99502",
+          "bd88db905e5009e0e6161cad1d09b6d33bde2560"
+        ]
+      }
+    }
+  ],
+  "fixture": {
+    "blob": "1b37cbf993b7a17810bad644263cdb71e5d9b7fd",
+    "sha256": "6209e04e44bfaa300fc0891464e781e932ed7c97dee0e3840d79c50ac49c65f6",
+    "terminal_blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+    "debt_header_blob": "d1d2fc65084936380c211094ce6f073273596338",
+    "scope_control_local_transcription_blob": "69f23b5ee8d8fec467ffb7071fca37e0c8ed75df"
+  },
+  "verifier_blob": "14bb31c8b8748657a07b8a22e93e0b830f59bb38",
+  "workflow_blob": "1f4bbb2465b6794d7b4046b68fbc2dc37dadf1c6",
+  "stage": {
+    "local_terminal_git_apply_reverse_reapply": "PASS",
+    "other_three_postimages": "PASS_CONNECTOR_RECONSTRUCTION_AND_DETERMINISTIC_REVERSE_REAPPLY_NOT_NATIVE_GIT_APPLY",
+    "full_chain_hosted": "PENDING"
+  },
+  "host": {
+    "status": "PASS_HOST_SUBSTITUTES_ONLY",
+    "compilers": [
+      "GCC 14.2.0",
+      "Clang 17.0.0"
+    ],
+    "flags": "-std=gnu11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie",
+    "cases_per_compiler": {
+      "accepted-before-offline": 85,
+      "offline-before-origin": 80,
+      "reused-epoch": 44,
+      "missing-correlation": 79,
+      "unobserved": 78,
+      "partial-correlation": 42,
+      "detach": 169
+    },
+    "checks_per_compiler": 577,
+    "total_checks": 1154,
+    "mutants_per_compiler": {
+      "epoch": {
+        "exit": 77,
+        "line": 164
+      },
+      "loss": {
+        "exit": 77,
+        "line": 180
+      },
+      "snapshot": {
+        "exit": 77,
+        "line": 104
+      },
+      "raw-bdev": {
+        "exit": 77,
+        "line": 196
+      }
+    },
+    "mutant_rejections": 8,
+    "initial_correlation_only": {
+      "checks_per_compiler": 328,
+      "mutant_rejections": 8
+    },
+    "limitations": [
+      "Terminal inc and debt header byte-pinned; scope controls manually transcribed from reconstructed postimage, local extraction whitespace blob differs from connector extraction; hosted verifier extracts actual functions directly.",
+      "Deterministic host substitutes for RCU, locks, BIO, broker and file refs; no real race/chain/requeue/typed MM native execution in R105.",
+      "Input-retirement callsites and final swapfile retirement placement only reconstructed/static, not executed in host fixture."
+    ]
+  },
+  "native": {
+    "status": "NOT_YET_EXECUTED_OR_VERIFIED",
+    "run_id": 45966609289,
+    "job_id": 140396673331,
+    "observed_run_status": "queued",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45966609289",
+    "objects_requested": [
+      "mm/zswap.o",
+      "mm/swapfile.o"
+    ],
+    "native_link": "NOT_RUN",
+    "artifact": "NOT_AVAILABLE",
+    "first_local_blocker": "git ls-remote github.com DNS resolution failure exit 128; no full Linux checkout",
+    "dispatch": "single automatic source push; no manual dispatch or rerun"
+  },
+  "admission": {
+    "independent_positive_authority": "MISSING",
+    "selected_area_ref": "existing pinned exact publication acquisition retained",
+    "file_detach": "internal cold API after verified MM join; independent controller refs and actual final table retirement still required",
+    "cleanup": "MM snapshot actual debt; not clean record or target/broker/provider proof",
+    "byte_retirement": "unsupported old committed provenance invalidates byte trace; no invented erase ABI",
+    "controller_integration": "NOT_DONE_NO_SAME_ROUND_PEER_DEPENDENCY"
+  },
+  "prohibited": {
+    "full_build": false,
+    "vm": false,
+    "module_load": false,
+    "activation": false,
+    "physical_mutation": false,
+    "branches": false,
+    "prs": false,
+    "manual_duplicate_dispatch": false
+  },
+  "acceptance_owner": "Agent 1"
+}
