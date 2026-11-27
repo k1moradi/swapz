@@ -1,0 +1,178 @@
+{
+  "round": 105,
+  "agent": 2,
+  "issue": 223,
+  "status": "PASS_PRIVATE_EXPORT_HOST_AND_DIRECTED_OBJECTS_ONLY",
+  "freeze": "ae7dc02e5db07fc6d133e02ffd558cb68c8e3159",
+  "freeze_tree": "3cc943f1e9dd46d6174f18e5adf7519a7e2f3f7c",
+  "task": "5148f7f941fa9144d01c51b047fec16a7b9e557f",
+  "task_header_blob": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source": "013ae9be685f9555f360279f9124ed682adf2f73",
+  "source_parent": "9d7ebfc4531db341ecf889d8e0b85969443dc147",
+  "source_tree": "239a440cc741550d92e831e95ca452727e608777",
+  "changes": {
+    "src/kernel/native-observation-owner.c": {
+      "pre": "50271d7a08763efff55b8767489ea323a3dbf381",
+      "post": "88e53220ec7c2c610b0645229576418424f3376f"
+    },
+    "src/kernel/native-observation-owner.h": {
+      "pre": "68750e6b7e78f5bb236c968b3694a429bff6813f",
+      "post": "b80d36ff48f775c161c3ed3694f4e94a59f18f96"
+    },
+    "src/kernel/native-observation-byte-bridge.c": {
+      "pre": "6b3446f6b90257e704052dbf5a73979c64b6399f",
+      "post": "81b86699c4790672ab6d35f1ac6ddbc70b9a165d"
+    },
+    "tests/tools/round103-private-byte-correlation.py": {
+      "pre": "da63f69a8fd7676424e8dc3a7b86987c81467ab4",
+      "post": "c30d5631f94e2501e84c48220e848f2a5dfa46b7"
+    },
+    "tests/tools/round105-private-evidence.py": {
+      "pre": null,
+      "post": "75f5e6eddd546efc377bdb769866098a298ae063"
+    },
+    "tests/tools/round105-producer-shapes.py": {
+      "pre": null,
+      "post": "9e46232f89e59ffd9cf582a201d7da4d0ec6ff0e"
+    },
+    "tests/runtime/native/fixtures/round105-private-evidence.c": {
+      "pre": null,
+      "post": "17b9b495728a20a3053183e9afe633a57169852e"
+    },
+    "tests/runtime/native/round105-private-evidence-test.py": {
+      "pre": null,
+      "post": "e791238dee4c27a0d85099c3b2bb57371ada725d"
+    },
+    ".github/workflows/phase-a-round102-native-byte-collector-noauth.yml": {
+      "pre": "ddad40c757ebc5a1b644478f2e17c27142048b2d",
+      "post": "694191d91f483d798d46362c43d4d535be2c2b44"
+    }
+  },
+  "frozen_producers": {
+    "target": "8a84ac4d395e2f635ae3e4216bade471c03618de",
+    "r104_overlay": "132c03fcefe961696f468a41c763666f1dc4f90c",
+    "r098_mm_overlay": "3832b6aa76b783f3790b869cf40512b114d66cd6",
+    "emitters": 3,
+    "initializer_shapes": 10,
+    "modeled_values": true,
+    "missing_outcomes_and_cleanup_synthetic": true
+  },
+  "standards": {
+    "before": "14b05a8ddf527584482e641792ed251d85eead11",
+    "after": "9584681e9431ba8d56be6400b4e81f739fdac0bf",
+    "parent_bytes": 1915825,
+    "current_bytes": 1918925,
+    "exact_complete_prefix": true
+  },
+  "publication": {
+    "branch": "main",
+    "force": false,
+    "expected_parent": "9d7ebfc4531db341ecf889d8e0b85969443dc147",
+    "verified_readback": "013ae9be685f9555f360279f9124ed682adf2f73",
+    "unpublished_stale_parent_reconciled": true,
+    "intervening_a10_build_harness_only": true,
+    "no_peer_source_dependency": true
+  },
+  "r104": {
+    "source": "eba09a4abb2a9afcc5b9775924f578f1fc8661c5",
+    "run": 45954371230,
+    "job": 140357335343,
+    "terminal": "SUCCESS_CARRIED",
+    "checks_each": 17,
+    "not_replayed": true
+  },
+  "guard_off": {
+    "run": 45965574548,
+    "job": 140393318143,
+    "attempt": 1,
+    "source": "013ae9be685f9555f360279f9124ed682adf2f73",
+    "conclusion": "success",
+    "checks_each": {
+      "clean": 237,
+      "join": 118,
+      "overflow": 63,
+      "invalid": 63,
+      "total": 481
+    },
+    "current_scope_and_correlation_cases": 22,
+    "artifact": {
+      "id": 15182990376,
+      "bytes": 2069,
+      "sha256": "2bda4cbe0c6aa6803d8d7dd2cdc38af60777e76b7aa0a196341cdd51c541ed23",
+      "archive_independently_verified": true
+    },
+    "first_error": null
+  },
+  "hosted": {
+    "run": 45965574598,
+    "job": 140393317977,
+    "attempt": 1,
+    "source": "013ae9be685f9555f360279f9124ed682adf2f73",
+    "conclusion": "success",
+    "host": {
+      "gcc": "13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1)",
+      "clang": "18.1.3 (Ubuntu 1ubuntu1)",
+      "checks_each": 34,
+      "clean_operations": 7,
+      "claimed_error_operations": 8,
+      "flags": "-std=c2x -O2 -g -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie -pthread",
+      "host_substitutes": true
+    },
+    "directed": {
+      "status": "PASS",
+      "compiler": "GCC 13.3.0",
+      "arch": "x86_64",
+      "config": {
+        "bytes": 40737,
+        "sha256": "72b6e69c29a768b51e678662ff577d9426b32542827099677fd2bf26e6da453d",
+        "SMP": true,
+        "TREE_RCU": true,
+        "NR_CPUS": 4,
+        "MODULES": true,
+        "TINY_RCU": false
+      },
+      "objects": {
+        "native-observation-byte-bridge.o": {
+          "bytes": 19144,
+          "sha256": "76d486816f4747e0a0d0661728e2a41dc2a33ab6ac304cbd38c6d88bf3b4a96d"
+        },
+        "native-observation-owner.o": {
+          "bytes": 14008,
+          "sha256": "dbc5b8261f94a1488239448230d43f5b3b1ce877a273dccacc2f0d771cac9cf6"
+        }
+      },
+      "elf_type": 1,
+      "elf_machine": 62,
+      "private_sink_not_exported": true,
+      "full_link": "NOT_RUN"
+    },
+    "artifact": {
+      "id": 15182692922,
+      "bytes": 28650,
+      "sha256": "d7ccac450385eb029b9952acbd01854ac0892e9449e6e264082655a3c1e8f16d",
+      "archive_independently_verified": true,
+      "object_hashes_independently_verified": true,
+      "source_parent_and_blobs_verified": true
+    },
+    "first_error": null,
+    "manual_dispatch": false
+  },
+  "local": {
+    "git_exit": 128,
+    "first_environment_error": "Could not resolve host: github.com",
+    "source_compile": "NOT_RUN_LOCALLY",
+    "artifact_inspection": "PASS"
+  },
+  "native_capture": false,
+  "connected_link": "NOT_RUN_A2",
+  "integration": "PRIVATE_INTERNAL_SINK_AND_OFFLINE_CONSUMER_ONLY",
+  "trusted_transport": "ABSENT",
+  "actual_independent_user_provenance": "NOT_ESTABLISHED",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO"
+}
