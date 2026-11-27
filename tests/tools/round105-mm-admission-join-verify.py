@@ -83,7 +83,7 @@ def stage(state, evidence, frozen, baseline, linux):
     declarations = {
         helper.GLUE_DIR + "/native-observation-integration.h": "e3bca3367459c7f79960105f63e9ddef4e95b4d6",
         helper.GLUE_DIR + "/native-observation-adapter.h": "ffa547fbecad79b3fabf0ded4bb182c201e4a33d",
-        helper.GLUE_DIR + "/native-observation-owner.h": "68750e6b7e78f5bb236c968b3694a429bff6813f",
+        helper.GLUE_DIR + "/native-observation-owner.h": "9e44829f3920167829fc364fdb6a95bfa0930805",
     }
     for relative, expected in declarations.items():
         pin(linux / relative, expected)

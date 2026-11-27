@@ -1,0 +1,35 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+index 058389456ee1586f5a26d40f78cd5cde99312060..9e1efceae44c384370d0aa3e25748d127a5cd4ad 100644
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1056,1 +1056,9 @@
+-	/* The trusted caller owns a live opened block file through this call.
++#ifdef SWAPZ_ROUND106_ADMITTED_OWNER_TEST
++	/* AUTH=0: the frozen registry is not an admission authority. There
++	 * is no independently approved owner grant or pre-install route
++	 * identity source. Refuse before touching any caller-owned object,
++	 * area/file/broker reference or RCU publication. This guard is a
++	 * negative boundary, not an admitted-owner implementation. */
++	return -EACCES;
++#endif
++	/* The trusted caller owns a live opened block file through this call.
+@@ -1217,3 +1225,16 @@
+-	/* Recheck actual retained debt, never manufacture a zero count. */
+-	if (atomic_read_acquire(&swapz_mm_busy))
+-		goto finish;
++	/* Recheck actual retained debt, never manufacture a zero count. */
++#ifdef SWAPZ_ROUND103_EXTERNAL_JOIN_TEST
++	/* Unpublication and the grace period are not a substitute for
++	 * the terminal witness. In particular, preserve the retained cap
++	 * and files if a preexisting callback faults during that interval. */
++	spin_lock_irqsave(&swapz_mm_terminal_gate, flags);
++	if (!swapz_mm_terminal_joined || !swapz_mm_terminal_ready()) {
++		error = swapz_mm_terminal_debt.fault ? -EUCLEAN : -EBUSY;
++		spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++		goto finish;
++	}
++	spin_unlock_irqrestore(&swapz_mm_terminal_gate, flags);
++#else
++	if (atomic_read_acquire(&swapz_mm_busy))
++		goto finish;
++#endif

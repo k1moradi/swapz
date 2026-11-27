@@ -1,0 +1,92 @@
+name: Round106 A11 guarded MM owner boundary AUTH0
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round106-original-mm-owner-boundary.patch'
+      - 'tests/tools/round106-mm-owner-boundary-verify.py'
+      - 'tests/runtime/native/fixtures/round106-mm-owner-boundary.c'
+      - '.github/workflows/phase-a-round106-mm-owner-boundary-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  mm-owner-boundary-directed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact direct-main source and standards prefix
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          import hashlib
+          import subprocess
+          from pathlib import Path
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(previous) and len(current) > len(previous)
+          print("R106 complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          PY
+      - name: Hosted toolchain prerequisites
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential clang binutils bc bison flex libelf-dev libssl-dev pkg-config openssl perl python3 xz-utils cpio
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: d2baba1bda02b78eb7df265d22c5e9dbee09e2b1
+          path: frozen
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5a36cabf0989dfffc75de52a6ab8cc021092ebf6
+          path: baseline
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Exact staged changes, focused GCC and Clang host cases and native changed objects
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B swapz/tests/tools/round106-mm-owner-boundary-verify.py frozen baseline linux r106-a11-evidence
+      - name: Bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round106-agent11-mm-owner-boundary
+          path: |
+            r106-a11-evidence/results.json
+            r106-a11-evidence/*.log
+            r106-a11-evidence/*.diff
+            r106-a11-evidence/*.config
+            r106-a11-evidence/*.symbols
+            r106-a11-evidence/r105-stage/r104-stage/r103-stage/unified-base-manifest.json
+            r106-a11-evidence/r105-stage/r104-stage/r103-stage/*.log
+            r106-a11-evidence/r105-stage/*.log
+            r106-a11-evidence/r105-stage/r104-stage/*.log
+            r106-a11-evidence/objects/
+          if-no-files-found: warn
+          retention-days: 14
