@@ -2,8 +2,8 @@
   "round": 105,
   "agent": 10,
   "kind": "connected-frozen-compile-link-only",
-  "status": "IN_PROGRESS",
-  "conclusion": null,
+  "status": "PASS_CONNECTED_COMPILE_LINK_ONLY",
+  "conclusion": "success",
   "source_freeze": "ae7dc02e5db07fc6d133e02ffd558cb68c8e3159",
   "source_tree": "3cc943f1e9dd46d6174f18e5adf7519a7e2f3f7c",
   "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
@@ -21,7 +21,7 @@
     "overlay": "3048e05e3f594dbaa6a10241fe1fa9c6092fbb54",
     "preimage": "1ecc86d30f20790f1fae7506a3f55d612200831a",
     "postimage": "2bfc139f380461c71da78a8c7f9469d1e7eb0b22",
-    "application": "NOT_VERIFIED"
+    "application": "PASS_STRICT_APPLY_REVERSE_REAPPLY"
   },
   "run_id": 45965476047,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45965476047",
@@ -29,8 +29,8 @@
     {
       "job_id": 140393001987,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45965476047/job/140393001987",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "steps": [
         {
           "number": 1,
@@ -83,52 +83,67 @@
         {
           "number": 9,
           "name": "One connected exact stage and full compile link",
-          "status": "in_progress",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
         },
         {
           "number": 10,
           "name": "Bounded native evidence",
-          "status": "pending",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
         },
         {
           "number": 16,
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
         },
         {
           "number": 17,
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
         },
         {
           "number": 18,
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
         },
         {
           "number": 19,
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
         },
         {
           "number": 20,
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
         }
       ]
     }
   ],
-  "artifacts": [],
-  "actual_full_kernel_link": "NOT_VERIFIED",
-  "actual_module_link": "NOT_VERIFIED",
-  "genuine_modpost": "NOT_VERIFIED",
+  "artifacts": [
+    {
+      "id": 15183260293,
+      "name": "round105-agent10-connected-build",
+      "size_in_bytes": 3740239,
+      "digest": "sha256:b079c5c6eae1e06a4f3e3de8f09bb5e9645053b6b54fbdd250f058984b09b3ed",
+      "expired": false,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45965476047/artifacts/15183260293"
+    }
+  ],
+  "actual_full_kernel_link": "PASS",
+  "actual_module_link": "PASS",
+  "genuine_modpost": "PASS_GENUINE",
   "first_error": null,
   "local_checkout_blocker": {
     "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
@@ -136,7 +151,7 @@
     "error": "Could not resolve host: github.com",
     "full_linux_checkout_available": false
   },
-  "compiler_config_artifact_digests": "NOT_VERIFIED",
+  "compiler_config_artifact_digests": "INDEPENDENTLY_VERIFIED_FROM_DOWNLOADED_ZIP",
   "AUTH": 0,
   "phase_a": "BLOCKED",
   "compressed_handoff": "OFF",
@@ -148,5 +163,113 @@
   "vm": false,
   "manual_dispatches": 0,
   "second_full_build": false,
-  "peer_implementation_dependencies": false
+  "peer_implementation_dependencies": false,
+  "run_attempt": 1,
+  "full_build_attempts": 1,
+  "stage": "PASS_CONNECTED_SOURCE",
+  "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+  "elf_prerequisite": "PASS",
+  "openssl_prerequisite": "PASS",
+  "config": {
+    "bytes": 46577,
+    "blob": "303bd78252794a4283ee026569e84ddb84560cb4",
+    "sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf",
+    "enabled": [
+      "64BIT",
+      "X86_64",
+      "SMP",
+      "TREE_RCU",
+      "SWAP",
+      "ZSWAP",
+      "MD",
+      "BLK_DEV_DM",
+      "MODULES",
+      "SWAPZ_ORIGINAL_MM_CARRIER_TEST"
+    ],
+    "nr_cpus": 4,
+    "disabled": [
+      "ZSWAP_DEFAULT_ON",
+      "ZSWAP_SHRINKER_DEFAULT_ON",
+      "MODVERSIONS"
+    ]
+  },
+  "module_info": {
+    "license": "GPL",
+    "depends": "",
+    "vermagic": "7.3.0+ SMP preempt",
+    "swapz_build_source_sha": "ae7dc02e5db07fc6d133e02ffd558cb68c8e3159",
+    "swapz_build_source_clean": "1"
+  },
+  "resources": {
+    "elapsed_seconds": 167.184,
+    "child_user_seconds": 254.896146,
+    "child_system_seconds": 44.684916,
+    "child_max_rss_kib": 186820
+  },
+  "symbols": {
+    "vmlinux_strong_undefined": 0,
+    "module_strong_imports": 125,
+    "all_module_imports_resolved_in_kernel_symvers": true,
+    "kernel_symvers_rows": 4040,
+    "private_module_gpl_imports": 27,
+    "query_definition_count": 1,
+    "query_relocation_count": 1,
+    "query_export_row": [
+      "0x00000000",
+      "swapz_mm_trial_scope_matches_exact",
+      "vmlinux",
+      "EXPORT_SYMBOL_GPL"
+    ]
+  },
+  "source_manifest": {
+    "frozen_product_count": 63,
+    "staged_linux_paths": 34,
+    "staged_module_inputs": 57,
+    "results_json_sha256": "81854e8b530e713b93a97375485bd4096f16e08df72c7db0cf9246a6ef9b0e9c",
+    "historical_unified_manifest_sha256": "78bcc288135a417cdcc28772895f9dfd8ed29ed1f8e41f712894e288e084d475",
+    "connected_source_diff_sha256": "ebf476c231abcc6f922ca61cf85ad054a3a257143c2eaa785541b715cc3dd6d0"
+  },
+  "native_artifacts": {
+    "vmlinux": {
+      "bytes": 12862816,
+      "blob": "a190a65a0d5a3029d2565acd70ccf5eb397f0274",
+      "sha256": "bbbec10f3cd422f9ec3b33fddd856c2a4912ea49d9d055675ea40dc5ff41d284",
+      "elf": "ELF64 x86-64 EXEC"
+    },
+    "dm-swapz.ko": {
+      "bytes": 470104,
+      "blob": "a448e60c46dc3f7a60dadad47709ff9122054c7f",
+      "sha256": "892ed64cb9a45c565107c63fdd8da9f07cb6ea77b0f3b31e5f0d53e37b325325",
+      "elf": "ELF64 x86-64 REL"
+    },
+    "kernel-Module.symvers": {
+      "bytes": 221424,
+      "blob": "9a6b4640861748b301c13b0ab6f9a71022c93090",
+      "sha256": "c9f048da609f2abce24da695cc9a3a0d001906013316925f179bfee5c99b511d"
+    },
+    "effective.config": {
+      "bytes": 46577,
+      "blob": "303bd78252794a4283ee026569e84ddb84560cb4",
+      "sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf"
+    }
+  },
+  "artifact_verification": {
+    "zip_sha256_match": true,
+    "zip_crc_all_entries_pass": true,
+    "binary_hashes_and_sizes_match": true,
+    "config_hash_matches": true,
+    "independent_nm_readelf": true,
+    "kernel_and_external_modpost_log_markers_present": true,
+    "no_compiler_warnings_in_two_link_logs": true,
+    "binaries_executed_or_loaded": false
+  },
+  "reproduction": "python3 -B swapz/tests/tools/round105-connected-build-verify.py frozen historical baseline linux r105-build r105-a10-evidence",
+  "qualification_limitations": [
+    "frozen R104 plus A1 export correction only, not integrated R105 main",
+    "minimal compile-link configuration, no host compatibility qualification",
+    "MODVERSIONS disabled",
+    "no runtime, trusted admission, terminal retirement or native byte-contract qualification",
+    "no local compiler invocation; independent artifact analysis only"
+  ]
 }
