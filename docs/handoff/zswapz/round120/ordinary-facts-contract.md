@@ -1,0 +1,23 @@
+# Fixed R120 ordinary producer/recorder interface — internal source facts, not a wire schema
+New development-only guard SWAPZ_ROUND120_ORDINARY_FACTS_TEST (absent normal builds, no positive gate). Frozen declaration below is the independent directed-compilation reference; A2 owns new src/kernel/native-ordinary-facts.h/.c, A11/A3 only include it under the explicit guard. For standalone staging, use the literal declarations from this document in a temporary header, with no peer dependencies; report unresolved link if real recorder absent, never call shim a full link. A1 will compose exact candidates and review real linkage before any runtime. Do not modify frozen typed wire schema or old observation guards. No new public exports this round. Where module linkage requires future symbol ownership, report it explicitly; do not add a fake export. No positive caller installed. Value-only facts, independent from typed eligibility; a fact is partial observational evidence, not v3 row or authentication. IDs must come from actual native owner state, never pointers, guessed logical IDs, slots or posthoc byte equality.
+```c
+/* Linux types; only in explicit development guard. */
+enum swapz_ordinary_fact_stage {
+    SWAPZ_ORD_FACT_STORED = 1,
+    SWAPZ_ORD_FACT_EVICT_SELECTED,
+    SWAPZ_ORD_FACT_MAP_PUBLISHED,
+    SWAPZ_ORD_FACT_WRITE_COMPLETE,
+    SWAPZ_ORD_FACT_READ_COMPLETE
+};
+struct swapz_ordinary_fact {
+    u64 area_epoch, target, slot, store, cookie, operation, map_generation;
+    u32 swap_type, generation, stage, status, logical_bytes;
+};
+bool swapz_ordinary_facts_active(void);
+u64 swapz_ordinary_facts_mint(void);
+bool swapz_ordinary_facts_append(const struct swapz_ordinary_fact *fact,
+                                const void *page, size_t length);
+void swapz_ordinary_facts_invalidate(void);
+```
+Global one-shot private recorder, inactive by default; active is a hint, mint/append/invalidate recheck actual active lifetime (permanent gate + RCU or demonstrably safe equivalent). Caller holds valid native objects and page view synchronously; no retained borrowed pointers. Cold controller-only preallocated storage, no allocation/hash/format/I/O/wait in hot paths, bounded attempts and sticky loss on refusal while capture enabled; no evidence-induced error propagation. Max 16 selected pages, 32 successful operation identities, 274 fact slots (bounded metadata and optional 4096-byte copies, capacity fixed before start; no 4096-byte stack arrays). Sequence assigned only at reservation with release/acquire publication, not assumed completion order. Owner must revoke/join all pre-entry and deferred callers before free; failure retains, reports loss and refuses clean export. No reenable or public access. A2 may add private cold owner API with no installed positive caller; tests use isolated actual C, not native kernel execution. Zero mint/append refusal does not affect product I/O.
+Stage-specific fields: area_epoch, target and swap_type come from actual selected scope; slot from real area entry or exact target-sector geometry, never inferred from content. STORED/EVICT_SELECTED require fresh nonzero store/cookie and generation, same actual entry incarnation; operation/map_generation zero; successful status zero and logical_bytes=4096. No page payload on these facts (actual separate source-byte witnesses later). Target facts require actual nonzero operation minted once per attributable operation, actual saved map_generation at publication/read; store/cookie/generation zero until independently bound by future MM/BIO join; status zero and logical_bytes=4096 only for genuine complete single-page success. MAP_PUBLISHED/WRITE_COMPLETE no page; READ_COMPLETE exact original completed 4096-byte page view copied synchronously if safe; if unavailable invalidate, no fabricated bytes. Unsupported, ambiguous, multi-page/split/shared extent attribution, loss/overflow/replacement or missing actual scope/geometry refuses capture; never alter native flow. Target publication may be ordinary packed/RAW/zero if actual qualifying map and one-page identity are proved, but no assertion about media persistence or specific lower BIO. No global uniqueness assertion over reused references to the same operation or store; minted tokens globally unique on creation, repeated only for same owner lineage; no cross-chain correlation claimed. Source facts retain actual ordering; don't sort or delay erase/free. Independent logical-to-slot binding, genuine original upper/lower BIO join, retirement ACK, user bytes and clean actual dtr remain future work. V3 write_commit only same-boot publication, persistence UNPROVEN. A1 acceptance only.
