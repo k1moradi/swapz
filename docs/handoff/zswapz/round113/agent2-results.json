@@ -1,0 +1,105 @@
+{
+  "round": 113,
+  "agent": 2,
+  "kind": "rootless ordinary evidence consumer; synthetic correlation only",
+  "conclusion": "PASS_ROOTLESS_ONLY",
+  "publication": "BLOCKED_PENDING_A1_SERIALIZED_TURN",
+  "frozen_source": "7f671268776eb38e9bb0d4621333af2b4660ad6d",
+  "frozen_tree": "16ed202e11d53560896b07d500fe264b0f306e89",
+  "task_commit": "ddeae7fa5e291ae677fb7ef0e8a723567a45ff5b",
+  "tested_source_candidate": "f7f60ee6813517e482457eb121de3b5f70583067",
+  "candidate_parent": "ddeae7fa5e291ae677fb7ef0e8a723567a45ff5b",
+  "candidate_tree": "24e8af4d6b13b5be03209ae1c6d9a02a53fa4ae2",
+  "tested_blobs": {
+    "tests/tools/phase-a-ordinary-evidence.py": "ba1dee236ae613023b892994bde8f25116c732dd",
+    "tests/runtime/native/phase-a-ordinary-evidence-test.py": "2a002111a02c592a793c9fd9071653b988a81177"
+  },
+  "frozen_inputs": {
+    "tests/tools/native-observation-byte-oracle.py": "f57adf23bb76305f88a20bf54f2702e6c00c7ddd",
+    "tests/tools/native-observation-current-export.py": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+    "tests/tools/native-observation-export.py": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+    "tests/runtime/native/independent-byte-oracle-test.py": "6df63e5c5236a0570c916c95c2e68414349cea4d",
+    "src/kernel/native-observation-byte-bridge.c": "902507cb065828bfa9a8b732edd61fb26ca2f08d"
+  },
+  "standards": {
+    "parent_blob": "e4c88ef49b16a65696aad089d72fb5fc15a2256b",
+    "candidate_blob": "181b17d6badb24d7e8eac0fe45db57b59ff27fc8",
+    "parent_prefix_verified": true,
+    "added_lines": 3,
+    "deleted_lines": 0
+  },
+  "environment": {
+    "python": "3.13.5",
+    "unprivileged_user": "nobody",
+    "native_checkout": false,
+    "source_transfer": "GitHub connector exact blobs independently git hash-object verified",
+    "direct_git": "DNS failure"
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-ordinary-evidence-test.py",
+      "status": "PASS",
+      "exit": 0,
+      "unittest_methods": 7,
+      "skips": 0,
+      "field_mutations": 32,
+      "event_remove_duplicate_reorder_subtests": 108,
+      "max_pages": 16,
+      "max_operations_exercised": 32,
+      "seconds": 5.381
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/independent-byte-oracle-test.py 7f671268776eb38e9bb0d4621333af2b4660ad6d",
+      "status": "PASS",
+      "exit": 0,
+      "checks": 4143,
+      "exhaustive_byte_mutations": 4096,
+      "clean_operations": 7,
+      "clean_pages": 8,
+      "clean_bytes": 32768,
+      "error_operations": 8,
+      "error_pages": 9,
+      "error_bytes": 36864,
+      "native_capture": false,
+      "auth": 0
+    }
+  ],
+  "first_failure": {
+    "stage": "initial environment setup",
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "reason": "Could not resolve host: github.com",
+    "resolved_for_rootless_tests": true
+  },
+  "initial_regression_invocation": {
+    "exit": 2,
+    "reason": "frozen independent-byte-oracle-test.py not present in local runtime",
+    "recovered": "all four exact frozen Python files transferred via connector, blob hashes verified before actual full regression; exit 0"
+  },
+  "first_test_failure": null,
+  "ci": {
+    "status": "NOT_RUN_NOT_ASSIGNED",
+    "run_id": null,
+    "job_ids": []
+  },
+  "compiler_native": "NOT_RUN_NOT_AUTHORIZED",
+  "actual_native_capture": false,
+  "actual_physical_io": false,
+  "native_qualification": "BLOCKED",
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import_enabled": false,
+  "physical": "NO_GO",
+  "source_authenticated": false,
+  "limitations": [
+    "No authenticated capture/producer, trust root, external operator channel or authorization.",
+    "One serial write/read pair per page, <=32 actual I/O operations despite outer 64 cap; concurrent/split/replacement/retry and unsupported events fail closed.",
+    "Expected prior store/slot/generation/cookie must be independently retained. Scope/receipts and bytes are untrusted claims; full same-manifest replay across separate offline invocations cannot be authenticated or recognized without external one-shot admission; native result remains UNKNOWN.",
+    "Lower completion is exact within one unsplit bounded request, independent of logical bytes; no RAW/codec/physical proof.",
+    "No main ref update before A1 explicitly grants turn; candidate commit is an immutable object only."
+  ],
+  "acceptance": "Agent1 only"
+}
