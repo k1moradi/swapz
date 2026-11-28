@@ -1,0 +1,343 @@
+{
+  "round": 119,
+  "agent": 10,
+  "kind": "pinned-linux-source-transport-only",
+  "status": "IN_PROGRESS",
+  "qualification": "PENDING_ACTUAL_LINUX_RESTORE",
+  "conclusion": null,
+  "source_freeze": "c5237321d0eb01002cec990deebff60c6f39ac64",
+  "source_tree": "327f200f9e45e4f06a335945cc8fbd6f41aa4f65",
+  "kernel_subtree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+  "linux_commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "linux_tree": "7494ea078a05b0b824c3f263260e45c1f78bcfd3",
+  "task": "c80097ba6ed9f9a80a955726c802f138e27c53c8",
+  "tested_commit": "1bd094c3fcd5d9a294b33b7fb512b696bf34ac33",
+  "tested_parent": "c80097ba6ed9f9a80a955726c802f138e27c53c8",
+  "tested_tree": "41c55a74c20b91d822fbe0dfd38d1a9379ddd726",
+  "blobs": {
+    "tests/tools/round119-pinned-source-transport.py": "aa36a89b28c02f92eddc0b6e369e59886cbe1082",
+    "tests/runtime/native/round119-pinned-source-transport-test.py": "d928211225a85fb1069f454e49cbcd0bc32395a8",
+    ".github/workflows/phase-a-round119-pinned-source-transport.yml": "2a3c21e4783abe300c034c0baff6169681858bd5",
+    "docs/testing_standards.md": "5d53f983d14a44cd1a11421a61342810aebf8bce"
+  },
+  "standards_parent_blob": "6814d8e261086ed96fb4fb21b8622a3e654615c8",
+  "standards_full_parent_prefix_verified": true,
+  "local_tests": [
+    {
+      "command": "python -B tests/runtime/native/round119-pinned-source-transport-test.py",
+      "exit": 0,
+      "methods": 1,
+      "elapsed_seconds": 0.183,
+      "unprivileged_user": true,
+      "positive": "actual disposable shallow Git multi-chunk export and restore; file and object counts exact",
+      "negative_controls": [
+        "corrupted chunk",
+        "missing chunk",
+        "wrong pack digest",
+        "wrong commit pin",
+        "dirty source"
+      ]
+    },
+    {
+      "command": "workflow generator validation: PyYAML BaseLoader, bash -n, ast.parse",
+      "exit": 0,
+      "artifact_upload_steps": 33,
+      "local_blob_equality": true
+    },
+    {
+      "command": "git ls-remote https://github.com/torvalds/linux.git HEAD",
+      "exit": 128,
+      "first_error": "Could not resolve host: github.com"
+    }
+  ],
+  "local_git": "2.47.3",
+  "minimum_tracked": 50000,
+  "chunk_bytes": 16777216,
+  "max_chunks": 32,
+  "max_pack_bytes": 536870912,
+  "artifact_retention_days": 14,
+  "run_id": 46170807374,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/46170807374",
+  "run_attempt": 1,
+  "jobs": [
+    {
+      "job_id": 141058585035,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/46170807374/job/141058585035",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Exact task and transport source",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Export exact complete source and independently restore",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Upload verified source manifest and restore evidence",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Upload source chunk 00",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Upload source chunk 01",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Upload source chunk 02",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Upload source chunk 03",
+          "status": "pending",
+          "conclusion": null,
+          "number": 10
+        },
+        {
+          "name": "Upload source chunk 04",
+          "status": "pending",
+          "conclusion": null,
+          "number": 11
+        },
+        {
+          "name": "Upload source chunk 05",
+          "status": "pending",
+          "conclusion": null,
+          "number": 12
+        },
+        {
+          "name": "Upload source chunk 06",
+          "status": "pending",
+          "conclusion": null,
+          "number": 13
+        },
+        {
+          "name": "Upload source chunk 07",
+          "status": "pending",
+          "conclusion": null,
+          "number": 14
+        },
+        {
+          "name": "Upload source chunk 08",
+          "status": "pending",
+          "conclusion": null,
+          "number": 15
+        },
+        {
+          "name": "Upload source chunk 09",
+          "status": "pending",
+          "conclusion": null,
+          "number": 16
+        },
+        {
+          "name": "Upload source chunk 10",
+          "status": "pending",
+          "conclusion": null,
+          "number": 17
+        },
+        {
+          "name": "Upload source chunk 11",
+          "status": "pending",
+          "conclusion": null,
+          "number": 18
+        },
+        {
+          "name": "Upload source chunk 12",
+          "status": "pending",
+          "conclusion": null,
+          "number": 19
+        },
+        {
+          "name": "Upload source chunk 13",
+          "status": "pending",
+          "conclusion": null,
+          "number": 20
+        },
+        {
+          "name": "Upload source chunk 14",
+          "status": "pending",
+          "conclusion": null,
+          "number": 21
+        },
+        {
+          "name": "Upload source chunk 15",
+          "status": "pending",
+          "conclusion": null,
+          "number": 22
+        },
+        {
+          "name": "Upload source chunk 16",
+          "status": "pending",
+          "conclusion": null,
+          "number": 23
+        },
+        {
+          "name": "Upload source chunk 17",
+          "status": "pending",
+          "conclusion": null,
+          "number": 24
+        },
+        {
+          "name": "Upload source chunk 18",
+          "status": "pending",
+          "conclusion": null,
+          "number": 25
+        },
+        {
+          "name": "Upload source chunk 19",
+          "status": "pending",
+          "conclusion": null,
+          "number": 26
+        },
+        {
+          "name": "Upload source chunk 20",
+          "status": "pending",
+          "conclusion": null,
+          "number": 27
+        },
+        {
+          "name": "Upload source chunk 21",
+          "status": "pending",
+          "conclusion": null,
+          "number": 28
+        },
+        {
+          "name": "Upload source chunk 22",
+          "status": "pending",
+          "conclusion": null,
+          "number": 29
+        },
+        {
+          "name": "Upload source chunk 23",
+          "status": "pending",
+          "conclusion": null,
+          "number": 30
+        },
+        {
+          "name": "Upload source chunk 24",
+          "status": "pending",
+          "conclusion": null,
+          "number": 31
+        },
+        {
+          "name": "Upload source chunk 25",
+          "status": "pending",
+          "conclusion": null,
+          "number": 32
+        },
+        {
+          "name": "Upload source chunk 26",
+          "status": "pending",
+          "conclusion": null,
+          "number": 33
+        },
+        {
+          "name": "Upload source chunk 27",
+          "status": "pending",
+          "conclusion": null,
+          "number": 34
+        },
+        {
+          "name": "Upload source chunk 28",
+          "status": "pending",
+          "conclusion": null,
+          "number": 35
+        },
+        {
+          "name": "Upload source chunk 29",
+          "status": "pending",
+          "conclusion": null,
+          "number": 36
+        },
+        {
+          "name": "Upload source chunk 30",
+          "status": "pending",
+          "conclusion": null,
+          "number": 37
+        },
+        {
+          "name": "Upload source chunk 31",
+          "status": "pending",
+          "conclusion": null,
+          "number": 38
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 75
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 76
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 15272669102,
+      "name": "round119-source-manifest",
+      "size_in_bytes": 5194,
+      "digest": "sha256:cdd57dc7e55312c00f0b06859dde464e0227d8b457744a3c3f7baedefd3ff4e9"
+    }
+  ],
+  "hosted_pinned_checkout": "NOT_YET_VERIFIED",
+  "hosted_fresh_restore": "NOT_YET_VERIFIED",
+  "independent_connector_download": "PENDING_ARTIFACT_AVAILABILITY",
+  "independent_agent_container_restore": "NOT_RUN",
+  "compiler_prerequisites": "PENDING_HOSTED_INVENTORY",
+  "first_ci_error": null,
+  "first_local_error": "git ls-remote exit 128: Could not resolve host: github.com",
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "observation": "UNKNOWN",
+  "actual_route": "ORDINARY",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "native": "NO_GO",
+  "physical": "NO_GO",
+  "actual_physical_io": false,
+  "full_builds": 0,
+  "manual_dispatches": 0,
+  "reruns": 0,
+  "peer_dependencies": false,
+  "agent2_candidate_integration": false,
+  "writer_lease": "A10_PENDING_TERMINAL_DISPOSITION"
+}
