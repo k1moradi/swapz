@@ -1,0 +1,47 @@
+{
+  "round": 119,
+  "agent": 1,
+  "status": "PASS_EXACT_INTEGRATED_REPAIR_CI",
+  "source_commit": "7cb5e18a1af3f81551b0abab8a71aa184f3dd3a0",
+  "workflow_blob": "a12e14f775bb01e53f6120a0eecd90eae4328ffd",
+  "test_blob": "5108ded8d9def8a693703dfe734bae4f6ee23d97",
+  "run_id": 46172207407,
+  "rootless_job": 141062911120,
+  "sparse_job": 141062910819,
+  "conclusion": "success",
+  "tests": [
+    {
+      "suite": "kernel-debug-main-range-test",
+      "passed": 11,
+      "seconds": 1.96
+    },
+    {
+      "suite": "kernel-debug-qualification-test",
+      "passed": 48,
+      "seconds": 15.511
+    },
+    {
+      "suite": "round093-native-evidence-collector-test",
+      "passed": 3,
+      "seconds": 0.055
+    }
+  ],
+  "total_passed": 62,
+  "loaded_kasan_lockdep": "NOT_RUN",
+  "loaded_kcsan": "NOT_RUN",
+  "historic_failed_job": 141001824017,
+  "historic_conclusion": "failure",
+  "other_pending_runs": [
+    46172207455,
+    46172207421,
+    46172207434,
+    46172207612,
+    46172207474
+  ],
+  "first_historical_local_failure": "missing frozen tool at import before discovery",
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "native_runtime": false,
+  "physical_execution": false,
+  "round120_task": "55d3a4c75243a4ef27233c2bd1a95d414fae8bab"
+}
