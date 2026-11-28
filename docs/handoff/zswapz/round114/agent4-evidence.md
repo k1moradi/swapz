@@ -1,0 +1,7 @@
+# Round114 Agent4 — codec-cost attribution, source candidate
+
+Freeze c87f9f92fc656db5670d9bfd75c7fcf826aa9bbf tree 7b6fe1478215a0485bb054c30a2a2f51711ddf45; product kernel tree 880d169f92383f438513d55e5fa2652bb3d9e0ae unchanged. [Assignment](agent4-codec-attribution-p0.md) · [Contract](frozen-contract.md). Source fixture 64ff056d565bf2bf4c658a0e1cd51269ffdf4854, verifier 4403848e698da99970634f75f1a60df6a3f99629, unchanged workflow 837265f165682829286b5d77aa149479c12f5215, parent 94ec9494a3a9929905856d8ae7775d3410198dc2. Parent standards cc2731972491ec73e55f330694179a522d4ea9d7, exact-prefix append 19e59f14efe9c23178a9e589d12606755a6a79d0.
+
+Retain R112 original 192-page corpus and production function/warnings, exact R112 non-timing gate, add 32 deterministic nonuniform repeated 512-byte patterns. Per-stratum inclusive paired timing, matched IDs, all page sizes/fallbacks, actual ordinary planner and labeled preserved packing model. Independent original/ordinary decode, CRC/copy by actual payload length, inverse subset, empty batch and clock/score-note proxy; outputs verified after timer. No timer subtraction or causal additive interpretation. Host liblz4, pinned Linux LZO C, scalar predictor, ordinary instrumentation included. Synthetic content not temperature or residency. No local full checkout; actual hosted test pending. No measurements until mandatory correctness succeeds.
+
+AUTH=0 Phase A BLOCKED observation UNKNOWN compressed handoff/forced RAW/import OFF physical NO_GO. No native/physical execution or new workflow; A1 acceptance only.

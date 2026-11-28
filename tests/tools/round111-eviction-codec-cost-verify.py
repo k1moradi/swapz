@@ -22,6 +22,14 @@ TREE = "98cb27a3f57d6482d859a260526edb5614ec7994"
 RECOVERY_PIN = "7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1"
 RECOVERY_TREE = "5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0"
 PRODUCT_TREE = "880d169f92383f438513d55e5fa2652bb3d9e0ae"
+ATTRIBUTION_PIN = "c87f9f92fc656db5670d9bfd75c7fcf826aa9bbf"
+ATTRIBUTION_TREE = "7b6fe1478215a0485bb054c30a2a2f51711ddf45"
+R112_REPORT = "docs/handoff/zswapz/round112/agent4-results.json"
+R112_REPORT_BLOB = "b8e676ee4fc4889fb66b3b528c39e1e8dc7600d9"
+STRATA = ["zero", "same", "random", "repeated", "structured", "mixed", "pattern512"]
+MICRO_NAMES = ["empty_batch", "original_decode", "ordinary_decode_with_inverse", "ordinary_crc",
+               "preserve_crc", "ordinary_payload_copy", "preserve_payload_copy",
+               "two_monotonic_clocks_and_score_note_proxy", "inverse_only"]
 LINUX = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 FIXTURE = ROOT / "tests/runtime/native/codec/round111-eviction-codec-cost.c"
 KERNEL = ROOT / "src/kernel"
@@ -78,38 +86,66 @@ def block(source, anchor):
 def quantile(values, q):
     return sorted(values)[math.ceil(len(values) * q) - 1]
 
+def stats(values):
+    require(len(values) == 20, "missing batch samples")
+    return {"median": statistics.median(values), "p95": quantile(values, .95),
+            "p99": quantile(values, .99), "stdev": statistics.stdev(values)}
+
 def summarize(case):
     count = case["eligible"]
-    require(case["byte_exact"] and count > 0 and len(case["pairs"]) >= 10, "missing actual pairs")
+    stratum = case["stratum"]
+    require(-1 <= stratum < len(STRATA), "invalid stratum")
+    case["stratum_name"] = "r112_shared" if stratum == -1 else STRATA[stratum]
+    require(case["byte_exact"] and case["pages"] == (192 if stratum == -1 else 32), "missing correctness")
     require(sum(case["category_counts"]) == case["pages"], "corpus count")
     require(sum(case["eligible_by_category"]) == count, "eligible count")
     require(count + case["zero"] + case["same"] + case["over_cap"] +
             case["unsupported_control"] == case["pages"], "partition count")
-    require(len(case["pairs"]) == 20, "exact paired batch count")
-    require(all(len(pair) == 4 for pair in case["pairs"]), "invalid pair columns")
+    require(len(case["pairs"]) == (20 if count else 0), "exact paired batch count")
+    require(all(len(pair) == 4 and min(pair) > 0 for pair in case["pairs"]), "invalid pair columns")
     require(all(sum(bins) == count for bins in case["size_bins"]), "payload histogram count")
     require(case["preserve_copy_bytes"] == case["payload_bytes"][1], "preserve copy count")
     require(case["ordinary_actual_planner_bytes"] >= case["payload_bytes"][0], "ordinary packing size")
+    expected_ids = list(range(192)) if stratum == -1 else (
+        list(range(stratum, 192, 6)) if stratum < 6 else list(range(192, 224)))
+    sizes = case["page_sizes"]
+    require([row[0] for row in sizes] == expected_ids, "page IDs differ")
+    require(all(len(row) == 4 and 0 < row[1] <= 8192 and 0 <= row[2] <= 4096
+                and row[3] in (0, 1) and (not row[3] or row[1] <= 3568)
+                for row in sizes), "page size or eligibility")
+    require(sum(row[3] for row in sizes) == count, "eligible IDs count")
+    require([sum(row[column] for row in sizes if row[3]) for column in (2, 1)] ==
+            case["payload_bytes"], "eligible payload totals")
     case["eligibility_rate"] = count / case["pages"]
     case["timing_ns_per_page_batch_statistics"] = {}
-    for index, name in enumerate(("ordinary_write", "ordinary_read", "preserve_write", "preserve_read")):
-        values = [pair[index] / count for pair in case["pairs"]]
-        require(min(values) > 0, "invalid timing")
-        case["timing_ns_per_page_batch_statistics"][name] = {
-            "median": statistics.median(values), "p95": quantile(values, .95),
-            "p99": quantile(values, .99), "stdev": statistics.stdev(values)}
     case["paired_preserve_minus_ordinary_ns_per_page"] = {}
-    for index, name in enumerate(("write", "read")):
-        values = [(pair[index + 2] - pair[index]) / count for pair in case["pairs"]]
-        case["paired_preserve_minus_ordinary_ns_per_page"][name] = {
-            "median": statistics.median(values), "p95": quantile(values, .95),
-            "p99": quantile(values, .99), "stdev": statistics.stdev(values),
-            "preserve_faster_pairs": sum(value < 0 for value in values)}
+    case["micro_ns_per_page_batch_statistics"] = {}
+    case["micro_paired_preserve_minus_ordinary_ns_per_page"] = {}
     case["fixed_class_model_padding_bytes"] = [
         [size - case["payload_bytes"][arm] for size in sizes]
         for arm, sizes in enumerate(case["fixed_class_model_bytes"])]
     require(all(padding >= 0 for arm in case["fixed_class_model_padding_bytes"] for padding in arm),
             "negative model padding")
+    require(0 <= case["inverse_pages"] <= count, "inverse count")
+    require(len(case["micro_pairs"]) == (20 if count else 0), "missing micro batches")
+    if not count:
+        return case
+    for index, name in enumerate(("ordinary_write", "ordinary_read", "preserve_write", "preserve_read")):
+        case["timing_ns_per_page_batch_statistics"][name] = stats([pair[index] / count for pair in case["pairs"]])
+    for index, name in enumerate(("write", "read")):
+        values = [(pair[index + 2] - pair[index]) / count for pair in case["pairs"]]
+        case["paired_preserve_minus_ordinary_ns_per_page"][name] = {
+            **stats(values), "preserve_faster_pairs": sum(value < 0 for value in values)}
+    require(all(len(pair) == len(MICRO_NAMES) and min(pair[:-1]) > 0 and
+                (pair[-1] > 0 if case["inverse_pages"] else pair[-1] == 0)
+                for pair in case["micro_pairs"]), "invalid micro batch")
+    for index, name in enumerate(MICRO_NAMES):
+        denominator = case["inverse_pages"] if name == "inverse_only" else count
+        case["micro_ns_per_page_batch_statistics"][name] = (
+            stats([pair[index] / denominator for pair in case["micro_pairs"]]) if denominator else None)
+    for left, right, name in ((3, 4, "crc"), (5, 6, "payload_copy")):
+        case["micro_paired_preserve_minus_ordinary_ns_per_page"][name] = stats(
+            [(pair[right] - pair[left]) / count for pair in case["micro_pairs"]])
     return case
 
 def main():
@@ -127,7 +163,12 @@ def main():
             "wrong frozen tree")
     require(run(["git", "-C", str(ROOT), "rev-parse", RECOVERY_PIN + "^{tree}"], "recovery tree") == RECOVERY_TREE,
             "wrong recovery tree")
-    for revision in (PIN, RECOVERY_PIN, "HEAD"):
+    require(run(["git", "-C", str(ROOT), "rev-parse", ATTRIBUTION_PIN + "^{tree}"], "attribution tree") == ATTRIBUTION_TREE,
+            "wrong attribution tree")
+    require(run(["git", "hash-object", str(ROOT / R112_REPORT)], "R112 evidence pin") == R112_REPORT_BLOB,
+            "R112 evidence drift")
+    prior_cases = json.loads((ROOT / R112_REPORT).read_text())["measurements"]["results"]["gcc-optimized"]["cases"]
+    for revision in (PIN, RECOVERY_PIN, ATTRIBUTION_PIN, "HEAD"):
         require(run(["git", "-C", str(ROOT), "rev-parse", revision + ":src/kernel"], "product subtree") == PRODUCT_TREE,
                 "product subtree differs from freeze")
     require(not run(["git", "-C", str(ROOT), "status", "--porcelain"], "product clean"), "dirty checkout")
@@ -183,28 +224,49 @@ def main():
             binary = scratch / label
             run([compiler, *flags, *objects, "-Wl,--gc-sections", "-llz4", "-o", str(binary)], label + "/link")
             cases = [summarize(json.loads(line)) for line in run([str(binary)], label + "/execute").splitlines()]
-            require([case["codec"] for case in cases] == [1, 2], "missing codec coverage")
+            require([(case["codec"], case["stratum"]) for case in cases] ==
+                    [(codec, stratum) for codec in (1, 2) for stratum in range(-1, len(STRATA))],
+                    "missing codec or stratum coverage")
             results[label] = {"status": "PASS", "compiler": run([compiler, "--version"], "compiler version").splitlines()[0],
                               "flags": flags, "cases": cases}
         # Cross-compiler, sanitized and optimized runs must agree on all non-timing evidence.
         stable_keys = ("pages", "eligible", "zero", "same", "over_cap", "unsupported_control",
                        "category_counts", "eligible_by_category", "payload_bytes", "ordinary_raw_pages",
                        "preserve_copy_bytes", "ordinary_raw_copy_bytes", "ordinary_actual_planner_bytes",
-                       "size_bins", "fixed_class_model_bytes", "byte_exact")
+                       "size_bins", "fixed_class_model_bytes", "byte_exact", "page_sizes", "inverse_pages",
+                       "stratum", "stratum_name")
         for index, reference in enumerate(results["gcc-asan-ubsan"]["cases"]):
             for result in results.values():
                 require(all(reference[key] == result["cases"][index][key] for key in stable_keys),
                         "compiler/optimization correctness disagreement")
+        # The shared corpus must reproduce R112 non-timing totals exactly.
+        for reference in prior_cases:
+            case = next(c for c in results["gcc-optimized"]["cases"]
+                        if c["codec"] == reference["codec"] and c["stratum"] == -1)
+            for key in ("pages", "eligible", "zero", "same", "over_cap", "unsupported_control",
+                        "payload_bytes", "size_bins", "ordinary_raw_pages",
+                        "ordinary_actual_planner_bytes", "fixed_class_model_bytes"):
+                require(case[key] == reference[key], "R112 shared corpus drift: " + key)
+            require(case["category_counts"][:-1] == reference["category_counts"] and
+                    case["eligible_by_category"][:-1] == reference["eligible_by_category"], "R112 category drift")
+            joined = sorted((row for c in results["gcc-optimized"]["cases"]
+                             if c["codec"] == reference["codec"] and 0 <= c["stratum"] < 6
+                             for row in c["page_sizes"]))
+            require(joined == case["page_sizes"], "strata differ from shared page sizes")
         # Sanitized timings are explicitly not performance evidence.
         for case in results["gcc-optimized"]["cases"]:
+            if not case["eligible"]:
+                continue
             timing = case["timing_ns_per_page_batch_statistics"]
-            print(f"codec={case['codec']} eligible={case['eligible']}/{case['pages']} "
+            print(f"codec={case['codec']} stratum={case['stratum_name']} eligible={case['eligible']}/{case['pages']} "
                   f"write median ns/page ordinary={timing['ordinary_write']['median']:.1f} "
                   f"preserve={timing['preserve_write']['median']:.1f} "
                   f"read median ns/page ordinary={timing['ordinary_read']['median']:.1f} "
                   f"preserve={timing['preserve_read']['median']:.1f} payload={case['payload_bytes']}")
         report = {"frozen": PIN, "tree": TREE, "source_commit": run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], "source HEAD"),
                   "recovery_frozen": RECOVERY_PIN, "recovery_tree": RECOVERY_TREE,
+                  "attribution_frozen": ATTRIBUTION_PIN, "attribution_tree": ATTRIBUTION_TREE,
+                  "r112_reference_blob": R112_REPORT_BLOB, "r112_shared_non_timing_match": True,
                   "product_subtree": PRODUCT_TREE,
                   "linux": LINUX, "linux_blobs": original_hashes, "product_blobs": PINS,
                   "machine": platform.machine(), "processor": platform.processor(),
@@ -213,14 +275,22 @@ def main():
                   "pair_order": "AB/BA alternating", "timing": "thread CPU ns, batch totals divided by eligible pages",
                   "instrumentation": "ordinary verbatim production monotonic wall-clock calls and stats included; preserve has no such calls; both compute and verify CRC; original source generation, packing and final memcmp outside timed regions; not an isolated pure-codec delta",
                   "packing_model": "fixed class 4/8/16 KiB next-fit, max64, raw separate; not lower IO",
-                  "category_order": ["zero", "same", "random", "repeated", "structured", "mixed"],
+                  "category_order": STRATA, "page_sizes_columns": ["logical_id", "original_bytes", "ordinary_bytes", "eligible"],
+                  "micro_order": MICRO_NAMES, "micro_design": "independent alternating forward/reverse batches; same selected IDs, actual per-arm lengths; inverse subset denominator and selection loop included; clock-score proxy is two monotonic calls and actual score note with precomputed score; no timer subtraction, no additive decomposition",
+                  "corpus": "R112 192 shared unchanged; additional 32 synthetic repeated 512-byte patterns; content strata not residency or temperature",
                   "size_bins_upper_bytes": [512, 1024, 2048, 3568, 4096],
                   "auth": 0, "phase_a": "BLOCKED", "compressed_handoff": False,
                   "forced_raw": False, "import": False, "physical": "NO_GO", "results": results}
         args.output.write_text(json.dumps(report, indent=2) + "\n")
         # Bounded structured evidence in the job log as well as the private artifact.
         # Only emit after all three mandatory executions and equality gates passed.
-        print("ROUND112_CODEC_RESULTS " + json.dumps(report, separators=(",", ":")), flush=True)
+        meta = {key: value for key, value in report.items() if key != "results"}
+        meta["compiler_lanes"] = {name: {key: value for key, value in lane.items() if key != "cases"}
+                                  for name, lane in results.items()}
+        print("ROUND114_CODEC_META " + json.dumps(meta, separators=(",", ":")), flush=True)
+        for name, lane in results.items():
+            for case in lane["cases"]:
+                print("ROUND114_CODEC_CASE " + json.dumps({"lane": name, "case": case}, separators=(",", ":")), flush=True)
         print("Legend: paired eligible generated pages; payload bytes exclude packing; ns/page is batch CPU.")
         print("Interpretation: compare write, read and payload independently; fixed-class packing is a model.")
         print("Evidence -> Goal implication -> Verdict: byte-exact host diagnostic -> quantify codec trade-offs -> diagnostic-only.")
