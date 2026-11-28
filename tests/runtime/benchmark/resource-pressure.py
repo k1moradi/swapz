@@ -192,5 +192,204 @@ def main():
     return 0
 
 
+# Opt-in preparation API only; the legacy pressure CLI never calls it.
+# Both mappings together are bounded by the existing 768 MiB pressure ceiling.
+MAX_MATCHED_PAGES = 768 * MIB // (2 * PAGE_BYTES)
+
+
+class ColdWorkloadError(RuntimeError):
+    """Bounded diagnostic; never include backing names, fd IDs or page bytes."""
+
+
+def _require_private_tmpfs(fd):
+    import fcntl
+    import stat
+
+    info = os.fstat(fd)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or
+            stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 0 or
+            info.st_size != 0 or
+            fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR):
+        raise ColdWorkloadError("backing must be an empty private unlinked read-write file")
+    # st_dev alone is insufficient: distinct mounts may share a superblock.
+    # Resolve the duplicate's exact mount ID, not a path or guessed mount.
+    identities = [line.split(b":", 1)[1].strip()
+                  for line in Path(f"/proc/self/fdinfo/{fd}").read_bytes().splitlines()
+                  if line.startswith(b"mnt_id:")]
+    if len(identities) != 1 or not identities[0].isdigit():
+        raise ColdWorkloadError("backing mount identity unavailable")
+    matches = [line for line in Path("/proc/self/mountinfo").read_bytes().splitlines()
+               if line.split(b" ", 1)[0] == identities[0]]
+    if len(matches) != 1:
+        raise ColdWorkloadError("backing mount identity unavailable or ambiguous")
+    left, separator, right = matches[0].partition(b" - ")
+    fields = left.split()
+    filesystem = right.split()
+    device = f"{os.major(info.st_dev)}:{os.minor(info.st_dev)}".encode("ascii")
+    if (not separator or len(fields) < 6 or len(filesystem) < 3 or
+            fields[2] != device or filesystem[0] != b"tmpfs"):
+        raise ColdWorkloadError("backing is not a verified tmpfs mount")
+
+
+def _cold_page(seed, index):
+    import hashlib
+    import struct
+
+    # Stable, nonuniform and compressible: distinct page-specific 512-byte
+    # patterns, not a claim about a representative production corpus.
+    pattern = b"\x00\x01" + hashlib.shake_256(struct.pack("<QQ", seed, index)).digest(510)
+    return pattern * (PAGE_BYTES // len(pattern))
+
+
+class MatchedColdWorkload:
+    """Exclusive context-owned mappings; no concurrent callers or exported views."""
+
+    backing_kind = "file-backed-tmpfs"
+
+    def __init__(self, anonymous, shmem, page_count, hot_page_count, seed):
+        self._anonymous = anonymous
+        self._shmem = shmem
+        self._page_count = page_count
+        self._hot_page_count = hot_page_count
+        self._seed = seed
+        self._touch_count = 0
+        self._usable = True
+
+    @property
+    def hot_pages(self):
+        return range(self._hot_page_count)
+
+    @property
+    def cold_pages(self):
+        return range(self._hot_page_count, self._page_count)
+
+    @property
+    def logical_bytes_per_mapping(self):
+        return self._page_count * PAGE_BYTES
+
+    def _require_usable(self):
+        if not self._usable:
+            raise ColdWorkloadError("workload closed or invalidated")
+
+    def touch_hot(self):
+        """One caller-controlled pass; no timer, worker or cold page access."""
+        self._require_usable()
+        try:
+            for index in self.hot_pages:
+                offset = index * PAGE_BYTES
+                self._anonymous[offset] ^= 1
+                self._shmem[offset] ^= 1
+        except BaseException:
+            self._usable = False
+            raise
+        self._touch_count += 1
+
+    def verify(self):
+        """Full byte check against independent regeneration, OUTSIDE timing.
+
+        Reads cold pages: call only after the intended cold observation ends.
+        """
+        self._require_usable()
+        for index in range(self._page_count):
+            expected = _cold_page(self._seed, index)
+            if index < self._hot_page_count and self._touch_count % 2:
+                expected = b"\x01" + expected[1:]
+            offset = index * PAGE_BYTES
+            end = offset + PAGE_BYTES
+            if (self._anonymous[offset:end] != expected or
+                    self._shmem[offset:end] != expected):
+                self._usable = False
+                raise ColdWorkloadError("matched workload full-page verification failed")
+
+
+def prepare_matched_cold_workload(*, page_count, hot_page_count, seed, tmpfs_fd):
+    """Return a context manager for two matched 4096-byte page cohorts.
+
+    Caller supplies and retains exclusive ownership of an empty, mode-0600,
+    unlinked tmpfs temporary file opened read-write (e.g. TemporaryFile).
+    Caller must not close, truncate, map or access it until context exit.
+    The context owns a duplicate fd and both mappings; it restores file size
+    to zero on exit. No memfd substitution or mount/reclaim operations.
+    """
+    from contextlib import contextmanager
+
+    if (type(page_count) is not int or not 2 <= page_count <= MAX_MATCHED_PAGES or
+            type(hot_page_count) is not int or not 1 <= hot_page_count < page_count or
+            type(seed) is not int or not 0 <= seed < 2**64 or
+            type(tmpfs_fd) is not int or tmpfs_fd < 0):
+        raise ColdWorkloadError("invalid matched workload bounds")
+    if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
+        raise ColdWorkloadError("matched workload requires 4096-byte host pages")
+
+    @contextmanager
+    def owned_mappings():
+        duplicate = anonymous = shmem = workload = None
+        resize_attempted = False
+        first_error = None
+        phase = "duplicate backing"
+        try:
+            try:
+                duplicate = os.dup(tmpfs_fd)
+                phase = "verify backing"
+                _require_private_tmpfs(duplicate)
+                length = page_count * PAGE_BYTES
+                phase = "reserve backing"
+                resize_attempted = True
+                # Reserve tmpfs space before touching mapped bytes, avoiding
+                # a foreseeable SIGBUS from tmpfs capacity exhaustion.
+                os.posix_fallocate(duplicate, 0, length)
+                if os.fstat(duplicate).st_size != length:
+                    raise ColdWorkloadError("unexpected reserved backing size")
+                phase = "map anonymous"
+                anonymous = mmap.mmap(-1, length, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
+                                      prot=mmap.PROT_READ | mmap.PROT_WRITE)
+                phase = "map tmpfs"
+                shmem = mmap.mmap(duplicate, length, flags=mmap.MAP_SHARED,
+                                  prot=mmap.PROT_READ | mmap.PROT_WRITE)
+                phase = "populate mappings"
+                for index in range(page_count):
+                    page = _cold_page(seed, index)
+                    offset = index * PAGE_BYTES
+                    anonymous[offset:offset + PAGE_BYTES] = page
+                    shmem[offset:offset + PAGE_BYTES] = page
+                workload = MatchedColdWorkload(anonymous, shmem, page_count, hot_page_count, seed)
+            except (OSError, ValueError, BufferError, MemoryError):
+                raise ColdWorkloadError(f"matched workload preparation failed: {phase}") from None
+            yield workload
+        except BaseException as error:
+            first_error = error
+            raise
+        finally:
+            if workload is not None:
+                workload._usable = False
+            cleanup_errors = []
+            shmem_closed = True
+            for name, mapping in (("tmpfs mapping", shmem), ("anonymous mapping", anonymous)):
+                if mapping is not None:
+                    try:
+                        mapping.close()
+                    except (OSError, BufferError, ValueError):
+                        cleanup_errors.append(name)
+                        if mapping is shmem:
+                            shmem_closed = False
+            if duplicate is not None:
+                if resize_attempted and shmem_closed:
+                    try:
+                        os.ftruncate(duplicate, 0)
+                    except OSError:
+                        cleanup_errors.append("backing reset")
+                try:
+                    os.close(duplicate)
+                except OSError:
+                    cleanup_errors.append("backing duplicate close")
+            if cleanup_errors:
+                message = "matched workload cleanup failed: " + ", ".join(cleanup_errors)
+                if first_error is None:
+                    raise ColdWorkloadError(message)
+                first_error.add_note(message)
+
+    return owned_mappings()
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
