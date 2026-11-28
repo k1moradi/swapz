@@ -1,0 +1,102 @@
+{
+  "round": 118,
+  "agent": 4,
+  "status": "PASS_ROOTLESS_LIVE_PREPARATION_ONLY",
+  "freeze": "d8dd2b12959a0ad06e9b2fca4c6795b8ee4e53f5",
+  "freeze_tree": "76f4d2835e5209419503bac9fd6a7b2a7d1a2aee",
+  "task": "2d71a66a19f48b1857f512e91136fc24daafe4b6",
+  "source_candidate": "4ea09aed8fa6a67749f2bcf81726a24f9d57c019",
+  "source_tree": "8bed2af2c4bd317ebe0897a0953b0879c3ee41a8",
+  "source_parent": "2d71a66a19f48b1857f512e91136fc24daafe4b6",
+  "source_blobs": {
+    "tests/tools/phase-a-live-workload.py": "3ef54135cfda8e2a790fd2fc63fc1937aee41ef6",
+    "tests/runtime/native/phase-a-live-workload-test.py": "5914949d3067ff9f2bf5c3ff7c490e7c232b2ce1",
+    "docs/testing_standards.md": "f12e5db062a63fc2ce24bc85bb8c965a9c2adaf7"
+  },
+  "standards_parent_blob": "14cfa7ea6dc58578e84e1dafae1bc9fd2e0023e5",
+  "standards_exact_prefix": true,
+  "frozen_dependency_blobs": {
+    "tests/tools/phase-a-workload-plan.py": "a093a016c3467a4732629006ee551c02dc5dff6d",
+    "tests/runtime/native/phase-a-workload-plan-test.py": "7aded48b539deaa91d9fd5b91f5dc49b29fbeffa",
+    "tests/runtime/benchmark/resource-pressure.py": "9f2529912a2cb47f4b20bb733903c25d65d97dda",
+    "tests/runtime/native/phase-a-cold-workload-test.py": "55855622dd2e4a382228678b4ca0f397a270952f",
+    "tests/tools/phase-a-ordinary-evidence.py": "a63f7555eadf2b6404352fbf7ade20118d6db15b"
+  },
+  "frozen_local_git_hashes_match": true,
+  "environment": {
+    "python": "3.13.5",
+    "execution_uid": 65534,
+    "page_bytes": 4096,
+    "existing_tmpfs": true,
+    "rootless_tests": true
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- env PYTHONDONTWRITEBYTECODE=1 python3 tests/runtime/native/phase-a-live-workload-test.py",
+      "passed": 9,
+      "skips": 0,
+      "exit": 0,
+      "seconds": 0.027
+    },
+    {
+      "command": "runuser -u nobody -- env PYTHONDONTWRITEBYTECODE=1 python3 tests/runtime/native/phase-a-cold-workload-test.py",
+      "passed": 10,
+      "skips": 0,
+      "exit": 0,
+      "seconds": 1.318
+    },
+    {
+      "command": "runuser -u nobody -- env PYTHONDONTWRITEBYTECODE=1 python3 tests/runtime/native/phase-a-workload-plan-test.py",
+      "passed": 8,
+      "skips": 0,
+      "exit": 0,
+      "seconds": 10.826
+    }
+  ],
+  "total_passed": 27,
+  "total_skips": 0,
+  "first_retrieval_error": "404 for R117 checkpoint at frozen source; recovered at task commit",
+  "first_execution_error": "git ls-remote: DNS resolution failed, exit 128; recovered exact frozen blobs through connector",
+  "test_failure": null,
+  "ci_run_ids": [],
+  "ci_job_ids": [],
+  "max_cohort_pages": 8,
+  "max_total_pages": 16,
+  "max_mapped_bytes": 65536,
+  "actual_mapping_checks": [
+    "precommit before mapping",
+    "distinct anonymous and verified file-backed tmpfs references while callback active",
+    "identical expected pages cannot substitute object token",
+    "nonce, digest, offset, logical and backing mismatch rejected",
+    "duplicate logical/offset/object token rejected",
+    "stale token with same nonce rejected",
+    "hot parity 0/1/2/3/16, no cold reads before or any mapping reads during callback",
+    "full final byte comparison",
+    "helper corruption and swapped live references rejected",
+    "callback exception and injected backing-close error preserve first cause",
+    "private files exclusive, mode0600, directory mode0700, no overwrite, fd closure and reset",
+    "non-tmpfs backing rejected"
+  ],
+  "limitations": [
+    "Cooperative synchronous owner-local API, not a sandbox or native VMA/slot identity; frozen helper private fields required.",
+    "No independent trusted capture, actual native STORED/slot binding, receipt, persistence or replay protection.",
+    "No native pressure or physical execution. Private artifact retention is same-process readback without explicit flush; frozen v2 CLI unchanged.",
+    "R117/R113 regressions executed on unchanged frozen files before final A4-only backing-close change; final dedicated suite rerun on exact final candidate."
+  ],
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "native_qualification": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import_enabled": false,
+  "physical": "NO_GO",
+  "actual_route": "ORDINARY",
+  "authenticated": false,
+  "selector_retuned": false,
+  "native_execution": false,
+  "physical_execution": false,
+  "ref_moved_by_agent": false,
+  "integration": "PENDING_AGENT1",
+  "prior_unreferenced_candidate_superseded": "6d54b46568d5da3a5f59ad0e13556afdbf45feb1"
+}
