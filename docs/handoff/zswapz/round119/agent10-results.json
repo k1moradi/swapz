@@ -2,9 +2,9 @@
   "round": 119,
   "agent": 10,
   "kind": "pinned-linux-source-transport-only",
-  "status": "IN_PROGRESS",
-  "qualification": "PENDING_ACTUAL_LINUX_RESTORE",
-  "conclusion": null,
+  "status": "PASS_SOURCE_RESTORE_ONLY",
+  "qualification": "COMPLETE_ACTUAL_PINNED_LINUX_RESTORE",
+  "conclusion": "success",
   "source_freeze": "c5237321d0eb01002cec990deebff60c6f39ac64",
   "source_tree": "327f200f9e45e4f06a335945cc8fbd6f41aa4f65",
   "kernel_subtree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
@@ -63,8 +63,8 @@
     {
       "job_id": 141058585035,
       "url": "https://github.com/k1moradi/swapz/actions/runs/46170807374/job/141058585035",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "steps": [
         {
           "name": "Set up job",
@@ -92,236 +92,465 @@
         },
         {
           "name": "Export exact complete source and independently restore",
-          "status": "in_progress",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 5
         },
         {
           "name": "Upload verified source manifest and restore evidence",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 6
         },
         {
           "name": "Upload source chunk 00",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 7
         },
         {
           "name": "Upload source chunk 01",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 8
         },
         {
           "name": "Upload source chunk 02",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 9
         },
         {
           "name": "Upload source chunk 03",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 10
         },
         {
           "name": "Upload source chunk 04",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 11
         },
         {
           "name": "Upload source chunk 05",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 12
         },
         {
           "name": "Upload source chunk 06",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 13
         },
         {
           "name": "Upload source chunk 07",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 14
         },
         {
           "name": "Upload source chunk 08",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 15
         },
         {
           "name": "Upload source chunk 09",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 16
         },
         {
           "name": "Upload source chunk 10",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 17
         },
         {
           "name": "Upload source chunk 11",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 18
         },
         {
           "name": "Upload source chunk 12",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 19
         },
         {
           "name": "Upload source chunk 13",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 20
         },
         {
           "name": "Upload source chunk 14",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 21
         },
         {
           "name": "Upload source chunk 15",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 22
         },
         {
           "name": "Upload source chunk 16",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 23
         },
         {
           "name": "Upload source chunk 17",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 24
         },
         {
           "name": "Upload source chunk 18",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 25
         },
         {
           "name": "Upload source chunk 19",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 26
         },
         {
           "name": "Upload source chunk 20",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 27
         },
         {
           "name": "Upload source chunk 21",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 28
         },
         {
           "name": "Upload source chunk 22",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 29
         },
         {
           "name": "Upload source chunk 23",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 30
         },
         {
           "name": "Upload source chunk 24",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 31
         },
         {
           "name": "Upload source chunk 25",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 32
         },
         {
           "name": "Upload source chunk 26",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 33
         },
         {
           "name": "Upload source chunk 27",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 34
         },
         {
           "name": "Upload source chunk 28",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 35
         },
         {
           "name": "Upload source chunk 29",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 36
         },
         {
           "name": "Upload source chunk 30",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 37
         },
         {
           "name": "Upload source chunk 31",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "skipped",
           "number": 38
         },
         {
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 75
         },
         {
           "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
+          "status": "completed",
+          "conclusion": "success",
           "number": 76
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 77
         }
       ]
     }
   ],
   "artifacts": [
     {
+      "id": 15272699164,
+      "name": "round119-source-chunk-00",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:a3e8fdb2985434717b02acbdb547313b537b139410011e097451fb6d57523101",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "6f5537d0bf680b98d78f4d76678f89a01f8e3ba3f5a021428aaf0036089187f1",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272754136,
+      "name": "round119-source-chunk-01",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:6e5aee952483990cdaf7e6c0aae50b47cb4abeb82032b3d2260a5733f3b98f76",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "c35bdc03a3798cbc8f2cef38f9bb41d722f0f2838acde6df78ecb2ceda6a86bf",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15273502320,
+      "name": "round119-source-chunk-02",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:07a62c7edd7b6115c71e50e6a6cf8b068fc58dfdb814711d67a6c8903df393eb",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "d232158dd234a8d7a8c2057195145c525e5fc1b9e97da6ccecee37356cdcb618",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272694186,
+      "name": "round119-source-chunk-03",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:673a94547c016b858869efe039d974a74662a1ada1a85d1a592b472c036c99b3",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "1317048a2fdeaeaf958087dba027a93b3ceb8d32610f6ff23aa2f5de30169e58",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272514888,
+      "name": "round119-source-chunk-04",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:12f810dcd51ed1ab95a80ed7c0300183e1887efcd0209e2627dad90071bec016",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "b12ec941957d553414f4ff60872414a378e454a82086046b5788a099e6f11794",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272654258,
+      "name": "round119-source-chunk-05",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:4d13cc35dc1cf0aa5fc56bb0b9c4232ae49c4021b223e339ea95551ec9137264",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "114efbc6cd6e627e732b80847097d96634425623e9ec307f2f770d7df98b7378",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272908735,
+      "name": "round119-source-chunk-06",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:ad93c5280ce2e766d36c5f9c538a3438838e7d34916bd8bc90df39044d7283e1",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "7ec166dc66e6baad51a3ed6776dc7f2d2b53e992f3d8c225ef0f5508b53354",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272998431,
+      "name": "round119-source-chunk-07",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:c552ecfabfad63615c70bef0dcf806823d49478aa49397a28e58aa57b9409f54",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "5bebd357b6eeca5f796088578cccbf72bdfb88980f6b2fe6324b7e0f598ca2d0",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272833825,
+      "name": "round119-source-chunk-08",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:ffc4efb4aee2641294e028483c1d913d18b90d2367c91ce9ace85e9cc615590f",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "3a3ca2da11b175ba9732d6663865d6ad6a7ba58354ce76ded399fd8314971e73",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15273302847,
+      "name": "round119-source-chunk-09",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:6d105e40508c2838e7a8953c5e883f0614ccaca4413bdb0575b98eef4edc0ed4",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "b80ced8b67f66a6ca4199ae1f5d76f859a470caf8f3e4de66d6f2eadb40005ba",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272868653,
+      "name": "round119-source-chunk-10",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:86efce84106cc70e38bd7a14859eb4385b814459747e4b8f7ba41ad0169e99c7",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "bac449845df3c6aa01facf2a501bf16763bd8dbf26a4274550e94f8e3b76704f",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272903733,
+      "name": "round119-source-chunk-11",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:e50400da9dc598ff6d9bc371dd0b01cda0fe6c8a27c967a1d396671f07ab67e3",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "f19d94d3de96df272dff13d5218aad945d42ce82f9819581b1ac83f9869d4b09",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15273267941,
+      "name": "round119-source-chunk-12",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:d8a6acd2b66baa57d1b4840c4a9aa4362bb32606a1d6dc0be4800667a0a10937",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "c7d06aa87fff71fcf06c12978db65868c932555083790d56079a4f53db712d1e",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272714069,
+      "name": "round119-source-chunk-13",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:6787b4349a9546c5ffaa1f0ee01971c382f6d014663816b62e99ca27db54b087",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "44bb3d99662ed85d17ebe092ae8546450de0627450094b1048839e34af45f935",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272689254,
+      "name": "round119-source-chunk-14",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:e08a687ce3d0637a26bc85e859efe03dc8676ac7995f3497a77b6ed65cfe0bf5",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "d9a2ef1988edec3397a4c6ef14ea6136fe513f1cc0f52829c70a8ebd4804601e",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272854087,
+      "name": "round119-source-chunk-15",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:d803cb9736f8935cd15353a4c45f50217edad293298f69cf973791fb078b1a34",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "2dbfba6afad6d26975238523a64eff2acaa05fc61a9022e54fd4d099a6bb26b5",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272793957,
+      "name": "round119-source-chunk-16",
+      "size_in_bytes": 16777364,
+      "digest": "sha256:43aa1d50c70a47afb7a05457d87a85b1d566daca5b1dcc734863b2b5d27e13eb",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 16777216,
+      "chunk_sha256": "d09fbe17d07c3f74127c7ed7c6b8c90575b0e147f1fc0025f3a7552147ee48b8",
+      "chunk_sha256_match": true
+    },
+    {
+      "id": 15272813967,
+      "name": "round119-source-chunk-17",
+      "size_in_bytes": 15625265,
+      "digest": "sha256:aa5ac5b2e60ab87d3ec2b3dc971faf8e5cc30b5f022db118ed3c35b459e73658",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true,
+      "chunk_bytes": 15625117,
+      "chunk_sha256": "08a226baaf3ae1bdaba50290c6bb0645ca107b629423c78c0f9adbcaf5b4b61d",
+      "chunk_sha256_match": true
+    },
+    {
       "id": 15272669102,
       "name": "round119-source-manifest",
       "size_in_bytes": 5194,
-      "digest": "sha256:cdd57dc7e55312c00f0b06859dde464e0227d8b457744a3c3f7baedefd3ff4e9"
+      "digest": "sha256:cdd57dc7e55312c00f0b06859dde464e0227d8b457744a3c3f7baedefd3ff4e9",
+      "download_materialized": true,
+      "zip_crc": "PASS",
+      "zip_sha256_match": true
     }
   ],
-  "hosted_pinned_checkout": "NOT_YET_VERIFIED",
-  "hosted_fresh_restore": "NOT_YET_VERIFIED",
-  "independent_connector_download": "PENDING_ARTIFACT_AVAILABILITY",
-  "independent_agent_container_restore": "NOT_RUN",
-  "compiler_prerequisites": "PENDING_HOSTED_INVENTORY",
+  "hosted_pinned_checkout": "PASS",
+  "hosted_fresh_restore": "PASS_SOURCE_RESTORE_ONLY",
+  "independent_connector_download": "PASS_ALL_19_ARTIFACTS_MATERIALIZED",
+  "independent_agent_container_restore": "PASS_SOURCE_RESTORE_ONLY",
+  "compiler_prerequisites": {
+    "hosted_inventory": "GCC 13.3.0, GNU Make 4.3, Binutils 2.42; openssl 3.0.13; all 16 listed executables available; libelf pkg-config missing",
+    "full_compile_prerequisites": "NOT_QUALIFIED",
+    "alternative_source_applicability": "PASS_R111_ACTUAL_DIFF_CHECK_ONLY"
+  },
   "first_ci_error": null,
   "first_local_error": "git ls-remote exit 128: Could not resolve host: github.com",
   "AUTH": 0,
@@ -339,5 +568,59 @@
   "reruns": 0,
   "peer_dependencies": false,
   "agent2_candidate_integration": false,
-  "writer_lease": "A10_PENDING_TERMINAL_DISPOSITION"
+  "writer_lease": "RELEASE_TO_AGENT1_AFTER_TERMINAL_REPORT_PUBLICATION",
+  "hosted_git": "2.56.1",
+  "hosted_test": {
+    "methods": 1,
+    "exit": 0,
+    "elapsed_seconds": 0.083
+  },
+  "pack": {
+    "bytes": 300837789,
+    "sha256": "4fc2d4dd45fb0a95f95a1b39c8c005b60fc6b1c98fb0d177365a74d42cdf55c5",
+    "chunks": 18,
+    "tracked_files": 97310,
+    "reachable_objects": 102990,
+    "packed_objects": 102990,
+    "packs": 1,
+    "loose_objects": 0
+  },
+  "manifest_json_sha256": "9648dd50e1966ec1f8a2afe9282638e404b0b44f4bba0d4888f8aa714ec6d336",
+  "local_restore_json_sha256": "d292f19b8bf54b2c47c99d1dfb4bcbb4753f8841d03fe62d9f5c4d2de3f71ffe",
+  "local_restore": {
+    "command": "runuser -u oai -- python -B round119-pinned-source-transport.py restore transport local-restore-parent/linux",
+    "exit": 0,
+    "elapsed_seconds": 24.058,
+    "head": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "tree": "7494ea078a05b0b824c3f263260e45c1f78bcfd3",
+    "clean": true,
+    "shallow_boundary": [
+      "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+    ],
+    "fsck_connectivity": "PASS",
+    "strict_index_pack": "PASS",
+    "remotes": 0,
+    "refs": 0,
+    "required_file_sha256_matches": 12,
+    "hosted_local_json_parsed_equality": true,
+    "container_path": "/mnt/data/r119-a10/local-restore-parent/linux",
+    "container_persistence": "session-local; other agents can re-download artifacts before expiry"
+  },
+  "r111_source_check": {
+    "artifact_id": 15226473013,
+    "archive_bytes": 4585568,
+    "archive_sha256": "b9172cfc4ea113318fec02d516121b4db847e77b616c1d27cd62ba8a691c2aeb",
+    "crc_members": 184,
+    "diff": "r111-connected-source.diff",
+    "diff_bytes": 365583,
+    "diff_sha256": "eb83b239cee6e378a7d00f2998f9a7e4bb78371cdaf70f637611b6481ddfe50d",
+    "command": "git apply --check --index --unidiff-zero --whitespace=error r111-connected-source.diff",
+    "exit": 0,
+    "checkout_unchanged": true
+  },
+  "local_diagnostic_incidents": [
+    "Direct upstream DNS exit 128; artifact route succeeded.",
+    "Initial local archive verification helper had a mistyped chunk-07 expected ZIP SHA256 (assertion exit 1); corrected against exact connector metadata, all 18 verified on second local verification; no artifact/source changes or CI rerun.",
+    "Direct artifact metadata endpoint rejected 400; historical run artifact list retrieved and actual R111 archive downloaded."
+  ]
 }
