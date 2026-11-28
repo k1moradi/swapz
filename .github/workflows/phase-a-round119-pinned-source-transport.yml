@@ -1,0 +1,368 @@
+name: Round119 A10 pinned Linux source transport AUTH0
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round119-pinned-source-transport.yml'
+permissions:
+  contents: read
+jobs:
+  source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact task and transport source
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$SWAPZ_PUSH_BEFORE_SHA" = c80097ba6ed9f9a80a955726c802f138e27c53c8
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test "$(git rev-parse c5237321d0eb01002cec990deebff60c6f39ac64^{tree})" = 327f200f9e45e4f06a335945cc8fbd6f41aa4f65
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          test "$(git hash-object tests/tools/round119-pinned-source-transport.py)" = aa36a89b28c02f92eddc0b6e369e59886cbe1082
+          test "$(git hash-object tests/runtime/native/round119-pinned-source-transport-test.py)" = d928211225a85fb1069f454e49cbcd0bc32395a8
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 -B - <<'PYTHON'
+          import ast, subprocess
+          from pathlib import Path
+          old = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          new = Path("docs/testing_standards.md").read_bytes()
+          assert new.startswith(old) and len(new) > len(old)
+          for path in ("tests/tools/round119-pinned-source-transport.py", "tests/runtime/native/round119-pinned-source-transport-test.py"):
+              ast.parse(Path(path).read_bytes(), filename=path)
+          PYTHON
+          python3 -B tests/runtime/native/round119-pinned-source-transport-test.py
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Export exact complete source and independently restore
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir evidence
+          python3 -B swapz/tests/tools/round119-pinned-source-transport.py export linux transport > evidence/export.json
+          python3 -B swapz/tests/tools/round119-pinned-source-transport.py restore transport restored > evidence/restore.json
+          cp transport/manifest.json evidence/manifest.json
+          cat evidence/restore.json
+          git --version
+          python3 --version
+          for tool in gcc make ld as nm readelf objdump bc bison flex perl pkg-config openssl cpio xz modinfo; do
+            if command -v "$tool" >/dev/null; then printf '%s available\n' "$tool"; else printf '%s missing\n' "$tool"; fi
+          done > evidence/toolchain.txt
+          gcc --version >> evidence/toolchain.txt
+          make --version >> evidence/toolchain.txt
+          ld --version >> evidence/toolchain.txt
+          for library in libelf openssl; do
+            if pkg-config --exists "$library"; then pkg-config --modversion "$library" >> evidence/toolchain.txt; else printf '%s missing\n' "$library" >> evidence/toolchain.txt; fi
+          done
+      - name: Upload verified source manifest and restore evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-manifest
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload source chunk 00
+        if: success() && hashFiles('transport/chunk-00.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-00
+          path: transport/chunk-00.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 01
+        if: success() && hashFiles('transport/chunk-01.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-01
+          path: transport/chunk-01.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 02
+        if: success() && hashFiles('transport/chunk-02.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-02
+          path: transport/chunk-02.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 03
+        if: success() && hashFiles('transport/chunk-03.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-03
+          path: transport/chunk-03.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 04
+        if: success() && hashFiles('transport/chunk-04.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-04
+          path: transport/chunk-04.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 05
+        if: success() && hashFiles('transport/chunk-05.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-05
+          path: transport/chunk-05.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 06
+        if: success() && hashFiles('transport/chunk-06.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-06
+          path: transport/chunk-06.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 07
+        if: success() && hashFiles('transport/chunk-07.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-07
+          path: transport/chunk-07.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 08
+        if: success() && hashFiles('transport/chunk-08.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-08
+          path: transport/chunk-08.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 09
+        if: success() && hashFiles('transport/chunk-09.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-09
+          path: transport/chunk-09.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 10
+        if: success() && hashFiles('transport/chunk-10.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-10
+          path: transport/chunk-10.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 11
+        if: success() && hashFiles('transport/chunk-11.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-11
+          path: transport/chunk-11.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 12
+        if: success() && hashFiles('transport/chunk-12.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-12
+          path: transport/chunk-12.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 13
+        if: success() && hashFiles('transport/chunk-13.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-13
+          path: transport/chunk-13.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 14
+        if: success() && hashFiles('transport/chunk-14.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-14
+          path: transport/chunk-14.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 15
+        if: success() && hashFiles('transport/chunk-15.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-15
+          path: transport/chunk-15.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 16
+        if: success() && hashFiles('transport/chunk-16.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-16
+          path: transport/chunk-16.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 17
+        if: success() && hashFiles('transport/chunk-17.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-17
+          path: transport/chunk-17.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 18
+        if: success() && hashFiles('transport/chunk-18.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-18
+          path: transport/chunk-18.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 19
+        if: success() && hashFiles('transport/chunk-19.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-19
+          path: transport/chunk-19.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 20
+        if: success() && hashFiles('transport/chunk-20.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-20
+          path: transport/chunk-20.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 21
+        if: success() && hashFiles('transport/chunk-21.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-21
+          path: transport/chunk-21.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 22
+        if: success() && hashFiles('transport/chunk-22.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-22
+          path: transport/chunk-22.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 23
+        if: success() && hashFiles('transport/chunk-23.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-23
+          path: transport/chunk-23.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 24
+        if: success() && hashFiles('transport/chunk-24.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-24
+          path: transport/chunk-24.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 25
+        if: success() && hashFiles('transport/chunk-25.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-25
+          path: transport/chunk-25.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 26
+        if: success() && hashFiles('transport/chunk-26.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-26
+          path: transport/chunk-26.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 27
+        if: success() && hashFiles('transport/chunk-27.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-27
+          path: transport/chunk-27.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 28
+        if: success() && hashFiles('transport/chunk-28.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-28
+          path: transport/chunk-28.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 29
+        if: success() && hashFiles('transport/chunk-29.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-29
+          path: transport/chunk-29.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 30
+        if: success() && hashFiles('transport/chunk-30.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-30
+          path: transport/chunk-30.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload source chunk 31
+        if: success() && hashFiles('transport/chunk-31.packpart') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: round119-source-chunk-31
+          path: transport/chunk-31.packpart
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
