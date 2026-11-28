@@ -18,21 +18,1614 @@
     "artifact": 15226127927,
     "first_error": "-Werror=shadow: extracted local int candidate shadows fixture global candidate[PAGE]"
   },
-  "status": "SOURCE_RECOVERY_PENDING_CI",
+  "status": "TERMINAL_HOST_DIAGNOSTIC_PASS",
   "local_exact_source": "BLOCKED_NO_GITHUB_DNS_OR_CHECKOUT",
-  "gcc_asan_ubsan": "NOT_RUN",
-  "clang_asan_ubsan": "NOT_RUN",
-  "optimized": "NOT_RUN",
-  "byte_exact": "NOT_RUN",
-  "measurements": null,
-  "run_id": null,
-  "job_id": null,
-  "artifact_id": null,
+  "gcc_asan_ubsan": "PASS",
+  "clang_asan_ubsan": "PASS",
+  "optimized": "PASS",
+  "byte_exact": "PASS",
+  "measurements": {
+    "frozen": "4345f21b1da720e6c8d685c7b232bfcebe635d50",
+    "tree": "98cb27a3f57d6482d859a260526edb5614ec7994",
+    "source_commit": "c7996667b5764356bd8ee2b766e181f6f452b27f",
+    "recovery_frozen": "7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1",
+    "recovery_tree": "5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0",
+    "product_subtree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+    "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "linux_blobs": {
+      "crypto/acompress.c": "4de1a2ad577f2b0e65ec313d635e7da63e8cf2b0",
+      "crypto/lz4.c": "57b713516aefac823f2af9481c828027b42490dd",
+      "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+      "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+      "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
+      "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
+      "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
+      "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc",
+      "mm/Kconfig": "afff1b25b5438756f15e464f63dabdbd5ec6102c",
+      "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163"
+    },
+    "product_blobs": {
+      "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+      "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+      "src/kernel/dm-target.c": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+      "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+      "src/kernel/predictor.c": "b1ce85ef0fb6a20d720dfba562d3a9a3588f127c",
+      "tests/tools/round052-zswap-swapz-codec-verify.py": "041d91a6ee496dd8d9c46c1c3fde2c3ea95e4d61",
+      "tests/tools/round056-codec-profile-verify.py": "a417dbf8d3a76844c81e147e1060f4c3b07d15ad"
+    },
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "cpu_count": 4,
+    "lz4_backend": "host liblz4, pinned Linux wrapper",
+    "predictor_backend": "scalar",
+    "lzo_backend": "pinned Linux C conservative unaligned shim",
+    "pair_order": "AB/BA alternating",
+    "timing": "thread CPU ns, batch totals divided by eligible pages",
+    "instrumentation": "ordinary verbatim production monotonic wall-clock calls and stats included; preserve has no such calls; both compute and verify CRC; original source generation, packing and final memcmp outside timed regions; not an isolated pure-codec delta",
+    "packing_model": "fixed class 4/8/16 KiB next-fit, max64, raw separate; not lower IO",
+    "category_order": [
+      "zero",
+      "same",
+      "random",
+      "repeated",
+      "structured",
+      "mixed"
+    ],
+    "size_bins_upper_bytes": [
+      512,
+      1024,
+      2048,
+      3568,
+      4096
+    ],
+    "auth": 0,
+    "phase_a": "BLOCKED",
+    "compressed_handoff": false,
+    "forced_raw": false,
+    "import": false,
+    "physical": "NO_GO",
+    "results": {
+      "gcc-asan-ubsan": {
+        "status": "PASS",
+        "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "flags": [
+          "-std=gnu11",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-O1",
+          "-g",
+          "-fsanitize=address,undefined",
+          "-fno-sanitize-recover=all",
+          "-fno-omit-frame-pointer"
+        ],
+        "cases": [
+          {
+            "codec": 1,
+            "pages": 192,
+            "eligible": 95,
+            "zero": 32,
+            "same": 32,
+            "over_cap": 32,
+            "unsupported_control": 1,
+            "category_counts": [
+              32,
+              32,
+              32,
+              32,
+              32,
+              32
+            ],
+            "eligible_by_category": [
+              0,
+              0,
+              0,
+              32,
+              32,
+              31
+            ],
+            "pairs": [
+              [
+                1164953,
+                916503,
+                887400,
+                1103444
+              ],
+              [
+                1550002,
+                1095255,
+                963678,
+                1162213
+              ],
+              [
+                1404871,
+                1185796,
+                939475,
+                1147314
+              ],
+              [
+                1390829,
+                1003048,
+                915757,
+                1072519
+              ],
+              [
+                1398412,
+                1367938,
+                1005036,
+                1181816
+              ],
+              [
+                1440389,
+                1068634,
+                1006225,
+                1198569
+              ],
+              [
+                1179580,
+                1012959,
+                970336,
+                1134089
+              ],
+              [
+                1713877,
+                1230219,
+                920222,
+                1128029
+              ],
+              [
+                1536252,
+                952752,
+                935314,
+                1055899
+              ],
+              [
+                1128302,
+                903950,
+                891822,
+                1050761
+              ],
+              [
+                1139027,
+                914842,
+                887773,
+                1031716
+              ],
+              [
+                1154591,
+                909443,
+                881082,
+                1054581
+              ],
+              [
+                1122725,
+                902991,
+                902996,
+                1027162
+              ],
+              [
+                1128322,
+                904474,
+                878330,
+                1042369
+              ],
+              [
+                1128625,
+                905398,
+                876569,
+                1026407
+              ],
+              [
+                1158658,
+                898350,
+                881628,
+                1049229
+              ],
+              [
+                1123295,
+                900471,
+                885413,
+                1027908
+              ],
+              [
+                1121915,
+                896210,
+                884660,
+                1046808
+              ],
+              [
+                1134929,
+                895494,
+                885325,
+                1017217
+              ],
+              [
+                1129783,
+                898089,
+                878867,
+                1041994
+              ]
+            ],
+            "payload_bytes": [
+              131739,
+              195953
+            ],
+            "ordinary_raw_pages": 0,
+            "preserve_copy_bytes": 195953,
+            "ordinary_raw_copy_bytes": 0,
+            "ordinary_actual_planner_bytes": 143360,
+            "size_bins": [
+              [
+                32,
+                10,
+                21,
+                32,
+                0
+              ],
+              [
+                0,
+                10,
+                21,
+                64,
+                0
+              ]
+            ],
+            "ordinary_last_batch_profile": {
+              "lz4_wall_ns": 72868,
+              "rescue_wall_ns": 316012,
+              "transform_calls": 32,
+              "adopted": 32
+            },
+            "fixed_class_model_bytes": [
+              [
+                192512,
+                172032,
+                147456
+              ],
+              [
+                262144,
+                229376,
+                212992
+              ]
+            ],
+            "byte_exact": true,
+            "eligibility_rate": 0.4947916666666667,
+            "timing_ns_per_page_batch_statistics": {
+              "ordinary_write": {
+                "median": 12174.994736842105,
+                "p95": 16315.810526315789,
+                "p99": 18040.81052631579,
+                "stdev": 1945.098795244899
+              },
+              "ordinary_read": {
+                "median": 9601.5,
+                "p95": 12949.673684210526,
+                "p99": 14399.347368421053,
+                "stdev": 1424.0432544102227
+              },
+              "preserve_write": {
+                "median": 9366.28947368421,
+                "p95": 10579.326315789474,
+                "p99": 10591.842105263158,
+                "stdev": 446.1199376428967
+              },
+              "preserve_read": {
+                "median": 11080.747368421053,
+                "p95": 12440.168421052631,
+                "p99": 12616.515789473684,
+                "stdev": 607.0728250922182
+              }
+            },
+            "paired_preserve_minus_ordinary_ns_per_page": {
+              "write": {
+                "median": -2766.1315789473683,
+                "p95": -2312.936842105263,
+                "p99": -2202.5684210526315,
+                "stdev": 1697.5752090643289,
+                "preserve_faster_pairs": 20
+              },
+              "read": {
+                "median": 1294.1789473684212,
+                "p95": 1588.2,
+                "p99": 1967.8,
+                "stdev": 986.3047708221296,
+                "preserve_faster_pairs": 3
+              }
+            },
+            "fixed_class_model_padding_bytes": [
+              [
+                60773,
+                40293,
+                15717
+              ],
+              [
+                66191,
+                33423,
+                17039
+              ]
+            ]
+          },
+          {
+            "codec": 2,
+            "pages": 192,
+            "eligible": 91,
+            "zero": 32,
+            "same": 32,
+            "over_cap": 36,
+            "unsupported_control": 1,
+            "category_counts": [
+              32,
+              32,
+              32,
+              32,
+              32,
+              32
+            ],
+            "eligible_by_category": [
+              0,
+              0,
+              0,
+              32,
+              32,
+              27
+            ],
+            "pairs": [
+              [
+                1578518,
+                844351,
+                791265,
+                1466289
+              ],
+              [
+                1577706,
+                831540,
+                786377,
+                1487184
+              ],
+              [
+                1602395,
+                834721,
+                783893,
+                1477867
+              ],
+              [
+                1611792,
+                852562,
+                794316,
+                1466254
+              ],
+              [
+                1585182,
+                838014,
+                791404,
+                1472852
+              ],
+              [
+                1599486,
+                833925,
+                790676,
+                1485571
+              ],
+              [
+                1586815,
+                849002,
+                782840,
+                1474253
+              ],
+              [
+                1587512,
+                830871,
+                784691,
+                1479913
+              ],
+              [
+                1591126,
+                830893,
+                787618,
+                1481306
+              ],
+              [
+                1593758,
+                837241,
+                786570,
+                1469039
+              ],
+              [
+                1590162,
+                824442,
+                797240,
+                1477781
+              ],
+              [
+                1606570,
+                829428,
+                786425,
+                1468394
+              ],
+              [
+                1592105,
+                837172,
+                787771,
+                1469651
+              ],
+              [
+                1591630,
+                845434,
+                792640,
+                1473334
+              ],
+              [
+                1593262,
+                821417,
+                786658,
+                1485092
+              ],
+              [
+                1615650,
+                842304,
+                777498,
+                1473386
+              ],
+              [
+                1601345,
+                833103,
+                800083,
+                1464870
+              ],
+              [
+                1588619,
+                834043,
+                785388,
+                1484355
+              ],
+              [
+                1591079,
+                834063,
+                791471,
+                1472007
+              ],
+              [
+                1576266,
+                845340,
+                794826,
+                1478561
+              ]
+            ],
+            "payload_bytes": [
+              117770,
+              175528
+            ],
+            "ordinary_raw_pages": 0,
+            "preserve_copy_bytes": 175528,
+            "ordinary_raw_copy_bytes": 0,
+            "ordinary_actual_planner_bytes": 126976,
+            "size_bins": [
+              [
+                32,
+                10,
+                21,
+                28,
+                0
+              ],
+              [
+                0,
+                4,
+                55,
+                32,
+                0
+              ]
+            ],
+            "ordinary_last_batch_profile": {
+              "lz4_wall_ns": 67421,
+              "rescue_wall_ns": 308451,
+              "transform_calls": 32,
+              "adopted": 32
+            },
+            "fixed_class_model_bytes": [
+              [
+                167936,
+                147456,
+                131072
+              ],
+              [
+                229376,
+                212992,
+                196608
+              ]
+            ],
+            "byte_exact": true,
+            "eligibility_rate": 0.4739583333333333,
+            "timing_ns_per_page_batch_statistics": {
+              "ordinary_write": {
+                "median": 17487.67032967033,
+                "p95": 17712,
+                "p99": 17754.395604395606,
+                "stdev": 116.65574720328688
+              },
+              "ordinary_read": {
+                "median": 9169.142857142857,
+                "p95": 9329.692307692309,
+                "p99": 9368.813186813188,
+                "stdev": 87.86900347514998
+              },
+              "preserve_write": {
+                "median": 8655.983516483517,
+                "p95": 8760.87912087912,
+                "p99": 8792.12087912088,
+                "stdev": 58.70633349506837
+              },
+              "preserve_read": {
+                "median": 16195.81868131868,
+                "p95": 16324.956043956045,
+                "p99": 16342.681318681318,
+                "stdev": 76.51784058878837
+              }
+            },
+            "paired_preserve_minus_ordinary_ns_per_page": {
+              "write": {
+                "median": -8828.236263736264,
+                "p95": -8651.131868131868,
+                "p99": -8587.252747252747,
+                "stdev": 140.14704964994777,
+                "preserve_faster_pairs": 20
+              },
+              "read": {
+                "median": 6993.307692307692,
+                "p95": 7204.879120879121,
+                "p99": 7293.131868131868,
+                "stdev": 141.10155198934484,
+                "preserve_faster_pairs": 0
+              }
+            },
+            "fixed_class_model_padding_bytes": [
+              [
+                50166,
+                29686,
+                13302
+              ],
+              [
+                53848,
+                37464,
+                21080
+              ]
+            ]
+          }
+        ]
+      },
+      "clang-asan-ubsan": {
+        "status": "PASS",
+        "compiler": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+        "flags": [
+          "-std=gnu11",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-O1",
+          "-g",
+          "-fsanitize=address,undefined",
+          "-fno-sanitize-recover=all",
+          "-fno-omit-frame-pointer"
+        ],
+        "cases": [
+          {
+            "codec": 1,
+            "pages": 192,
+            "eligible": 95,
+            "zero": 32,
+            "same": 32,
+            "over_cap": 32,
+            "unsupported_control": 1,
+            "category_counts": [
+              32,
+              32,
+              32,
+              32,
+              32,
+              32
+            ],
+            "eligible_by_category": [
+              0,
+              0,
+              0,
+              32,
+              32,
+              31
+            ],
+            "pairs": [
+              [
+                1396493,
+                1094675,
+                1082452,
+                1210481
+              ],
+              [
+                1183689,
+                962810,
+                1053532,
+                1205815
+              ],
+              [
+                1164028,
+                971975,
+                1048362,
+                1196994
+              ],
+              [
+                1219630,
+                967844,
+                1064417,
+                1213150
+              ],
+              [
+                1176477,
+                966276,
+                1043082,
+                1182883
+              ],
+              [
+                1171683,
+                962974,
+                1054940,
+                1197277
+              ],
+              [
+                1196939,
+                992796,
+                1060632,
+                1198921
+              ],
+              [
+                1392464,
+                1012507,
+                1076719,
+                1251337
+              ],
+              [
+                1177433,
+                973593,
+                1084174,
+                1198864
+              ],
+              [
+                1179518,
+                963090,
+                1040746,
+                1182551
+              ],
+              [
+                1163243,
+                971954,
+                1068083,
+                1209461
+              ],
+              [
+                1172850,
+                963771,
+                1040334,
+                1202662
+              ],
+              [
+                1173079,
+                968593,
+                1041346,
+                1177380
+              ],
+              [
+                1171714,
+                964533,
+                1051121,
+                1179604
+              ],
+              [
+                1179483,
+                963667,
+                1039280,
+                1187315
+              ],
+              [
+                1165899,
+                976417,
+                1042179,
+                1181948
+              ],
+              [
+                1167419,
+                960927,
+                1040369,
+                1196757
+              ],
+              [
+                1185042,
+                961303,
+                1039096,
+                1174177
+              ],
+              [
+                1161377,
+                960755,
+                1055184,
+                1187273
+              ],
+              [
+                1170607,
+                963449,
+                1040354,
+                1189229
+              ]
+            ],
+            "payload_bytes": [
+              131739,
+              195953
+            ],
+            "ordinary_raw_pages": 0,
+            "preserve_copy_bytes": 195953,
+            "ordinary_raw_copy_bytes": 0,
+            "ordinary_actual_planner_bytes": 143360,
+            "size_bins": [
+              [
+                32,
+                10,
+                21,
+                32,
+                0
+              ],
+              [
+                0,
+                10,
+                21,
+                64,
+                0
+              ]
+            ],
+            "ordinary_last_batch_profile": {
+              "lz4_wall_ns": 65348,
+              "rescue_wall_ns": 265294,
+              "transform_calls": 32,
+              "adopted": 32
+            },
+            "fixed_class_model_bytes": [
+              [
+                192512,
+                172032,
+                147456
+              ],
+              [
+                262144,
+                229376,
+                212992
+              ]
+            ],
+            "byte_exact": true,
+            "eligibility_rate": 0.4947916666666667,
+            "timing_ns_per_page_batch_statistics": {
+              "ordinary_write": {
+                "median": 12366.084210526316,
+                "p95": 14657.515789473684,
+                "p99": 14699.926315789473,
+                "stdev": 719.140618635827
+              },
+              "ordinary_read": {
+                "median": 10162.152631578949,
+                "p95": 10657.968421052632,
+                "p99": 11522.894736842105,
+                "stdev": 321.5443831699686
+              },
+              "preserve_write": {
+                "median": 11049.910526315789,
+                "p95": 11394.231578947369,
+                "p99": 11412.357894736842,
+                "stdev": 156.73848617165802
+              },
+              "preserve_read": {
+                "median": 12598.689473684211,
+                "p95": 12770,
+                "p99": 13171.968421052632,
+                "stdev": 183.06518163146646
+              }
+            },
+            "paired_preserve_minus_ordinary_ns_per_page": {
+              "write": {
+                "median": -1378.8736842105263,
+                "p95": -1001.6842105263158,
+                "p99": -981.6736842105263,
+                "stdev": 632.3729064675623,
+                "preserve_faster_pairs": 20
+              },
+              "read": {
+                "median": 2369.9473684210525,
+                "p95": 2557.9473684210525,
+                "p99": 2582.1684210526314,
+                "stdev": 288.3333030981036,
+                "preserve_faster_pairs": 0
+              }
+            },
+            "fixed_class_model_padding_bytes": [
+              [
+                60773,
+                40293,
+                15717
+              ],
+              [
+                66191,
+                33423,
+                17039
+              ]
+            ]
+          },
+          {
+            "codec": 2,
+            "pages": 192,
+            "eligible": 91,
+            "zero": 32,
+            "same": 32,
+            "over_cap": 36,
+            "unsupported_control": 1,
+            "category_counts": [
+              32,
+              32,
+              32,
+              32,
+              32,
+              32
+            ],
+            "eligible_by_category": [
+              0,
+              0,
+              0,
+              32,
+              32,
+              27
+            ],
+            "pairs": [
+              [
+                1412445,
+                886059,
+                935362,
+                1406564
+              ],
+              [
+                1420604,
+                889935,
+                934784,
+                1394377
+              ],
+              [
+                1405066,
+                895613,
+                938352,
+                1392419
+              ],
+              [
+                1391529,
+                885962,
+                933515,
+                1409397
+              ],
+              [
+                1409332,
+                886222,
+                936608,
+                1396193
+              ],
+              [
+                1390452,
+                904367,
+                949143,
+                1389961
+              ],
+              [
+                1399033,
+                889214,
+                930738,
+                1403912
+              ],
+              [
+                1415655,
+                885627,
+                933679,
+                1388949
+              ],
+              [
+                1388492,
+                890957,
+                940650,
+                1390603
+              ],
+              [
+                1410327,
+                885909,
+                933972,
+                1416973
+              ],
+              [
+                1404469,
+                909317,
+                958988,
+                1400847
+              ],
+              [
+                1390495,
+                898927,
+                944075,
+                1393056
+              ],
+              [
+                1403877,
+                889918,
+                933283,
+                1399792
+              ],
+              [
+                1409231,
+                888664,
+                928514,
+                1392291
+              ],
+              [
+                1389232,
+                892455,
+                960356,
+                1418351
+              ],
+              [
+                1396435,
+                887411,
+                932875,
+                1414217
+              ],
+              [
+                1409905,
+                892269,
+                933344,
+                1393662
+              ],
+              [
+                1388185,
+                895032,
+                947922,
+                1392658
+              ],
+              [
+                1395819,
+                886047,
+                933425,
+                1418437
+              ],
+              [
+                1411278,
+                893992,
+                954543,
+                1395096
+              ]
+            ],
+            "payload_bytes": [
+              117770,
+              175528
+            ],
+            "ordinary_raw_pages": 0,
+            "preserve_copy_bytes": 175528,
+            "ordinary_raw_copy_bytes": 0,
+            "ordinary_actual_planner_bytes": 126976,
+            "size_bins": [
+              [
+                32,
+                10,
+                21,
+                28,
+                0
+              ],
+              [
+                0,
+                4,
+                55,
+                32,
+                0
+              ]
+            ],
+            "ordinary_last_batch_profile": {
+              "lz4_wall_ns": 68878,
+              "rescue_wall_ns": 255842,
+              "transform_calls": 32,
+              "adopted": 32
+            },
+            "fixed_class_model_bytes": [
+              [
+                167936,
+                147456,
+                131072
+              ],
+              [
+                229376,
+                212992,
+                196608
+              ]
+            ],
+            "byte_exact": true,
+            "eligibility_rate": 0.4739583333333333,
+            "timing_ns_per_page_batch_statistics": {
+              "ordinary_write": {
+                "median": 15430.472527472528,
+                "p95": 15556.648351648351,
+                "p99": 15611.032967032967,
+                "stdev": 112.01387134160483
+              },
+              "ordinary_read": {
+                "median": 9779.41208791209,
+                "p95": 9938.098901098901,
+                "p99": 9992.494505494506,
+                "stdev": 71.00979066855322
+              },
+              "preserve_write": {
+                "median": 10275.527472527472,
+                "p95": 10538.329670329671,
+                "p99": 10553.362637362638,
+                "stdev": 104.87340662681142
+              },
+              "preserve_read": {
+                "median": 15336.752747252747,
+                "p95": 15586.274725274725,
+                "p99": 15587.21978021978,
+                "stdev": 111.38086630097041
+              }
+            },
+            "paired_preserve_minus_ordinary_ns_per_page": {
+              "write": {
+                "median": -5111.395604395604,
+                "p95": -4838.054945054945,
+                "p99": -4712.923076923077,
+                "stdev": 177.73217520883034,
+                "preserve_faster_pairs": 20
+              },
+              "read": {
+                "median": 5538.84065934066,
+                "p95": 5835.868131868132,
+                "p99": 5850.43956043956,
+                "stdev": 152.33721000618823,
+                "preserve_faster_pairs": 0
+              }
+            },
+            "fixed_class_model_padding_bytes": [
+              [
+                50166,
+                29686,
+                13302
+              ],
+              [
+                53848,
+                37464,
+                21080
+              ]
+            ]
+          }
+        ]
+      },
+      "gcc-optimized": {
+        "status": "PASS",
+        "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "flags": [
+          "-std=gnu11",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-O3"
+        ],
+        "cases": [
+          {
+            "codec": 1,
+            "pages": 192,
+            "eligible": 95,
+            "zero": 32,
+            "same": 32,
+            "over_cap": 32,
+            "unsupported_control": 1,
+            "category_counts": [
+              32,
+              32,
+              32,
+              32,
+              32,
+              32
+            ],
+            "eligible_by_category": [
+              0,
+              0,
+              0,
+              32,
+              32,
+              31
+            ],
+            "pairs": [
+              [
+                758414,
+                558976,
+                758856,
+                924020
+              ],
+              [
+                740000,
+                549673,
+                774313,
+                906016
+              ],
+              [
+                754620,
+                561135,
+                758898,
+                912408
+              ],
+              [
+                745450,
+                547024,
+                767914,
+                916342
+              ],
+              [
+                737768,
+                556188,
+                758812,
+                932671
+              ],
+              [
+                738072,
+                547157,
+                788338,
+                929761
+              ],
+              [
+                752031,
+                570776,
+                778504,
+                921177
+              ],
+              [
+                740315,
+                546889,
+                771930,
+                918736
+              ],
+              [
+                736695,
+                555562,
+                758881,
+                920817
+              ],
+              [
+                740750,
+                546980,
+                767925,
+                905946
+              ],
+              [
+                749578,
+                556519,
+                758612,
+                906455
+              ],
+              [
+                760776,
+                561256,
+                767455,
+                916334
+              ],
+              [
+                747209,
+                555290,
+                758792,
+                930850
+              ],
+              [
+                736574,
+                547006,
+                787934,
+                927402
+              ],
+              [
+                749792,
+                555984,
+                768098,
+                896886
+              ],
+              [
+                742410,
+                546962,
+                767263,
+                919209
+              ],
+              [
+                742625,
+                555568,
+                768025,
+                915543
+              ],
+              [
+                740049,
+                546876,
+                767411,
+                909787
+              ],
+              [
+                754921,
+                564629,
+                768042,
+                901640
+              ],
+              [
+                739972,
+                546897,
+                766730,
+                916610
+              ]
+            ],
+            "payload_bytes": [
+              131739,
+              195953
+            ],
+            "ordinary_raw_pages": 0,
+            "preserve_copy_bytes": 195953,
+            "ordinary_raw_copy_bytes": 0,
+            "ordinary_actual_planner_bytes": 143360,
+            "size_bins": [
+              [
+                32,
+                10,
+                21,
+                32,
+                0
+              ],
+              [
+                0,
+                10,
+                21,
+                64,
+                0
+              ]
+            ],
+            "ordinary_last_batch_profile": {
+              "lz4_wall_ns": 56087,
+              "rescue_wall_ns": 28883,
+              "transform_calls": 32,
+              "adopted": 32
+            },
+            "fixed_class_model_bytes": [
+              [
+                192512,
+                172032,
+                147456
+              ],
+              [
+                262144,
+                229376,
+                212992
+              ]
+            ],
+            "byte_exact": true,
+            "eligibility_rate": 0.4947916666666667,
+            "timing_ns_per_page_batch_statistics": {
+              "ordinary_write": {
+                "median": 7815.973684210527,
+                "p95": 7983.305263157895,
+                "p99": 8008.168421052632,
+                "stdev": 79.4511360190978
+              },
+              "ordinary_read": {
+                "median": 5846.589473684211,
+                "p95": 5943.4631578947365,
+                "p99": 6008.168421052632,
+                "stdev": 74.73419302199092
+              },
+              "preserve_write": {
+                "median": 8080.88947368421,
+                "p95": 8294.042105263157,
+                "p99": 8298.294736842105,
+                "stdev": 93.09251669456748
+              },
+              "preserve_read": {
+                "median": 9647.115789473684,
+                "p95": 9798.421052631578,
+                "p99": 9817.589473684211,
+                "stdev": 104.20396607684256
+              }
+            },
+            "paired_preserve_minus_ordinary_ns_per_page": {
+              "write": {
+                "median": 249.03684210526313,
+                "p95": 529.1157894736842,
+                "p99": 540.6315789473684,
+                "stdev": 140.72722237389772,
+                "preserve_faster_pairs": 0
+              },
+              "read": {
+                "median": 3831.342105263158,
+                "p95": 4004.1684210526314,
+                "p99": 4027.4105263157894,
+                "stdev": 133.2331960679479,
+                "preserve_faster_pairs": 0
+              }
+            },
+            "fixed_class_model_padding_bytes": [
+              [
+                60773,
+                40293,
+                15717
+              ],
+              [
+                66191,
+                33423,
+                17039
+              ]
+            ]
+          },
+          {
+            "codec": 2,
+            "pages": 192,
+            "eligible": 91,
+            "zero": 32,
+            "same": 32,
+            "over_cap": 36,
+            "unsupported_control": 1,
+            "category_counts": [
+              32,
+              32,
+              32,
+              32,
+              32,
+              32
+            ],
+            "eligible_by_category": [
+              0,
+              0,
+              0,
+              32,
+              32,
+              27
+            ],
+            "pairs": [
+              [
+                676813,
+                508840,
+                706514,
+                852134
+              ],
+              [
+                688998,
+                506420,
+                707293,
+                840805
+              ],
+              [
+                684272,
+                491556,
+                687744,
+                838570
+              ],
+              [
+                685992,
+                499997,
+                686690,
+                843135
+              ],
+              [
+                676092,
+                500205,
+                688066,
+                845284
+              ],
+              [
+                685797,
+                491613,
+                687345,
+                837899
+              ],
+              [
+                690424,
+                504382,
+                688704,
+                836665
+              ],
+              [
+                699313,
+                513606,
+                686513,
+                830073
+              ],
+              [
+                690372,
+                512428,
+                690774,
+                830263
+              ],
+              [
+                685513,
+                491364,
+                695729,
+                845068
+              ],
+              [
+                687188,
+                500464,
+                699657,
+                853608
+              ],
+              [
+                687471,
+                500008,
+                688196,
+                830337
+              ],
+              [
+                692929,
+                500173,
+                679132,
+                844049
+              ],
+              [
+                699798,
+                496522,
+                686955,
+                838094
+              ],
+              [
+                686675,
+                491141,
+                688579,
+                838158
+              ],
+              [
+                706468,
+                500301,
+                699611,
+                860458
+              ],
+              [
+                676652,
+                499999,
+                692033,
+                835824
+              ],
+              [
+                681177,
+                501045,
+                687694,
+                836677
+              ],
+              [
+                691247,
+                491512,
+                687620,
+                835433
+              ],
+              [
+                685837,
+                491348,
+                679123,
+                850492
+              ]
+            ],
+            "payload_bytes": [
+              117770,
+              175528
+            ],
+            "ordinary_raw_pages": 0,
+            "preserve_copy_bytes": 175528,
+            "ordinary_raw_copy_bytes": 0,
+            "ordinary_actual_planner_bytes": 126976,
+            "size_bins": [
+              [
+                32,
+                10,
+                21,
+                28,
+                0
+              ],
+              [
+                0,
+                4,
+                55,
+                32,
+                0
+              ]
+            ],
+            "ordinary_last_batch_profile": {
+              "lz4_wall_ns": 60787,
+              "rescue_wall_ns": 26767,
+              "transform_calls": 32,
+              "adopted": 32
+            },
+            "fixed_class_model_bytes": [
+              [
+                167936,
+                147456,
+                131072
+              ],
+              [
+                229376,
+                212992,
+                196608
+              ]
+            ],
+            "byte_exact": true,
+            "eligibility_rate": 0.4739583333333333,
+            "timing_ns_per_page_batch_statistics": {
+              "ordinary_write": {
+                "median": 7548.697802197802,
+                "p95": 7690.087912087912,
+                "p99": 7763.384615384615,
+                "stdev": 84.90199717242402
+              },
+              "ordinary_read": {
+                "median": 5495.5,
+                "p95": 5631.076923076923,
+                "p99": 5644.021978021978,
+                "stdev": 76.91538502400184
+              },
+              "preserve_write": {
+                "median": 7561.879120879121,
+                "p95": 7763.89010989011,
+                "p99": 7772.450549450549,
+                "stdev": 83.14909049780242
+              },
+              "preserve_read": {
+                "median": 9212.791208791208,
+                "p95": 9380.307692307691,
+                "p99": 9455.582417582418,
+                "stdev": 90.0429836743541
+              }
+            },
+            "paired_preserve_minus_ordinary_ns_per_page": {
+              "write": {
+                "median": 12.489010989010989,
+                "p95": 201.04395604395606,
+                "p99": 326.38461538461536,
+                "stdev": 123.37144543391192,
+                "preserve_faster_pairs": 7
+              },
+              "read": {
+                "median": 3775.6593406593406,
+                "p95": 3946.6373626373625,
+                "p99": 3957.769230769231,
+                "stdev": 127.84428394671222,
+                "preserve_faster_pairs": 0
+              }
+            },
+            "fixed_class_model_padding_bytes": [
+              [
+                50166,
+                29686,
+                13302
+              ],
+              [
+                53848,
+                37464,
+                21080
+              ]
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "run_id": 46104589478,
+  "job_id": 140854378183,
+  "artifact_id": 15246204379,
   "auth": 0,
   "phase_a": "BLOCKED",
   "compressed_handoff": false,
   "forced_raw": false,
   "import": false,
   "physical": "NO_GO",
-  "acceptance": "AGENT1_PENDING"
+  "acceptance": "AGENT1_PENDING",
+  "source_commit": "c7996667b5764356bd8ee2b766e181f6f452b27f",
+  "artifact_size_bytes": 6694,
+  "artifact_digest": "sha256:fe6ea3c8e63f9f7de32b3776cad15d849e504c17717ad8679b8d4b0d5cf0ca4d",
+  "artifact_zip_independently_verified": false,
+  "job_conclusion": "success",
+  "first_error": null,
+  "cross_compiler_non_timing_agreement": "PASS",
+  "verdict": "DIAGNOSTIC_ONLY_NO_MEASURED_PRESERVATION_ADVANTAGE"
 }
