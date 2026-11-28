@@ -1,0 +1,921 @@
+{
+  "schema": "swapz-ordinary-native-event-ownership",
+  "version": 1,
+  "consumer_schema_version": 2,
+  "freeze": "2215ecc4e46434bdcd9167a0dff058501bf702b4",
+  "freeze_tree": "de17301302207f7b014340719997899c72c4654c",
+  "task": "6f94b48c81c2b5e9095a856d1ee0bfd6b3b804c3",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "consumer_blob": "a63f7555eadf2b6404352fbf7ade20118d6db15b",
+  "scope_fields": [
+    "source",
+    "run_nonce",
+    "workload_sha256",
+    "area_epoch",
+    "swap_type",
+    "target"
+  ],
+  "page_identity_fields": [
+    "logical",
+    "slot",
+    "store",
+    "generation",
+    "cookie"
+  ],
+  "limits": {
+    "pages": 16,
+    "operations": 64,
+    "actual_serial_operations": 32,
+    "events": 274,
+    "logical_bytes": 4096,
+    "manifest_bytes": 262144,
+    "capture_bytes": 1048576
+  },
+  "source_pins": {
+    "mm/zswap.c": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+    "mm/page_io.c": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+    "mm/swapfile.c": "8b9826f09f7b3127d4cb739a072102763d8e1ecd",
+    "mm/swapz-trial-terminal.inc": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+    "include/linux/swapz_mm_carrier.h": "8d369c402780e06ffd317919acdd6bbd4802646e",
+    "block/bio.c": "f6f1ddc82a5632f1f9cf8dbb0bdb2138eb8e0e64",
+    "drivers/md/dm.c": "5e446e6b80f5744e082ed13a506506499ecb854f",
+    "drivers/md/dm-io.c": "777b917be40020d0fabf295f86b211f9c59fbe37",
+    "mm/memory.c": "0fb676dd2bd639f452d591876d8bec502beafa9a",
+    "mm/shmem.c": "af21a89abb0f63278171cc1f43c83c764c236b6c",
+    "src/kernel/dm-target.c": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+    "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+    "src/kernel/native-observation-adapter.c": "00700206f1c6df7e0494cdbfe9da86ec209b5ce3",
+    "src/kernel/native-observation-byte-bridge.c": "902507cb065828bfa9a8b732edd61fb26ca2f08d",
+    "src/kernel/native-observation-byte-collector.c": "d363f40f537722783777956f8920415b97639b93",
+    "src/kernel/native-observation-controller.c": "0ea943f55449cacae473c182f33e75c48eb371bb",
+    "src/kernel/native-observation-owner.c": "088b9ba8ad59cff94510dbd0452df734c96590bb",
+    "src/kernel/native-observation-recorder.c": "3a9b9040b4f87a13d31361f4467809d82fc52da3",
+    "src/kernel/native-observation-recorder.h": "f1959c40d58854fd9e2e2264c882db9a8b8dfe62",
+    "tests/tools/phase-a-ordinary-evidence.py": "a63f7555eadf2b6404352fbf7ade20118d6db15b",
+    "tests/runtime/native/phase-a-ordinary-evidence-test.py": "a469edc7e22cf6d06fe55c5ba9c5cef94935bb71"
+  },
+  "upstream_preimages": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/page_io.c": "c6824fcd483e0aa2c412e14dae0d2a356b17c373"
+  },
+  "overlays": {
+    "R109_MM": "3c38d165804cb62c7f0d99e27e1ed303987ec90e",
+    "R110_DM": "61a83b92c43be93d0a3ebffe614de4bc8ebe8660",
+    "R107_DM": "7d761ce14c8f452c277d945381e15a02227ed2c2"
+  },
+  "rows": [
+    {
+      "stage": "stored",
+      "ordinal": 1,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "mm/zswap.c",
+          "blob": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+          "functions": "zswap_store_page; swapz_mm_stage_input; swapz_mm_capture",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "src/kernel/native-observation-byte-bridge.c",
+          "blob": "902507cb065828bfa9a8b732edd61fb26ca2f08d",
+          "functions": "swapz_trial_byte_stage_input; swapz_trial_byte_finish_input",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "PARTIAL_TYPED_COUPLED",
+      "owner_lock_lifetime": "MM store owner, locked source folio and successful XArray insertion before LRU visibility; RCU exact active area; bridge spin protects preallocated banks",
+      "required_payload": "status=0 only after actual successful store; late independent witness must carry same actual logical/slot/store/generation/cookie and scope",
+      "gap_and_change": "Current precompression bytes + finish(cookie) exist, but cookie is minted by typed codec/provider eligibility; no independent ordinary STORED event or late witness. Add ordinary-only entry incarnation and commit acknowledgement; cancel provisional input on every error.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "natural_evict",
+      "ordinal": 2,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "cause"
+      ],
+      "anchors": [
+        {
+          "path": "mm/zswap.c",
+          "blob": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+          "functions": "shrink_memcg_cb; zswap_writeback_entry; swapz_mm_preerase",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "PARTIAL_TYPED_COUPLED",
+      "owner_lock_lifetime": "Native zswap LRU selection; copy swpentry under LRU lock, release lock, reacquire valid locked swapcache folio and verify XArray exact entry before deref; no observer-driven eviction",
+      "required_payload": "cause=native_reclaim; actual selected committed entry after successful decode; not retirement",
+      "gap_and_change": "Base shrink_memcg_cb actual caller; preerase takes typed cap/ticket and compressed stream, not ordinary evidence. Mint independent selection fact without codec/provider gate, reserve/seal or claim; fail UNKNOWN on stale entry/hot skip.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_mm",
+      "ordinal": 3,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation"
+      ],
+      "anchors": [
+        {
+          "path": "mm/zswap.c",
+          "blob": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+          "functions": "zswap_writeback_entry; __swap_writeout call",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "swap_add_folio; swap_write_submit",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "MISSING_ORDINARY_PROVENANCE",
+      "owner_lock_lifetime": "Locked decoded folio, validated swpentry and area; before erase/free save bounded value key, then hand to existing SIO; native MM retains ownership",
+      "required_payload": "fresh operation token before ordinary submission, same STORED tuple; no typed candidate or retry token",
+      "gap_and_change": "Existing writeback path erases/frees before submit, carrier only for typed. Ordinary operation sidecar and actual ownership move missing; record no successful write at selection.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_bio",
+      "ordinal": 4,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "logical_bytes",
+        "page"
+      ],
+      "anchors": [
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "swap_add_folio; swap_bdev_submit_write",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "block/bio.c",
+          "blob": "f6f1ddc82a5632f1f9cf8dbb0bdb2138eb8e0e64",
+          "functions": "BIO carrier lifetime and chain boundary",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "PARTIAL_TYPED_BIND_ONLY",
+      "owner_lock_lifetime": "SIO owns folio/bvec; map actual source page while owned before submit; exact original BIO size/sector/bdev; terminal ticket survives callback",
+      "required_payload": "fresh bio token; logical_bytes=4096 and full actual source page (not staged expected bytes); operation copied from MM",
+      "gap_and_change": "Typed bind sets bi_vcnt for one-bvec carrier; normal path need not set it. Ordinary capture must inspect actual SIO geometry without changing it, reject merged/multipage/context alias; no copied expected bytes.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_dm",
+      "ordinal": 5,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm"
+      ],
+      "anchors": [
+        {
+          "path": "drivers/md/dm.c",
+          "blob": "5e446e6b80f5744e082ed13a506506499ecb854f",
+          "functions": "dm_submit_bio; dm_swapz_trial_observation_origin",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/swapz-trial-terminal.inc",
+          "blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+          "functions": "swapz_mm_trial_dm_enter; swapz_mm_trial_dm_origin",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_map; swapz_scope_observe_plain_accept_locked",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "PARTIAL_UNBOUND_ORIGIN",
+      "owner_lock_lifetime": "DM entrant before SRCU borrow; actual live table clone/tio and target queue admission, exact route/sector, one original callback ticket",
+      "required_payload": "fresh dm token on actual accepted target descriptor; same MM operation and bio, not re-minted",
+      "gap_and_change": "Current plain origin mints operation/original itself and ACCEPT has logical only; rejects FUA/PREFLUSH, split/requeue. Carry existing MM identity through actual origin and descriptor; no pointer token.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_lower_submit",
+      "ordinal": 6,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "lower",
+        "bytes"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_lower; swapz_lower_write; swapz_lower_write_run; swapz_accept_write; swapz_flush_window",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "drivers/md/dm-io.c",
+          "blob": "777b917be40020d0fabf295f86b211f9c59fbe37",
+          "functions": "do_region; dispatch_io",
+          "source_class": "PINNED_UPSTREAM"
+        }
+      ],
+      "coverage": "PARTIAL_RAW_ONLY",
+      "owner_lock_lifetime": "Ordered foreground owner, counted descriptor/reservation and exact lower region; actual lower child submission after fault injection/range checks",
+      "required_payload": "fresh lower token, actual submitted physical bytes 512..16384 multiple of 512; all lineage exact",
+      "gap_and_change": "Existing lower wrapper observes only standalone RAW+FUA, before swapz_lower may refuse; packed/bulk/GC unsupported. Need distinguish attempted wrapper call from actual submit; single attributable lower child/region only, no shared batch attribution.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_lower_complete",
+      "ordinal": 7,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "lower",
+        "bytes",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_lower; swapz_lower_write; swapz_finalize_inflight_write",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "drivers/md/dm-io.c",
+          "blob": "777b917be40020d0fabf295f86b211f9c59fbe37",
+          "functions": "endio; dec_count",
+          "source_class": "PINNED_UPSTREAM"
+        }
+      ],
+      "coverage": "PARTIAL_RAW_ONLY",
+      "owner_lock_lifetime": "Actual lower callback/synchronous aggregate result while owner retains descriptor; child byte length saved before iterator advance; error bitmap/unsupported status preserved",
+      "required_payload": "same lower and submitted length, status=0 only actual complete; no success on short/error/partial",
+      "gap_and_change": "Existing lower return and bitmap are aggregate, not one-child proof; async path separate. Reject split/multi-child/foreign completion; do not fabricate a completed byte count from request size.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_commit",
+      "ordinal": 8,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "logical_bytes",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_raw_write; swapz_flush_window; swapz_finalize_inflight_write; swapz_issue_flush",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "src/kernel/authority.c",
+          "blob": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+          "functions": "swapz_finish_raw",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "src/kernel/engine.c",
+          "blob": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+          "functions": "ordinary engine publication path",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "MISSING_DURABLE_ORDINARY_CONTRACT",
+      "owner_lock_lifetime": "ordered_owner/actual authority transaction owns map generation and reservation; lower success plus existing required durable fence before publication; save actual published map identity",
+      "required_payload": "logical_bytes=4096 status=0 and one actual authoritative durable commit, commit_seq retained for later read",
+      "gap_and_change": "RAW witness requires REQ_FUA while plain origin rejects it; native ordinary swap write uses REQ_OP_WRITE|REQ_SWAP. Ordinary packed/zero/bulk invalidated. Do not add flush, FUA, force RAW or extra read to manufacture proof. Need independently proven existing durability and single attributable map publication or UNKNOWN; schema/contract decision if impossible.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "write_upper",
+      "ordinal": 9,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "logical_bytes",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "drivers/md/dm.c",
+          "blob": "5e446e6b80f5744e082ed13a506506499ecb854f",
+          "functions": "__dm_io_complete; dm_swapz_original_observation_endio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/swapz-trial-terminal.inc",
+          "blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+          "functions": "swapz_mm_trial_dm_complete; swapz_mm_trial_dm_endio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "end_swap_bio_write; swap_write_end",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_end_io; swapz_scope_observe_clone",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "PARTIAL_UNBOUND_UPPER",
+      "owner_lock_lifetime": "Original BIO callback owner, not clone; terminal debt retained through callback return; actual original status and saved logical bytes, no BIO use after endio",
+      "required_payload": "logical_bytes=4096 status=0 on real original callback, exact committed operation",
+      "gap_and_change": "Existing DM completion passes correlation to retained wrapper and typed MM ACK separate. Need ordinary identity/status correlation incl sync submit_bio_wait; never emit duplicate at clone and callback, fault/redirty invalidates success.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "evict_retired",
+      "ordinal": 10,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "mm/zswap.c",
+          "blob": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+          "functions": "zswap_writeback_entry; xa_erase; zswap_entry_free; shrink_memcg_cb",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "swap_write_end",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/swapz-trial-terminal.inc",
+          "blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+          "functions": "swapz_mm_trial_dm_endio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "MISSING_JOINED_RETIREMENT",
+      "owner_lock_lifetime": "MM owns real entry erase/free before submission; completion owner owns actual successful writeback; latch value identity before free; no entry pointer retained",
+      "required_payload": "status=0 only joined actual same-entry erase/free and successful original write completion, after write_upper",
+      "gap_and_change": "Native erase/free precedes write submission; zswap_writeback_entry return or ZSWPWB counter is not durability/ACK. Two facts must join in true order; define evict_retired as certification of joined retirement, not time of erase. If v2 means physical erase after upper, impossible without schema review.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_mm",
+      "ordinal": 11,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "commit_seq",
+        "route"
+      ],
+      "anchors": [
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "swap_read_folio; swap_add_folio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/zswap.c",
+          "blob": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+          "functions": "zswap_load; zswap_invalidate",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "MISSING_ORDINARY_COMMIT_LINK",
+      "owner_lock_lifetime": "Locked non-uptodate selected folio, exact live swap area/slot incarnation; only after zeromap miss and zswap_load returns -ENOENT; previously committed map key alive",
+      "required_payload": "fresh operation, exact prior write_commit seq, route=ordinary_backing",
+      "gap_and_change": "Base path reaches ordinary backing only after misses; no binding to original commit today. Swapcache hit, zeromap, zswap hit/error, stale/reused slot and different generation fail UNKNOWN.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_bio",
+      "ordinal": 12,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "logical_bytes"
+      ],
+      "anchors": [
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "swap_bdev_submit_read; swap_add_folio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/swapz-trial-terminal.inc",
+          "blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+          "functions": "swapz_mm_trial_mm_enter; swapz_mm_trial_mm_take",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "PARTIAL_TERMINAL_ONLY",
+      "owner_lock_lifetime": "SIO/locked destination folio and actual bvec ownership; preserve read operation through submit; retain callback until return",
+      "required_payload": "fresh bio token and actual 4096 logical bytes; same read operation",
+      "gap_and_change": "Existing read submit has no ordinary provenance sidecar. Do not force unmerge; reject merged, large folio, readahead/foreign original ambiguity. Support or decline synchronous branch explicitly.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_dm",
+      "ordinal": 13,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm"
+      ],
+      "anchors": [
+        {
+          "path": "drivers/md/dm.c",
+          "blob": "5e446e6b80f5744e082ed13a506506499ecb854f",
+          "functions": "dm_swapz_trial_observation_origin; dm_submit_bio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_map; swapz_scope_observe_plain_accept_locked; swapz_read; swapz_scope_observe_read_pin",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "MISSING_ORDINARY_READ_KIND",
+      "owner_lock_lifetime": "Actual core original/clone and target per-BIO under queue_lock, classify map at ordered execution after prior writes; check committed map identity/pin",
+      "required_payload": "fresh dm token bound to existing read operation and BIO; actual ordinary mapping, not typed original",
+      "gap_and_change": "Current map only marks observation_read_selected; typed read pin path emits typed read; swapz_read explicitly invalidates ordinary read. Need ordinary lineage at accepted map and actual ordered-map selection; no typed-read pin masquerade.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_lower_submit",
+      "ordinal": 14,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "lower",
+        "bytes"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_read; swapz_lower_read; swapz_lower; swapz_parallel_lower_read",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "src/kernel/engine.c",
+          "blob": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+          "functions": "swapz_engine_read_page",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "drivers/md/dm-io.c",
+          "blob": "777b917be40020d0fabf295f86b211f9c59fbe37",
+          "functions": "do_region; dispatch_io",
+          "source_class": "PINNED_UPSTREAM"
+        }
+      ],
+      "coverage": "MISSING_ORDINARY_LOWER_WITNESS",
+      "owner_lock_lifetime": "Ordered map/extent ownership or actual independent read-slot pin and retained descriptor; one attributable real child/region; lower destination alive",
+      "required_payload": "fresh lower token actual physical bytes 512..16384 aligned, read op distinct from write",
+      "gap_and_change": "Typed storage read is not ordinary. Cache hit, zero-elision, write-verification read, multi-request read, shared extent or unsupported independent read slot must not be relabelled. Instrument real ordinary lower owner; no extra read.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_lower_complete",
+      "ordinal": 15,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "lower",
+        "bytes",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_lower; swapz_async_lower_read_done; swapz_finish_read_slot_range",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "drivers/md/dm-io.c",
+          "blob": "777b917be40020d0fabf295f86b211f9c59fbe37",
+          "functions": "endio; dec_count",
+          "source_class": "PINNED_UPSTREAM"
+        }
+      ],
+      "coverage": "MISSING_ORDINARY_LOWER_WITNESS",
+      "owner_lock_lifetime": "Lower synchronous result or actual async callback joined while descriptor/destination pinned; real status including bitmap/unsupported bits",
+      "required_payload": "same lower token and exact bytes, status=0 only actual completion; not decoder/cached bytes",
+      "gap_and_change": "Async slot reports completion aggregate, not selected page or child lineage. Need exact binding or reject shape; zero-fill on lower error is not readback.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_upper",
+      "ordinal": 16,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "dm",
+        "logical_bytes",
+        "status",
+        "page"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_read; swapz_copy_bio_accounted; swapz_end_io",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "drivers/md/dm.c",
+          "blob": "5e446e6b80f5744e082ed13a506506499ecb854f",
+          "functions": "dm_swapz_original_observation_endio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/swapz-trial-terminal.inc",
+          "blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+          "functions": "swapz_mm_trial_dm_endio",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "mm/page_io.c",
+          "blob": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+          "functions": "swap_bio_read_end_io; swap_read_end",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        }
+      ],
+      "coverage": "MISSING_ORDINARY_FULL_PAGE",
+      "owner_lock_lifetime": "Actual original destination folio still locked/owned before unlock and callback release; copy full 4096 bytes synchronously before bio_uninit/free, no pointer escape",
+      "required_payload": "logical_bytes=4096, status=0 and actual returned full page, exact read lineage",
+      "gap_and_change": "Typed ORACLE uses pinned typed path; ordinary read invalidates today. Record bytes at true original callback before folio unlock, not ctx->read_page/decode scratch, while lower and final copy success proven; distinct sync handling.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "read_user",
+      "ordinal": 17,
+      "per_page": true,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "logical",
+        "slot",
+        "store",
+        "generation",
+        "cookie",
+        "operation",
+        "bio",
+        "logical_bytes",
+        "status",
+        "page"
+      ],
+      "anchors": [
+        {
+          "path": "mm/memory.c",
+          "blob": "0fb676dd2bd639f452d591876d8bec502beafa9a",
+          "functions": "do_swap_page (base)",
+          "source_class": "PINNED_UPSTREAM"
+        },
+        {
+          "path": "mm/shmem.c",
+          "blob": "af21a89abb0f63278171cc1f43c83c764c236b6c",
+          "functions": "shmem_swapin_folio (base)",
+          "source_class": "PINNED_UPSTREAM"
+        },
+        {
+          "path": "tests/tools/phase-a-ordinary-evidence.py",
+          "blob": "a63f7555eadf2b6404352fbf7ade20118d6db15b",
+          "functions": "validate; committed_pages; stored_witnesses",
+          "source_class": "HOST_CONSUMER_ONLY"
+        }
+      ],
+      "coverage": "ABSENT_INDEPENDENT_RECIPIENT",
+      "owner_lock_lifetime": "Future independent workload/verifier owns actual matched anon/tmpfs page, after real fault/map return and before user buffer changes; independently bound run and mapping identity",
+      "required_payload": "logical_bytes=4096 status=0 and full actual user bytes; same read operation/bio; independently compared to pre-run plan",
+      "gap_and_change": "No current native/user bridge or authenticated recipient. Actual user bytes cannot be inferred from read_upper or fixture; no arbitrary kernel user pointer or synthetic copy. Require independent receipt binding exact virtual object/offset to actual slot/read; no posthoc plan rewrite.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "cleanup",
+      "ordinal": 18,
+      "per_page": false,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "receipt",
+        "issuer",
+        "status",
+        "maps",
+        "bios",
+        "pins",
+        "reservations",
+        "stores",
+        "caps",
+        "tickets",
+        "quarantines"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_scope_terminal_census; swapz_scope_finish_retained; swapz_drain",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "src/kernel/native-observation-controller.c",
+          "blob": "0ea943f55449cacae473c182f33e75c48eb371bb",
+          "functions": "swapz_trial_controller_finish; swapz_controller_snapshot_locked",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "mm/swapz-trial-terminal.inc",
+          "blob": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+          "functions": "swapz_mm_trial_scope_join_external; swapz_mm_trial_scope_terminal_snapshot; swapz_mm_trial_scope_detach_files",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "src/kernel/native-observation-byte-bridge.c",
+          "blob": "902507cb065828bfa9a8b732edd61fb26ca2f08d",
+          "functions": "terminal_ready; swapz_byte_bridge_close",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "src/kernel/native-observation-owner.c",
+          "blob": "088b9ba8ad59cff94510dbd0452df734c96590bb",
+          "functions": "swapz_trial_observation_stop; private_export_locked",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "PARTIAL_TYPED_CENSUS",
+      "owner_lock_lifetime": "Actual stop/swapoff/area retirement and pre-reference join; ordered_owner maps, MM terminal gate debt, controller cold lock old-owner retirement; byte ledger stores joined; release all open files before destruction",
+      "required_payload": "fresh receipt; issuer=controller_census; all eight actual debt fields and status zero; exactly one last recorder row",
+      "gap_and_change": "Existing flags7 cleanup counts typed fields but not explicit ordinary stores or retained read/write sidecar debt; ordinary map invalidation is not guaranteed by swapoff. Prove actual map retirement in final-intent lifecycle after area drained, not fake discard. Seal only after joined ordinary ledger; no dtr prerequisite to detach.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    },
+    {
+      "stage": "dtr",
+      "ordinal": 19,
+      "per_page": false,
+      "fields": [
+        "seq",
+        "stage",
+        "area_epoch",
+        "swap_type",
+        "target",
+        "receipt",
+        "cleanup_seq",
+        "issuer",
+        "status"
+      ],
+      "anchors": [
+        {
+          "path": "src/kernel/dm-target.c",
+          "blob": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+          "functions": "swapz_dtr; swapz_round096_target_can_free; swapz_free",
+          "source_class": "FROZEN_MODULE"
+        },
+        {
+          "path": "drivers/md/dm.c",
+          "blob": "5e446e6b80f5744e082ed13a506506499ecb854f",
+          "functions": "__dm_destroy; dm_swapz_retire_final_table",
+          "source_class": "R111_STAGED_DIFF_AND_MANIFEST"
+        },
+        {
+          "path": "src/kernel/native-observation-owner.c",
+          "blob": "088b9ba8ad59cff94510dbd0452df734c96590bb",
+          "functions": "swapz_trial_observation_materialize; swapz_trial_observation_deliver",
+          "source_class": "FROZEN_MODULE"
+        }
+      ],
+      "coverage": "MISSING_INDEPENDENT_DTR_RECEIPT",
+      "owner_lock_lifetime": "Final reservation fences opens/resume/table replacement; actual zero opens/holders before native destruction; target destructor clean branch plus core post-dm_table_destroy completion, scalar receipt survives object free",
+      "required_payload": "fresh receipt distinct from cleanup; issuer=dm_target_dtr; status=0; exact cleanup_seq and scope; appended by independent envelope after cleanup",
+      "gap_and_change": "Current DM final reservation marks DESTROYED after dtr return, but void dtr can quarantine and detach. No independent clean receipt, no caller, no trusted sink. Need success branch proof plus actual return; no fput==close, no re-read freed target, no extra recorder CLEANUP.",
+      "native_v2_producer": "NOT_COMPLETE",
+      "native_event_observed": false
+    }
+  ],
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "native": "NO_GO",
+  "physical": "NO_GO"
+}
