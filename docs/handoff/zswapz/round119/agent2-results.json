@@ -1,0 +1,97 @@
+{
+  "round": 119,
+  "agent": 2,
+  "status": "BLOCKED_LOCAL_FULL_REGRESSION",
+  "repair_qualification": "PASS_ROOTLESS_RANGE_AND_R093",
+  "frozen_commit": "c5237321d0eb01002cec990deebff60c6f39ac64",
+  "frozen_tree": "327f200f9e45e4f06a335945cc8fbd6f41aa4f65",
+  "task_commit": "c80097ba6ed9f9a80a955726c802f138e27c53c8",
+  "task_tree": "feddeec12f5d0576c97c3a36afb1834716d6ff17",
+  "source_candidate": "9cfdd9060b98cacd02dfcb5cb74ca8cd89ffc79d",
+  "source_tree": "0070006056fcda4302cd2e74bf25f7496c5b0c5a",
+  "source_blobs": {
+    ".github/workflows/kernel-debug.yml": "a12e14f775bb01e53f6120a0eecd90eae4328ffd",
+    "tests/runtime/native/kernel-debug-main-range-test.py": "5108ded8d9def8a693703dfe734bae4f6ee23d97",
+    "docs/testing_standards.md": "94a82c1f12b740dacff588d518fecb27e54c4be1"
+  },
+  "frozen_workflow_blob": "71eb882e84d551c54d0c858ff0f180a27ac7ac07",
+  "standards_prefix_exact": true,
+  "environment": {
+    "python": "3.13.5",
+    "git": "2.47.3",
+    "test_uid": 65534
+  },
+  "historical_ci": {
+    "run": 46152455374,
+    "job": 141001824017,
+    "conclusion": "failure",
+    "before": "2d71a66a19f48b1857f512e91136fc24daafe4b6",
+    "source": "c5237321d0eb01002cec990deebff60c6f39ac64",
+    "source_parent": "749c7469a18ef747e838a318580d6c1a24f7bd39",
+    "first_failure": "single-parent assertion returned exit 1 before standards validation and tests",
+    "candidate_ci": "NOT_RUN"
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/kernel-debug-main-range-test.py -v",
+      "exit": 0,
+      "passed": 11,
+      "skipped": 0,
+      "seconds": 26.595
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/round093-native-evidence-collector-test.py -v",
+      "exit": 0,
+      "passed": 3,
+      "skipped": 0,
+      "seconds": 1.508,
+      "negative_controls": 15
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/kernel-debug-qualification-test.py -v",
+      "exit": 1,
+      "status": "BLOCKED_BEFORE_TEST_DISCOVERY",
+      "passed": 0,
+      "expected_methods": 48,
+      "first_failure": "FileNotFoundError at import, missing tests/tools/kernel-debug-qualify.py; no semantic test result"
+    }
+  ],
+  "verified_frozen_test_blobs": {
+    "tests/runtime/native/kernel-debug-qualification-test.py": "2a4ae070ebf4010bea0f99d337482bd6e8057b85",
+    "tests/runtime/native/round093-native-evidence-collector-test.py": "43a19f5384123461d1c2376e01c8532ceb62e453",
+    "tests/tools/round093-native-evidence-collector.py": "10806bbb1442f456bfc149638802f7eab217ce40"
+  },
+  "missing_local_dependency": {
+    "path": "tests/tools/kernel-debug-qualify.py",
+    "frozen_blob": "23963fb732b44993ea6e2bb503d1019fcdcf95bd"
+  },
+  "retrieval_failure": {
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "first_error": "Could not resolve host: github.com",
+    "resolution": "Partial exact blob recovery through GitHub connector; complete kernel-debug fixture closure unavailable locally."
+  },
+  "reproduction": {
+    "same_disposable_three_commit_push": {
+      "frozen_guard_exit": 1,
+      "repaired_guard_exit": 0
+    },
+    "yaml_parse": "PASS"
+  },
+  "constraints": {
+    "auth": 0,
+    "phase_a": "BLOCKED",
+    "observation": "UNKNOWN",
+    "actual_route": "ORDINARY",
+    "experimental_switches": "OFF",
+    "native_execution": false,
+    "physical_execution": false,
+    "physical": "NO_GO",
+    "selector_retune": false,
+    "project_ref_movement": false,
+    "workflow_dispatch": false,
+    "builds": 0,
+    "peer_dependency": false
+  },
+  "acceptance": "Agent 1 only; local partial qualification does not qualify historical or candidate CI."
+}

@@ -7,6 +7,7 @@ on:
       - 'tests/tools/kernel-debug-qualify.py'
       - 'tests/tools/qualify-kernel-debug-owned.sh'
       - 'tests/runtime/native/kernel-debug-qualification-test.py'
+      - 'tests/runtime/native/kernel-debug-main-range-test.py'
       - 'tests/runtime/native/round093-native-evidence-collector-test.py'
       - 'tests/tools/round093-native-evidence-collector.py'
       - 'tests/tools/deploy-nullblk.sh'
@@ -33,30 +34,111 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-      - name: Verify exact source and complete standards prefix on R093 fixture changes
+          # A direct-main push can advance more than one linear commit.
+          fetch-depth: 0
+      - name: Verify exact direct-main range and complete standards prefix
         if: github.event_name == 'push'
         env:
           BEFORE: ${{ github.event.before }}
           SOURCE: ${{ github.sha }}
+          PUSH_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE"
-          test "$(git rev-list --parents -n 1 HEAD)" = "$SOURCE $BEFORE"
-          git diff --check "$BEFORE" "$SOURCE"
-          python3 - <<'PY'
-          import hashlib, subprocess
+          python3 -B - <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
           from pathlib import Path
-          before = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
-          after = Path("docs/testing_standards.md").read_bytes()
-          assert after.startswith(before), "historical standards prefix changed"
-          print("standards_before", len(before), hashlib.sha256(before).hexdigest())
-          print("standards_after", len(after), hashlib.sha256(after).hexdigest())
+
+          standards = "docs/testing_standards.md"
+          sha = re.compile(r"[0-9a-f]{40}")
+          commit = "<unavailable>"
+
+          class InvalidRange(Exception):
+              pass
+
+          def require(condition, reason):
+              if not condition:
+                  raise InvalidRange(reason)
+
+          def git(*args, reason):
+              # Only fixed reasons and validated Git SHAs reach the console.
+              try:
+                  result = subprocess.run(
+                      ("git", "--no-replace-objects", *args),
+                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                      timeout=15, check=False)
+              except (OSError, subprocess.TimeoutExpired):
+                  raise InvalidRange(reason) from None
+              require(result.returncode == 0, reason)
+              return result.stdout
+
+          def standards_bytes(revision):
+              entry = git("ls-tree", "-z", revision, "--", standards,
+                          reason="standards_tree_unavailable")
+              require(re.fullmatch(rb"100(?:644|755) blob [0-9a-f]{40}\t" +
+                                   standards.encode() + rb"\x00", entry),
+                      "standards_regular_blob_required")
+              data = git("show", f"{revision}:{standards}",
+                         reason="standards_blob_unavailable")
+              require(data, "standards_empty")
+              return data
+
+          try:
+              source = os.environ.get("SOURCE", "")
+              before = os.environ.get("BEFORE", "")
+              require(sha.fullmatch(source) and source != "0" * 40, "invalid_source")
+              require(sha.fullmatch(before) and before != "0" * 40, "invalid_before")
+              require(os.environ.get("PUSH_REF") == "refs/heads/main", "not_main_push")
+              require(git("symbolic-ref", "--quiet", "HEAD", reason="not_main_checkout") ==
+                      b"refs/heads/main\n", "not_main_checkout")
+              require(git("rev-parse", "--verify", "HEAD^{commit}",
+                          reason="checkout_unavailable").strip() == source.encode(),
+                      "source_checkout_mismatch")
+              commit = source
+              require(git("rev-parse", "--is-shallow-repository",
+                          reason="history_unavailable").strip() == b"false",
+                      "shallow_history")
+              for revision in (before, source):
+                  require(git("cat-file", "-t", revision,
+                              reason="commit_unavailable").strip() == b"commit",
+                          "commit_object_required")
+              git("merge-base", "--is-ancestor", before, source,
+                  reason="before_not_ancestor_or_history_missing")
+              commits = git("rev-list", "--first-parent", "--reverse", f"{before}..{source}",
+                            reason="range_unavailable").decode("ascii").splitlines()
+              require(commits and commits[-1] == source and
+                      all(sha.fullmatch(item) for item in commits), "invalid_range")
+              parent = before
+              commit = parent
+              previous = standards_bytes(parent)
+              for commit in commits:
+                  # Inspect the actual direct parents, not a net diff or a
+                  # first-parent traversal that could silently accept merges.
+                  parents = git("rev-list", "--parents", "-n", "1", commit,
+                                reason="parent_unavailable").split()
+                  require(parents == [commit.encode(), parent.encode()],
+                          "nonlinear_or_discontinuous_range")
+                  git("diff", "--check", "--no-ext-diff", "--no-textconv", parent, commit,
+                      "--", reason="commit_diff_check_failed")
+                  current = standards_bytes(commit)
+                  require(current.startswith(previous), "historical_standards_prefix_changed")
+                  previous = current
+                  parent = commit
+              require(Path(standards).read_bytes() == previous, "checkout_standards_mismatch")
+          except (InvalidRange, OSError, UnicodeError) as error:
+              reason = str(error) if isinstance(error, InvalidRange) else "checkout_or_metadata_unavailable"
+              print(f"SOURCE_CONTRACT_MISMATCH: commit={commit} first_error={reason}", file=sys.stderr)
+              print("corrective_action=verify exact main push history and each commit; "
+                    "do not amend or force-push published commits", file=sys.stderr)
+              sys.exit(1)
           PY
       - name: Reject false kernel-debug PASS and unsafe invocation syntax
         shell: bash
         run: |
           set -euo pipefail
+          python3 -B tests/runtime/native/kernel-debug-main-range-test.py -v
           bash -n tests/tools/qualify-kernel-debug-owned.sh
           python3 -B tests/runtime/native/kernel-debug-qualification-test.py -v
           python3 -B tests/runtime/native/round093-native-evidence-collector-test.py -v
