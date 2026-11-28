@@ -1,0 +1,108 @@
+{
+  "round": 114,
+  "agent": 2,
+  "conclusion": "PASS_ROOTLESS_ONLY",
+  "publication": "IMMUTABLE_CANDIDATE_A1_INTEGRATION_PENDING",
+  "frozen_source": "c87f9f92fc656db5670d9bfd75c7fcf826aa9bbf",
+  "frozen_tree": "7b6fe1478215a0485bb054c30a2a2f51711ddf45",
+  "task_commit": "94ec9494a3a9929905856d8ae7775d3410198dc2",
+  "source_candidate": "af0c72f67a2073b669cd48253d3fef221a34af6d",
+  "source_parent": "94ec9494a3a9929905856d8ae7775d3410198dc2",
+  "source_tree": "f9ea7dc0a067a2254a72fa64082cf2724fbb2c22",
+  "frozen_owned_blobs": {
+    "tests/tools/phase-a-ordinary-evidence.py": "ba1dee236ae613023b892994bde8f25116c732dd",
+    "tests/runtime/native/phase-a-ordinary-evidence-test.py": "2a002111a02c592a793c9fd9071653b988a81177"
+  },
+  "tested_blobs": {
+    "tests/tools/phase-a-ordinary-evidence.py": "a63f7555eadf2b6404352fbf7ade20118d6db15b",
+    "tests/runtime/native/phase-a-ordinary-evidence-test.py": "a469edc7e22cf6d06fe55c5ba9c5cef94935bb71"
+  },
+  "frozen_regression_blobs": {
+    "tests/runtime/native/independent-byte-oracle-test.py": "6df63e5c5236a0570c916c95c2e68414349cea4d",
+    "tests/tools/native-observation-byte-oracle.py": "f57adf23bb76305f88a20bf54f2702e6c00c7ddd",
+    "tests/tools/native-observation-current-export.py": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+    "tests/tools/native-observation-export.py": "0c97be31dce2d7a049335189e114b2c73cd0074c"
+  },
+  "standards": {
+    "parent_blob": "cc2731972491ec73e55f330694179a522d4ea9d7",
+    "candidate_blob": "9beb1815a78841e5b759899e7631343c938e4c86",
+    "exact_parent_prefix": true,
+    "added_lines": 4,
+    "deleted_lines": 0
+  },
+  "environment": {
+    "python": "3.13.5",
+    "unprivileged_uid": 65534,
+    "user": "nobody",
+    "native_checkout": false,
+    "source_transfer": "GitHub connector; byte-exact local git hash-object against pinned Git blobs; tested local hash matched remote immutable blobs"
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-ordinary-evidence-test.py",
+      "status": "PASS",
+      "exit": 0,
+      "unittest_methods": 9,
+      "skips": 0,
+      "seconds": 5.664,
+      "prior_field_mutations": 32,
+      "prior_event_sequence_subtests": 108,
+      "new_plan_rejections": 31,
+      "new_witness_rejections": 22,
+      "max_pages": 16,
+      "max_operations_exercised": 32
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/independent-byte-oracle-test.py c87f9f92fc656db5670d9bfd75c7fcf826aa9bbf",
+      "status": "PASS",
+      "exit": 0,
+      "checks": 4143,
+      "exhaustive_byte_mutations": 4096,
+      "clean_operations": 7,
+      "clean_pages": 8,
+      "clean_bytes": 32768,
+      "error_operations": 8,
+      "error_pages": 9,
+      "error_bytes": 36864,
+      "native_capture": false,
+      "auth": 0
+    }
+  ],
+  "first_failure": {
+    "stage": "environment setup",
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "reason": "Could not resolve host: github.com",
+    "resolved_for_rootless_tests": true
+  },
+  "other_transfer_issues": [
+    "Initial hand-transferred frozen dedicated test hash mismatch; corrected against pinned exact line, hash verified before edits.",
+    "Direct raw-file download unavailable; recovered via connector, exact hashes verified."
+  ],
+  "first_semantic_test_failure": null,
+  "ci": {
+    "status": "NOT_RUN_NOT_ASSIGNED",
+    "run_id": null,
+    "job_ids": []
+  },
+  "native_compiler": "NOT_RUN_NOT_AUTHORIZED",
+  "actual_native_capture": false,
+  "actual_physical_io": false,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "native_qualification": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import_enabled": false,
+  "physical": "NO_GO",
+  "authenticated": false,
+  "limitations": [
+    "Schema v2 is a prospective offline contract; independently retained pre-run plan and late STORED witness are required, but their origin and retention timing are not authenticated.",
+    "Recomputed hash binds only the validated canonical plan, not independent trust or operator consent. Entire same-manifest replay or jointly replaced plan/capture cannot be authenticated or prevented offline.",
+    "One serial write/read pair per planned page, groups may be in any order, max 16 pages/32 actual operations within max 64 planned operations; no concurrent/split/replacement or retry.",
+    "Cleanup/dtr remain structural untrusted claims, no native producer or independent actual teardown proof.",
+    "No main ref move by A2; A1 reconstructs only owned blobs and exact append on fresh main."
+  ],
+  "acceptance": "Agent1 only"
+}
