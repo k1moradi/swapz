@@ -1,0 +1,174 @@
+{
+  "round": 117,
+  "agent": 2,
+  "conclusion": "PASS_ROOTLESS_PREPARATION_ONLY",
+  "publication": "IMMUTABLE_CANDIDATE_A1_INTEGRATION_PENDING",
+  "frozen_source": "2215ecc4e46434bdcd9167a0dff058501bf702b4",
+  "frozen_tree": "de17301302207f7b014340719997899c72c4654c",
+  "product_kernel_tree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+  "task_commit": "6f94b48c81c2b5e9095a856d1ee0bfd6b3b804c3",
+  "source_candidate": "06fe406c037e47bbcf7384471718d1b927ce1cdd",
+  "source_parent": "6f94b48c81c2b5e9095a856d1ee0bfd6b3b804c3",
+  "source_tree": "7e73b5b29bde74d16e7b760545b480ecf461a2cf",
+  "tested_blobs": {
+    "tests/tools/phase-a-workload-plan.py": "a093a016c3467a4732629006ee551c02dc5dff6d",
+    "tests/runtime/native/phase-a-workload-plan-test.py": "7aded48b539deaa91d9fd5b91f5dc49b29fbeffa"
+  },
+  "frozen_regression_blobs": {
+    "tests/runtime/benchmark/resource-pressure.py": "9f2529912a2cb47f4b20bb733903c25d65d97dda",
+    "tests/runtime/native/phase-a-cold-workload-test.py": "55855622dd2e4a382228678b4ca0f397a270952f",
+    "tests/tools/phase-a-ordinary-evidence.py": "a63f7555eadf2b6404352fbf7ade20118d6db15b",
+    "tests/runtime/native/phase-a-ordinary-evidence-test.py": "a469edc7e22cf6d06fe55c5ba9c5cef94935bb71"
+  },
+  "frozen_blobs_verified_locally": true,
+  "source_blobs_exact_remote_readback": true,
+  "standards": {
+    "parent_blob": "6fa121ad216138a7975f78e4d1d18ede05f03be8",
+    "candidate_blob": "14cfa7ea6dc58578e84e1dafae1bc9fd2e0023e5",
+    "exact_parent_prefix": true,
+    "added_lines": 4,
+    "deleted_lines": 0
+  },
+  "environment": {
+    "python": "3.13.5",
+    "uid": 65534,
+    "user": "nobody",
+    "host_page_bytes": 4096,
+    "verified_file_backed_tmpfs": true,
+    "actual_anonymous_mapping": true,
+    "full_checkout": false
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-workload-plan-test.py",
+      "exit": 0,
+      "status": "PASS",
+      "methods": 8,
+      "skips": 0,
+      "seconds": 10.219
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-cold-workload-test.py",
+      "exit": 0,
+      "status": "PASS",
+      "methods": 10,
+      "skips": 0,
+      "seconds": 1.603
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-ordinary-evidence-test.py",
+      "exit": 0,
+      "status": "PASS",
+      "methods": 9,
+      "skips": 0,
+      "seconds": 6.082
+    }
+  ],
+  "total_methods": 27,
+  "total_skips": 0,
+  "first_error": {
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "reason": "Could not resolve host: github.com",
+    "exit": "128 (git fatal; initial combined shell did not separately print child exit)",
+    "recovered": true,
+    "recovery": "Exact connector file contents transported losslessly; each of four complete local Git blob hashes matched frozen source before execution."
+  },
+  "other_environment_errors": [
+    "Direct raw-file retrieval unavailable; no reliance on raw-web retrieval.",
+    "Attempt to use streaming container session refused before command execution; repeated as ordinary synchronous invocation."
+  ],
+  "first_semantic_test_failure": null,
+  "ci": {
+    "status": "NOT_RUN_NOT_ASSIGNED",
+    "run_id": null,
+    "job_ids": []
+  },
+  "qualification": {
+    "plan_version": 2,
+    "cohort_page_range": [
+      2,
+      8
+    ],
+    "max_total_pages": 16,
+    "max_operations": 64,
+    "request_max_bytes": 4096,
+    "artifact_max_bytes": 262144,
+    "hot_touches_range": [
+      0,
+      16
+    ],
+    "mapping_logical_id_rule": "anonymous 1..N, file-backed tmpfs N+1..2N; not native swap slots",
+    "actual_fixture": {
+      "pages": 16,
+      "logical_bytes": 65536,
+      "cohorts": [
+        {
+          "backing": "anonymous",
+          "pages": 8,
+          "hot": 3,
+          "cold": 5
+        },
+        {
+          "backing": "file-backed-tmpfs",
+          "pages": 8,
+          "hot": 3,
+          "cold": 5
+        }
+      ],
+      "hot_touch_counts_tested": [
+        0,
+        1,
+        2,
+        3,
+        16
+      ],
+      "cli_hot_touches": 3,
+      "actual_full_page_comparison": true,
+      "helper_verify": true,
+      "precommit_retained_before_mapping": true,
+      "closed_maps_and_zero_backing_size": true
+    },
+    "independent_canonical_vector": true,
+    "synthetic_committed_pages_acceptance": true,
+    "scope_is_hypothetical": true,
+    "artifact_fields": [
+      "plan",
+      "scope"
+    ],
+    "witnesses_emitted": false,
+    "capture_emitted": false,
+    "cleanup_receipt_emitted": false,
+    "dtr_receipt_emitted": false,
+    "private_directory_mode": "0700",
+    "private_request_and_artifact_mode": "0600",
+    "exclusive_create": true,
+    "no_symlinks_or_traversal": true,
+    "no_overwrite": true,
+    "cleanup_debt_redacted": true,
+    "raw_plan_stdout": false,
+    "private_artifacts_committed": false
+  },
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "native_qualification": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import_enabled": false,
+  "physical": "NO_GO",
+  "actual_route": "ORDINARY",
+  "authenticated": false,
+  "native_execution": false,
+  "physical_execution": false,
+  "pressure_exercise": false,
+  "selector_retuned": false,
+  "limitations": [
+    "Actual small rootless memory mappings and full-byte verification only, not natural eviction, cold residency, native swap slots or backing readback.",
+    "Caller-supplied scope is strictly syntactically checked but is hypothetical; no source provenance, trusted retention, authentication, replay prevention or positive authority.",
+    "Plan producer retains bytes and scope before mapping, but closes maps after qualification; no continuing native workload session, STORED witness, native capture, cleanup census or dtr receipt.",
+    "Frozen helper has no public byte accessor: in-context bounded slices of its private mappings are compared to independently generated committed bytes, without exporting views; coupled to frozen helper layout.",
+    "Directory must be owner-exclusive, no concurrent owner rename/mutation or hostile same-UID process; cleanup failure remains blocked, with cleanup debt boolean when recorded. Local temporary artifacts cleaned by tests.",
+    "No full checkout, CI, kernel build or native/physical activity. No same-round peer output."
+  ],
+  "acceptance": "Agent1 only"
+}
