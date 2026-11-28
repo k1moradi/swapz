@@ -19,6 +19,9 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 PIN = "4345f21b1da720e6c8d685c7b232bfcebe635d50"
 TREE = "98cb27a3f57d6482d859a260526edb5614ec7994"
+RECOVERY_PIN = "7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1"
+RECOVERY_TREE = "5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0"
+PRODUCT_TREE = "880d169f92383f438513d55e5fa2652bb3d9e0ae"
 LINUX = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 FIXTURE = ROOT / "tests/runtime/native/codec/round111-eviction-codec-cost.c"
 KERNEL = ROOT / "src/kernel"
@@ -46,7 +49,10 @@ def run(command, label):
         detail = PRIVATE / "first-error.log"
         detail.write_text(completed.stdout + "\n" + completed.stderr)
         detail.chmod(0o600)
-        raise RuntimeError(f"{label}: exit={completed.returncode}; private first-error.log")
+        diagnostic = next((kind for kind in ("-Werror=shadow", "AddressSanitizer",
+                           "UndefinedBehaviorSanitizer", "runtime error:", "ROUND111_CODEC_FIRST_ERROR")
+                           if kind in completed.stderr), "child diagnostic retained")
+        raise RuntimeError(f"{label}: exit={completed.returncode}; {diagnostic}; private first-error.log")
     return completed.stdout.strip()
 
 def load(name):
@@ -79,6 +85,11 @@ def summarize(case):
     require(sum(case["eligible_by_category"]) == count, "eligible count")
     require(count + case["zero"] + case["same"] + case["over_cap"] +
             case["unsupported_control"] == case["pages"], "partition count")
+    require(len(case["pairs"]) == 20, "exact paired batch count")
+    require(all(len(pair) == 4 for pair in case["pairs"]), "invalid pair columns")
+    require(all(sum(bins) == count for bins in case["size_bins"]), "payload histogram count")
+    require(case["preserve_copy_bytes"] == case["payload_bytes"][1], "preserve copy count")
+    require(case["ordinary_actual_planner_bytes"] >= case["payload_bytes"][0], "ordinary packing size")
     case["eligibility_rate"] = count / case["pages"]
     case["timing_ns_per_page_batch_statistics"] = {}
     for index, name in enumerate(("ordinary_write", "ordinary_read", "preserve_write", "preserve_read")):
@@ -87,9 +98,18 @@ def summarize(case):
         case["timing_ns_per_page_batch_statistics"][name] = {
             "median": statistics.median(values), "p95": quantile(values, .95),
             "p99": quantile(values, .99), "stdev": statistics.stdev(values)}
+    case["paired_preserve_minus_ordinary_ns_per_page"] = {}
+    for index, name in enumerate(("write", "read")):
+        values = [(pair[index + 2] - pair[index]) / count for pair in case["pairs"]]
+        case["paired_preserve_minus_ordinary_ns_per_page"][name] = {
+            "median": statistics.median(values), "p95": quantile(values, .95),
+            "p99": quantile(values, .99), "stdev": statistics.stdev(values),
+            "preserve_faster_pairs": sum(value < 0 for value in values)}
     case["fixed_class_model_padding_bytes"] = [
         [size - case["payload_bytes"][arm] for size in sizes]
         for arm, sizes in enumerate(case["fixed_class_model_bytes"])]
+    require(all(padding >= 0 for arm in case["fixed_class_model_padding_bytes"] for padding in arm),
+            "negative model padding")
     return case
 
 def main():
@@ -100,11 +120,16 @@ def main():
     args = parser.parse_args()
     linux = args.linux_root.resolve()
     PRIVATE = args.output.resolve().parent
-    PRIVATE.mkdir(parents=True, exist_ok=True)
     os.umask(0o077)
+    PRIVATE.mkdir(parents=True, exist_ok=True)
     require(os.geteuid() != 0, "rootless execution required")
     require(run(["git", "-C", str(ROOT), "rev-parse", PIN + "^{tree}"], "frozen tree") == TREE,
             "wrong frozen tree")
+    require(run(["git", "-C", str(ROOT), "rev-parse", RECOVERY_PIN + "^{tree}"], "recovery tree") == RECOVERY_TREE,
+            "wrong recovery tree")
+    for revision in (PIN, RECOVERY_PIN, "HEAD"):
+        require(run(["git", "-C", str(ROOT), "rev-parse", revision + ":src/kernel"], "product subtree") == PRODUCT_TREE,
+                "product subtree differs from freeze")
     require(not run(["git", "-C", str(ROOT), "status", "--porcelain"], "product clean"), "dirty checkout")
     require(not run(["git", "-C", str(ROOT), "diff", "--name-only", PIN, "--", "src/kernel"], "product drift"),
             "product differs from freeze")
@@ -161,6 +186,15 @@ def main():
             require([case["codec"] for case in cases] == [1, 2], "missing codec coverage")
             results[label] = {"status": "PASS", "compiler": run([compiler, "--version"], "compiler version").splitlines()[0],
                               "flags": flags, "cases": cases}
+        # Cross-compiler, sanitized and optimized runs must agree on all non-timing evidence.
+        stable_keys = ("pages", "eligible", "zero", "same", "over_cap", "unsupported_control",
+                       "category_counts", "eligible_by_category", "payload_bytes", "ordinary_raw_pages",
+                       "preserve_copy_bytes", "ordinary_raw_copy_bytes", "ordinary_actual_planner_bytes",
+                       "size_bins", "fixed_class_model_bytes", "byte_exact")
+        for index, reference in enumerate(results["gcc-asan-ubsan"]["cases"]):
+            for result in results.values():
+                require(all(reference[key] == result["cases"][index][key] for key in stable_keys),
+                        "compiler/optimization correctness disagreement")
         # Sanitized timings are explicitly not performance evidence.
         for case in results["gcc-optimized"]["cases"]:
             timing = case["timing_ns_per_page_batch_statistics"]
@@ -170,17 +204,23 @@ def main():
                   f"read median ns/page ordinary={timing['ordinary_read']['median']:.1f} "
                   f"preserve={timing['preserve_read']['median']:.1f} payload={case['payload_bytes']}")
         report = {"frozen": PIN, "tree": TREE, "source_commit": run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], "source HEAD"),
+                  "recovery_frozen": RECOVERY_PIN, "recovery_tree": RECOVERY_TREE,
+                  "product_subtree": PRODUCT_TREE,
                   "linux": LINUX, "linux_blobs": original_hashes, "product_blobs": PINS,
                   "machine": platform.machine(), "processor": platform.processor(),
                   "cpu_count": os.cpu_count(), "lz4_backend": "host liblz4, pinned Linux wrapper",
                   "predictor_backend": "scalar", "lzo_backend": "pinned Linux C conservative unaligned shim",
                   "pair_order": "AB/BA alternating", "timing": "thread CPU ns, batch totals divided by eligible pages",
+                  "instrumentation": "ordinary verbatim production monotonic wall-clock calls and stats included; preserve has no such calls; both compute and verify CRC; original source generation, packing and final memcmp outside timed regions; not an isolated pure-codec delta",
                   "packing_model": "fixed class 4/8/16 KiB next-fit, max64, raw separate; not lower IO",
                   "category_order": ["zero", "same", "random", "repeated", "structured", "mixed"],
                   "size_bins_upper_bytes": [512, 1024, 2048, 3568, 4096],
                   "auth": 0, "phase_a": "BLOCKED", "compressed_handoff": False,
                   "forced_raw": False, "import": False, "physical": "NO_GO", "results": results}
         args.output.write_text(json.dumps(report, indent=2) + "\n")
+        # Bounded structured evidence in the job log as well as the private artifact.
+        # Only emit after all three mandatory executions and equality gates passed.
+        print("ROUND112_CODEC_RESULTS " + json.dumps(report, separators=(",", ":")), flush=True)
         print("Legend: paired eligible generated pages; payload bytes exclude packing; ns/page is batch CPU.")
         print("Interpretation: compare write, read and payload independently; fixed-class packing is a model.")
         print("Evidence -> Goal implication -> Verdict: byte-exact host diagnostic -> quantify codec trade-offs -> diagnostic-only.")

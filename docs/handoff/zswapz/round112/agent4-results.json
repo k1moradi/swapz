@@ -1,0 +1,38 @@
+{
+  "round": 112,
+  "agent": 4,
+  "frozen": "7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1",
+  "tree": "5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0",
+  "original_experiment_freeze": "4345f21b1da720e6c8d685c7b232bfcebe635d50",
+  "product_subtree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_parent": "a308e20d11cb34250724fa30bc843aa4ad0e0d65",
+  "source_blobs": {
+    "tests/runtime/native/codec/round111-eviction-codec-cost.c": "3a194c006e6424673dd11eb512d3b0f4dd77450e",
+    "tests/tools/round111-eviction-codec-cost-verify.py": "38c9895196cabad34d9a41a854f10569e95f9fe1"
+  },
+  "workflow_blob": "837265f165682829286b5d77aa149479c12f5215",
+  "previous_failure": {
+    "run": 46056108200,
+    "job": 140698870412,
+    "artifact": 15226127927,
+    "first_error": "-Werror=shadow: extracted local int candidate shadows fixture global candidate[PAGE]"
+  },
+  "status": "SOURCE_RECOVERY_PENDING_CI",
+  "local_exact_source": "BLOCKED_NO_GITHUB_DNS_OR_CHECKOUT",
+  "gcc_asan_ubsan": "NOT_RUN",
+  "clang_asan_ubsan": "NOT_RUN",
+  "optimized": "NOT_RUN",
+  "byte_exact": "NOT_RUN",
+  "measurements": null,
+  "run_id": null,
+  "job_id": null,
+  "artifact_id": null,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO",
+  "acceptance": "AGENT1_PENDING"
+}

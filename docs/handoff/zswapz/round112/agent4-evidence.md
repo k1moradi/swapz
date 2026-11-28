@@ -1,0 +1,14 @@
+# Round112 Agent4 — offline diagnostic recovery
+
+Frozen `7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1` tree `5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0`. [Assignment](agent4-codec-recovery-p0.md), [contract](frozen-contract.md), [issue #230](https://github.com/k1moradi/swapz/issues/230). R111 and R112 product src/kernel tree both `880d169f92383f438513d55e5fa2652bb3d9e0ae`; current publication parent verified identical. Original experiment retains product pin `4345f21b1da720e6c8d685c7b232bfcebe635d50` and Linux `c339f4010dea8b0d754f84ace70cd1b089878ef8`.
+
+## Verified preceding failure
+[R111 job 140698870412](https://github.com/k1moradi/swapz/actions/runs/46056108200/job/140698870412) terminal failure, first GCC fixture compile. A1 inspected [artifact 15226127927](https://github.com/k1moradi/swapz/actions/runs/46056108200/artifacts/15226127927): ordinary-extracted.inc line47 local int candidate shadows fixture global candidate[PAGE], -Werror=shadow. No executable or timing. Renamed scratch to candidate_compression_buffer and argument; retained extracted function and strict warnings.
+
+## Recovery candidate
+Explicit record codec tag independent of ordinary disk encoding, reset records at codec boundary and raw/zero flags on preserve, require valid lengths and precise -EINVAL builder refusal. Both arms hash and validate payload; final byte comparison outside timed intervals. Retain verbatim ordinary production wall-clock calls and accumulate stats per batch, consume profile outside timing; preservation has no such clocks, so observed write delta includes asymmetrical instrumentation (not pure codec throughput). Original LZ4 pinned wrapper with host liblz4; LZO pinned actual Linux C conservative shim; scalar host predictor. No real pool or active handoff. Actual ordinary planner/builder vs fixed-class modeled opaque packing. 20 alternating matched eligible pairs, fallback controls untimed; paired preserve-minus-ordinary statistics, exact cross-compiler/optimization agreement on non-timing evidence. No production edits.
+
+## Status
+Local container cannot resolve GitHub and lacks exact-source checkouts; no local exact-source compile claimed. Existing dedicated automatic source lane only, no new workflow or dispatch. GCC/Clang ASan/UBSan and optimized execution **NOT_RUN until hosted evidence**, no measurements claimed. Source fixture blob `3a194c006e6424673dd11eb512d3b0f4dd77450e`, verifier `38c9895196cabad34d9a41a854f10569e95f9fe1`, unchanged workflow `837265f165682829286b5d77aa149479c12f5215`. Publication parent `a308e20d11cb34250724fa30bc843aa4ad0e0d65`. Terminal run/job/artifact to be recorded when observed.
+
+Evidence -> Goal implication -> Verdict: actual first compiler failure corrected in source -> enables paired codec diagnostic -> qualification pending, not performance or admission evidence. AUTH=0 Phase A BLOCKED compressed handoff/forced RAW/import OFF physical NO_GO. Agent1 acceptance only.

@@ -29,10 +29,11 @@ struct record {
     unsigned int length;
     swapz_u32 crc;
     bool raw, zero;
+    enum original_codec original_codec; /* meaningful only for preserved bytes */
 };
 static struct source corpus[COUNT];
 static struct record records[2][COUNT];
-static u8 readback[COUNT][PAGE], plain[PAGE], transform[PAGE], candidate[PAGE], inverse[PAGE];
+static u8 readback[COUNT][PAGE], plain[PAGE], transform[PAGE], candidate_compression_buffer[PAGE], inverse[PAGE];
 static unsigned int selected[COUNT], selected_count;
 static void *lz4_memory, *lzo_memory;
 
@@ -75,6 +76,10 @@ struct swapz_dm { bool delta64_rescue_enabled; int delta64_lz4_acceleration; };
 #define LZ4_compress_fast host_lz4_fast
 #include "ordinary-extracted.inc"
 #undef LZ4_compress_fast
+
+/* Match production accumulated counters; inspect outside timed batches. */
+static struct swapz_delta64_stats ordinary_stats;
+static u64 ordinary_lz4_wall_ns;
 
 static uint32_t next_random(uint32_t *state)
 {
@@ -125,13 +130,13 @@ static void original_decode(enum original_codec codec, const u8 *input,
 static void ordinary_write(const u8 *page, struct record *record)
 {
     struct swapz_dm ctx = { true, SWAPZ_LZ4_DELTA64_ACCELERATION_DEFAULT };
-    struct swapz_delta64_stats stats = {0};
-    u64 wall = 0;
+    record->original_codec = 0;
     int length = swapz_compress_page(&ctx, page, record->bytes, transform,
-                                    candidate, lz4_memory, &wall,
-                                    &record->encoding, &stats, &record->zero);
-    record->raw = !record->zero && length <= 0;
-    CHECK(length <= (int)SWAPZ_MAX_COMPRESSED);
+                                    candidate_compression_buffer, lz4_memory, &ordinary_lz4_wall_ns,
+                                    &record->encoding, &ordinary_stats, &record->zero);
+    CHECK(length >= 0 && length <= (int)SWAPZ_MAX_COMPRESSED);
+    CHECK(!record->zero || length > 0);
+    record->raw = !record->zero && length == 0;
     if (record->zero) {
         record->length = 0;
     } else if (record->raw) {
@@ -145,24 +150,34 @@ static void ordinary_write(const u8 *page, struct record *record)
 static void ordinary_read(const struct record *record, u8 *output)
 {
     CHECK(record->crc == swapz_crc32c_bytes(record->bytes, record->length));
+    CHECK(record->original_codec == 0);
     if (record->zero) {
+        CHECK(!record->raw && record->length == 0);
         memset(output, 0, PAGE);
     } else if (record->raw) {
+        CHECK(record->length == PAGE);
         memcpy(output, record->bytes, PAGE);
     } else if (record->encoding == SWAPZ_ENCODING_LZ4) {
+        CHECK(record->length >= 1U && record->length <= SWAPZ_MAX_COMPRESSED);
         CHECK(LZ4_decompress_safe((const char *)record->bytes, (char *)output,
                                   (int)record->length, PAGE) == PAGE);
     } else {
         CHECK(record->encoding == SWAPZ_ENCODING_DELTA64_SHUF8);
+        CHECK(record->length >= 1U && record->length <= SWAPZ_MAX_COMPRESSED);
         CHECK(LZ4_decompress_safe((const char *)record->bytes, (char *)inverse,
                                   (int)record->length, PAGE) == PAGE);
         swapz_unpredict_delta64_shuf8(inverse, transform, output);
     }
 }
-static void preserve_write(const struct source *source, struct record *record)
+static void preserve_write(enum original_codec codec, const struct source *source,
+                           struct record *record)
 {
     /* Original namespace is deliberately external, never a disk encoding. */
     CHECK(source->length >= 1U && source->length <= SWAPZ_MAX_COMPRESSED);
+    CHECK(codec == ORIGINAL_LZ4 || codec == ORIGINAL_LZO1X);
+    record->raw = false;
+    record->zero = false;
+    record->original_codec = codec;
     record->encoding = SWAPZ_ENCODING_INVALID;
     record->length = source->length;
     memcpy(record->bytes, source->compressed, source->length);
@@ -170,9 +185,11 @@ static void preserve_write(const struct source *source, struct record *record)
 }
 static void preserve_read(enum original_codec codec, const struct record *record, u8 *output)
 {
-    CHECK(record->encoding == SWAPZ_ENCODING_INVALID);
+    CHECK(record->encoding == SWAPZ_ENCODING_INVALID && !record->raw && !record->zero);
+    CHECK(record->original_codec == codec);
+    CHECK(record->length >= 1U && record->length <= SWAPZ_MAX_COMPRESSED);
     CHECK(record->crc == swapz_crc32c_bytes(record->bytes, record->length));
-    original_decode(codec, record->bytes, record->length, output);
+    original_decode(record->original_codec, record->bytes, record->length, output);
 }
 static uint64_t pack_model(unsigned int arm, unsigned int capacity)
 {
@@ -242,11 +259,16 @@ static uint64_t production_pack(void)
     CHECK(swapz_ram_extent_begin(&builder, extent, PAGE, 1, descriptors, 1) == 0);
     CHECK(swapz_ram_extent_append(&builder, 1, 1, records[1][selected[0]].bytes,
                                   (swapz_u16)records[1][selected[0]].length,
-                                  SWAPZ_ENCODING_INVALID) != 0);
+                                  SWAPZ_ENCODING_INVALID) == -EINVAL);
+    CHECK(builder.count == 0 && builder.payload_start == PAGE);
     return total;
 }
 static void run_arm(enum original_codec codec, unsigned int arm, uint64_t *write, uint64_t *read)
 {
+    if (arm == 0) {
+        memset(&ordinary_stats, 0, sizeof(ordinary_stats));
+        ordinary_lz4_wall_ns = 0;
+    }
     uint64_t start = clock_ns(CLOCK_THREAD_CPUTIME_ID);
     for (unsigned int index = 0; index < selected_count; ++index) {
         unsigned int logical = selected[index];
@@ -255,7 +277,7 @@ static void run_arm(enum original_codec codec, unsigned int arm, uint64_t *write
             original_decode(codec, source->compressed, source->length, plain);
             ordinary_write(plain, &records[arm][logical]);
         } else {
-            preserve_write(source, &records[arm][logical]);
+            preserve_write(codec, source, &records[arm][logical]);
         }
     }
     *write = clock_ns(CLOCK_THREAD_CPUTIME_ID) - start;
@@ -283,6 +305,12 @@ static void test_codec(enum original_codec codec)
     unsigned int too_large = 0, unsupported = 0;
     uint64_t payload[2] = {0}, bins[2][5] = {{0}}, raw[2] = {0};
     selected_count = 0;
+    /* No record state inherited from the previous source codec. */
+    memset(records, 0, sizeof(records));
+    memset(&ordinary_stats, 0, sizeof(ordinary_stats));
+    ordinary_lz4_wall_ns = 0;
+    CHECK(strcmp(swapz_predictor_transform_backend_name(), "scalar") == 0);
+    CHECK(strcmp(swapz_predictor_inverse_backend_name(), "scalar") == 0);
     for (unsigned int logical = 0; logical < COUNT; ++logical) {
         struct source *source = &corpus[logical];
         unsigned int length = CAP;
@@ -321,7 +349,7 @@ static void test_codec(enum original_codec codec)
     }
     printf("{\"codec\":%d,\"pages\":%u,\"eligible\":%u,\"zero\":%u,\"same\":%u,"
            "\"over_cap\":%u,\"unsupported_control\":%u,\"category_counts\":[",
-           codec, COUNT, selected_count, category_counts[ZERO], category_counts[SAME], too_large, unsupported);
+           (int)codec, (unsigned int)COUNT, selected_count, category_counts[ZERO], category_counts[SAME], too_large, unsupported);
     for (unsigned int i = 0; i < CATEGORIES; ++i) printf("%s%u", i ? "," : "", category_counts[i]);
     printf("],\"eligible_by_category\":[");
     for (unsigned int i = 0; i < CATEGORIES; ++i) printf("%s%u", i ? "," : "", eligible_counts[i]);
@@ -353,7 +381,11 @@ static void test_codec(enum original_codec codec)
         for (unsigned int i = 0; i < 5; ++i) printf("%s%" PRIu64, i ? "," : "", bins[arm][i]);
         printf("]");
     }
-    printf("],\"fixed_class_model_bytes\":[");
+    printf("],\"ordinary_last_batch_profile\":{\"lz4_wall_ns\":%" PRIu64
+           ",\"rescue_wall_ns\":%" PRIu64 ",\"transform_calls\":%" PRIu64
+           ",\"adopted\":%" PRIu64 "},\"fixed_class_model_bytes\":[",
+           ordinary_lz4_wall_ns, ordinary_stats.wall_ns, ordinary_stats.transform_calls,
+           ordinary_stats.adopted);
     for (unsigned int arm = 0; arm < 2; ++arm)
         printf("%s[%" PRIu64 ",%" PRIu64 ",%" PRIu64 "]", arm ? "," : "",
                pack_model(arm, PAGE), pack_model(arm, 2U*PAGE), pack_model(arm, 4U*PAGE));
