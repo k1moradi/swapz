@@ -1,0 +1,102 @@
+{
+  "round": 112,
+  "agent": 11,
+  "issue": 230,
+  "kind": "actual-linked-source-admission-readiness-decision-only",
+  "status": "REPORT_READY_ADMISSION_BLOCKED",
+  "conclusion": "DECISION_PACKAGE_COMPLETE_NO_GO",
+  "freeze": "7911cb6873ea4bd7158c9fa06ac615eee1d4d2f1",
+  "freeze_tree": "5a9553a2a7c9a66bd0080fcf073bef2a4f672fe0",
+  "task": "a308e20d11cb34250724fa30bc843aa4ad0e0d65",
+  "linked_source": "4345f21b1da720e6c8d685c7b232bfcebe635d50",
+  "linked_tree": "98cb27a3f57d6482d859a260526edb5614ec7994",
+  "linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "publication": {
+    "expected_parent": "135f8cf233045e6087b3feb495a568e778bbf332",
+    "main": true,
+    "nonforce": true,
+    "sole_parent": true,
+    "owned_files": [
+      "native-admission-readiness.md",
+      "agent11-evidence.md",
+      "agent11-results.json"
+    ],
+    "standards": "UNCHANGED_DOCS_ONLY"
+  },
+  "prior_qualification": {
+    "tested_commit": "91f77bc9a0e60b45b5c32305acde6f64116885c6",
+    "run_id": 46055928263,
+    "job_id": 140698287504,
+    "conclusion": "success",
+    "scope": "CONNECTED_COMPILE_LINK_ONLY",
+    "artifact": {
+      "id": 15226473013,
+      "bytes": 4585568,
+      "members": 184,
+      "sha256": "b9172cfc4ea113318fec02d516121b4db847e77b616c1d27cd62ba8a691c2aeb",
+      "crc": "PASS",
+      "results_sha256": "9d36b1702eaa3465cfc97137a4bc74c004ffa1dd2c4029ff834fb619c36f4a0c",
+      "staged_diff_sha256": "eb83b239cee6e378a7d00f2998f9a7e4bb78371cdaf70f637611b6481ddfe50d",
+      "vmlinux_sha256": "861ab544c791ac56ed9e889c752a168f7b9abbfb6791e292a646f74a6afd9e63",
+      "module_sha256": "9e4c32580bfe29c9284d0f184e9d6a29e160174b4f3e3ffc3662a440edf99bd0"
+    }
+  },
+  "source_pins": {
+    "drivers/md/dm.c": "5e446e6b80f5744e082ed13a506506499ecb854f",
+    "mm/zswap.c": "9e1efceae44c384370d0aa3e25748d127a5cd4ad",
+    "mm/swapfile.c": "8b9826f09f7b3127d4cb739a072102763d8e1ecd",
+    "mm/swapz-trial-terminal.inc": "697f3c9fc51738fedabc58cefc4eee6fddc8358c",
+    "mm/page_io.c": "5c3ebb46e2d885b0d3ab492a796996c004954d79",
+    "block/bio.c": "f6f1ddc82a5632f1f9cf8dbb0bdb2138eb8e0e64",
+    "src/kernel/dm-target.c": "5ecc477dc6c795d89e2a67ad2f6424a94d314b2d",
+    "src/kernel/native-observation-controller.c": "0ea943f55449cacae473c182f33e75c48eb371bb",
+    "src/kernel/native-observation-owner.c": "088b9ba8ad59cff94510dbd0452df734c96590bb",
+    "src/kernel/native-observation-byte-bridge.c": "902507cb065828bfa9a8b732edd61fb26ca2f08d",
+    "mm/round098-swapz/zswap-original-broker-owner.inc": "a6a025b1d56513919ac83f4367e9c306fa12c933"
+  },
+  "local_checks": {
+    "archive_hash_crc": "PASS",
+    "source_manifest_and_diff": "READ",
+    "actual_elf_nm_objdump": "READ_ONLY",
+    "begin_registered": "-EACCES",
+    "mm_publish": "-EACCES",
+    "positive_static_controller_begin": "ABSENT_OPTIMIZED_OUT",
+    "dm_combined_and_final_retire": "LOCAL_NO_DIRECT_CALL",
+    "trusted_private_sink": "ABSENT",
+    "direct_call_census_limit": "not exhaustive indirect call proof"
+  },
+  "first_error": null,
+  "first_blocker": "No independent trusted admission owner/channel or real lifecycle caller; no explicit consent for this run",
+  "trust_root": "NONE",
+  "proposed_decision": "independent operator-controlled run verifier and private built-in one-shot lifecycle transaction only after A1 review; no implemented grant",
+  "engineering": [
+    "native lifecycle caller and same-transaction rechecks",
+    "independent counted broker capability",
+    "exact stop/swapoff/join/retire/zero-open/dtr proof",
+    "private trusted sink and independent dtr envelope",
+    "ordinary-only previously-STORED eviction/readback trace semantic fit"
+  ],
+  "authorization": [
+    "A1/operator trust model decision",
+    "separate explicit bounded isolated Phase A execution consent",
+    "separate raw evidence access",
+    "later separate Phase B approval"
+  ],
+  "new_compiler_tests": "NOT_RUN",
+  "native_runtime": "NOT_RUN",
+  "native_lockdep": "NOT_RUN",
+  "new_builds": 0,
+  "manual_dispatches": 0,
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "OFF",
+  "forced_RAW": "OFF",
+  "import": "OFF",
+  "physical": "NO_GO",
+  "actual_physical_io": false,
+  "peer_dependency": false,
+  "production_changes": false,
+  "branches": false,
+  "prs": false,
+  "acceptance_owner": "Agent 1"
+}
