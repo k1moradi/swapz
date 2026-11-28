@@ -421,6 +421,49 @@ static uint64_t micro_batch(enum original_codec codec, enum micro_op operation)
     return elapsed;
 }
 
+/* Independent reflected Castagnoli oracle, outside all measured regions. */
+static uint32_t crc_reference(const u8 *data, unsigned int length)
+{
+    uint32_t state = UINT32_C(0xffffffff);
+    for (unsigned int index = 0; index < length; ++index) {
+        state ^= data[index];
+        for (unsigned int bit = 0; bit < 8U; ++bit)
+            state = (state >> 1U) ^ ((state & 1U) ? UINT32_C(0x82f63b78) : 0U);
+    }
+    return ~state;
+}
+static uint32_t checked_crc(const u8 *data, unsigned int length)
+{
+    uint32_t actual = swapz_crc32c_bytes(data, length);
+    CHECK(actual == crc_reference(data, length));
+    return actual;
+}
+static void crc_selftest(void)
+{
+    static const u8 known[] = "123456789";
+    static const unsigned int lengths[] = {
+        0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 63, 64, 65,
+        127, 128, 255, 256, 511, 512, 513, 1023, 1024, 2047, 2048,
+        3567, 3568, 3569, 4095, 4096
+    };
+    _Alignas(8) u8 data[PAGE + 7];
+    uint32_t state = UINT32_C(0xcafef00d);
+    for (unsigned int index = 0; index < sizeof(data); ++index)
+        data[index] = (u8)next_random(&state);
+    CHECK(checked_crc(NULL, 0) == 0);
+    CHECK(checked_crc(known, 9) == UINT32_C(0xe3069283));
+    printf("{\"crc_known\":%" PRIu32 ",\"crc_empty\":0,\"crc_vectors\":[",
+           UINT32_C(0xe3069283));
+    bool first = true;
+    for (unsigned int offset = 0; offset < 8U; ++offset) {
+        for (unsigned int index = 0; index < sizeof(lengths) / sizeof(lengths[0]); ++index) {
+            uint32_t value = checked_crc(data + offset, lengths[index]);
+            printf("%s[%u,%u,%" PRIu32 "]", first ? "" : ",", offset, lengths[index], value);
+            first = false;
+        }
+    }
+    puts("]}");
+}
 static void report_case(enum original_codec codec, int stratum)
 {
     unsigned int category_counts[CATEGORIES] = {0}, eligible_counts[CATEGORIES] = {0};
@@ -504,6 +547,23 @@ static void report_case(enum original_codec codec, int stratum)
         printf("%s[%u,%u,%u,%u]", index ? "," : "", logical, corpus[logical].length,
                records[0][logical].length, corpus[logical].eligible ? 1U : 0U);
     }
+    printf("],\"page_crcs\":[");
+    /* Actual full page, original bytes and both record payloads, including
+     * fallback controls; independently verify and retain checksum equality. */
+    for (unsigned int index = 0; index < total_pages; ++index) {
+        unsigned int logical = page_ids[index];
+        const struct source *source = &corpus[logical];
+        const struct record *ordinary_record = &records[0][logical];
+        const struct record *preserved_record = &records[1][logical];
+        uint32_t page_crc = checked_crc(source->page, PAGE);
+        uint32_t original_crc = checked_crc(source->compressed, source->length);
+        uint32_t ordinary_crc = checked_crc(ordinary_record->bytes, ordinary_record->length);
+        uint32_t preserved_crc = checked_crc(preserved_record->bytes, preserved_record->length);
+        CHECK(ordinary_crc == ordinary_record->crc && preserved_crc == preserved_record->crc);
+        CHECK(source->eligible ? preserved_crc == original_crc : preserved_crc == ordinary_crc);
+        printf("%s[%u,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 "]",
+               index ? "," : "", logical, page_crc, original_crc, ordinary_crc, preserved_crc);
+    }
     prepare_micro();
     printf("],\"inverse_pages\":%u,\"micro_pairs\":[", inverse_count);
     if (selected_count) {
@@ -558,15 +618,17 @@ static void test_codec(enum original_codec codec)
     for (int stratum = 0; stratum < CATEGORIES; ++stratum)
         report_case(codec, stratum);
 }
-int main(void)
+int main(int argc, char **argv)
 {
+    CHECK(argc == 2 && (strcmp(argv[1], "1") == 0 || strcmp(argv[1], "2") == 0));
+    crc_selftest();
     lz4_memory = malloc((size_t)LZ4_sizeofState());
     lzo_memory = malloc(LZO1X_MEM_COMPRESS);
     CHECK(lz4_memory && lzo_memory);
     /* Default scalar implementation; no kernel SIMD transition claims. */
     generate();
-    test_codec(ORIGINAL_LZ4);
-    test_codec(ORIGINAL_LZO1X);
+    /* Split codec executions so the two binaries can alternate order. */
+    test_codec(strcmp(argv[1], "1") == 0 ? ORIGINAL_LZ4 : ORIGINAL_LZO1X);
     free(lzo_memory); free(lz4_memory);
     return 0;
 }
