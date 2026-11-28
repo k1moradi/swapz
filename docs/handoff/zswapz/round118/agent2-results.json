@@ -1,0 +1,149 @@
+{
+  "round": 118,
+  "agent": 2,
+  "conclusion": "PASS_ROOTLESS_INTERLEAVED_DIAGNOSTIC_ONLY",
+  "publication": "IMMUTABLE_CANDIDATE_A1_INTEGRATION_PENDING",
+  "frozen_source": "d8dd2b12959a0ad06e9b2fca4c6795b8ee4e53f5",
+  "frozen_tree": "76f4d2835e5209419503bac9fd6a7b2a7d1a2aee",
+  "product_kernel_tree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+  "task_commit": "2d71a66a19f48b1857f512e91136fc24daafe4b6",
+  "source_candidate": "13a035a9a2b2e311cf35d194871bb9161eb1e093",
+  "source_parent": "2d71a66a19f48b1857f512e91136fc24daafe4b6",
+  "source_tree": "4108ebfeec4b890136a4185218ee7a440c949acc",
+  "tested_blobs": {
+    "tests/tools/phase-a-ordinary-evidence-v3.py": "a915bbdbc209436ef78c548079039d7e9a3947a7",
+    "tests/runtime/native/phase-a-ordinary-evidence-v3-test.py": "da45a325d393538c153e7007b2d0dc338915749b"
+  },
+  "frozen_dependencies": {
+    "tests/tools/phase-a-ordinary-evidence.py": "a63f7555eadf2b6404352fbf7ade20118d6db15b",
+    "tests/runtime/native/phase-a-ordinary-evidence-test.py": "a469edc7e22cf6d06fe55c5ba9c5cef94935bb71",
+    "docs/handoff/zswapz/round117/ordinary-event-ownership.md": "3bbab5afad5385d0ae9e45b8b03fa0cd7d224c3a",
+    "docs/handoff/zswapz/round117/ordinary-event-map.json": "3834b7ea50af24b19a754bb6d8d1c1f42be86cb1"
+  },
+  "local_dependency_git_hashes_verified": true,
+  "source_blobs_remote_verified": true,
+  "standards": {
+    "parent_blob": "14cfa7ea6dc58578e84e1dafae1bc9fd2e0023e5",
+    "candidate_blob": "215f8a2070019e46fd40f1a3beb021300205c1f2",
+    "exact_parent_prefix": true,
+    "added_lines": 4,
+    "deleted_lines": 0
+  },
+  "environment": {
+    "python": "3.13.5",
+    "uid": 65534,
+    "user": "nobody",
+    "full_checkout": false
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-ordinary-evidence-v3-test.py",
+      "exit": 0,
+      "status": "PASS",
+      "methods": 8,
+      "skips": 0,
+      "seconds": 13.939
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-ordinary-evidence-test.py",
+      "exit": 0,
+      "status": "PASS",
+      "methods": 9,
+      "skips": 0,
+      "seconds": 6.525
+    }
+  ],
+  "total_methods": 17,
+  "total_skips": 0,
+  "first_error": {
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "reason": "Could not resolve host: github.com",
+    "recovered": true,
+    "recovery": "Complete frozen v2 source and regression fetched via connector, losslessly transported and exact local Git hashes verified before execution."
+  },
+  "first_semantic_test_failure": null,
+  "ci": {
+    "status": "NOT_RUN_NOT_ASSIGNED",
+    "run_id": null,
+    "job_ids": []
+  },
+  "qualification": {
+    "envelope_version": 3,
+    "embedded_plan_version": 2,
+    "plan_bounds": {
+      "pages": [
+        1,
+        16
+      ],
+      "operations": [
+        2,
+        64
+      ]
+    },
+    "max_actual_operations": 32,
+    "max_events": 274,
+    "manifest_max_bytes": 262144,
+    "capture_max_bytes": 1048576,
+    "stages_per_page": 17,
+    "terminal_stages": 2,
+    "full_page_values_per_page": 3,
+    "maximum_bytes_compared": 196608,
+    "valid_schedule_page_counts": [
+      1,
+      2,
+      3,
+      16
+    ],
+    "schedule_families": [
+      "reverse_serial",
+      "round_robin",
+      "mixed_completion",
+      "seeded_random"
+    ],
+    "random_max_page_seeds": 24,
+    "primary_schedule_acceptances": 41,
+    "adjacent_same_page_swaps_rejected": 48,
+    "global_event_mutations_rejected": 212,
+    "maximum_plan_operations_64_accepted": true,
+    "maximum_actual_operations_32_accepted": true,
+    "v2_v3_no_fallback": true,
+    "all_stage_field_removals_and_extra_fields_tested": true,
+    "cross_page_cross_role_global_tokens_tested": true,
+    "causal_publish_binding_tested": true,
+    "false_persistence_refused": true,
+    "all_cleanup_debts_tested": true,
+    "equal_content_coherent_identity_swap_accepted_structurally_only": true,
+    "equal_content_unilateral_cookie_swap_refused": true,
+    "private_cli_caps_and_redaction_tested": true,
+    "first_error_preserved": true,
+    "input_order_unchanged": true,
+    "fixture_origin": "unchanged independent v2 synthetic fixture; test-only scheduling and ordinal remapping",
+    "valid_status": "CONSISTENT_INTERLEAVED_ORDINARY_CORRELATION_ONLY"
+  },
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "native_qualification": "BLOCKED",
+  "observation": "UNKNOWN",
+  "persistence": "UNPROVEN",
+  "durable_qualification": "BLOCKED",
+  "logical_slot_binding": "UNVERIFIED",
+  "actual_route": "ORDINARY",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import_enabled": false,
+  "physical": "NO_GO",
+  "authenticated": false,
+  "native_execution": false,
+  "physical_execution": false,
+  "evidence_induced_io": false,
+  "selector_retuned": false,
+  "limitations": [
+    "All capture claims, witnesses, cleanup and dtr are synthetic. No actual native producer or logical-slot binding, persistence, durable proof, independent trusted capture or consent.",
+    "Same-byte coherent swaps of hypothetical witness and event identities can be structurally consistent; no physical mapping identity follows. Whole-envelope replay across invocations cannot be prevented.",
+    "Single bounded offline validation, no concurrent caller mutation contract; no split/merge/retry/replacement/loss; unsupported capture shapes refuse.",
+    "Fixed sibling v2 dependency reuses canonical commitment, strict shape/identity/witness/JSON and private input checks. Inherits direct-parent O_NOFOLLOW/private-mode policy, not a new ancestor-traversal hardening or protection against a hostile same-UID owner.",
+    "No kernel source, build, CI, native or physical exercise, actual durability witness, extra flush/FUA/read/reclaim, or selector tuning. No R118 peer dependency."
+  ],
+  "acceptance": "Agent1 only"
+}
