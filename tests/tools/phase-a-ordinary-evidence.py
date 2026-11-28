@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
-"""Prospective ordinary-only evidence contract, version 1; NOT a native producer.
+"""Prospective ordinary-only evidence contract, version 2; NOT a native producer.
 
 Two independent UTF-8 JSON objects, no duplicate/unknown keys or nonfinite
-numbers. Manifest: {schema: 'swapz-ordinary-manifest', version: 1, scope,
- pages: [{logical, slot, store, generation, cookie, expected_page}]}.
-Scope: {source (40 lowercase hex Git commit), run_nonce (32 lowercase hex),
- workload_sha256 (64 lowercase hex), area_epoch, swap_type, target}.
-Hex identities must be nonzero; expected_page is exactly 8192 lowercase hex
-characters. All numbers are JSON integers (not booleans); swap_type 0..255,
- logical/generation 1..2**32-1, other identities 1..2**64-1. Manifest
- pages are independently retained, including prior store identity, not
- reconstructed from the capture. 1..16 pages, at most 64 I/O operations;
- this first profile permits exactly one serial write/read pair per page.
+numbers. Manifest: {schema: 'swapz-ordinary-manifest', version: 2, scope,
+ plan, witnesses: [...]}. Scope: {source (40 lowercase hex Git commit),
+ run_nonce (32 lowercase hex), workload_sha256 (64 lowercase hex),
+ area_epoch, swap_type, target}. Hex identities must be nonzero.
+ Plan: {schema:'swapz-ordinary-plan', version:2, source, run_nonce,
+ area_epoch, swap_type, target, max_pages, max_operations,
+ pages:[{logical, expected_page}]}. Retain the plan independently before
+ the run; expected_page is exactly 8192 lowercase hex characters.
+ Plan pages are strictly ascending by unique logical ID. Planned bounds:
+ max_pages 1..16, max_operations 2..64, covering all planned pairs.
+ SHA256 of json.dumps(plan, sort_keys=True, separators=(',', ':'),
+ ensure_ascii=True, allow_nan=False).encode('utf-8') (no newline) must equal
+ workload_sha256 in both envelopes. Only this exact typed field set is
+ hashed, without a self-referential digest. JSON member order/whitespace
+ outside the canonical representation is immaterial.
+ Late independently retained prior-STORED witness rows:
+ {scope, logical, slot, store, generation, cookie, status:0}, one per
+ planned logical ID in the same ascending order, each repeating full scope.
+ No prior slot/store/generation/cookie is required in the pre-run plan.
+ All numbers are JSON integers (not booleans); swap_type 0..255,
+ logical/generation 1..2**32-1, other identities 1..2**64-1.
+ One serial write/read pair per page (at most 32 actual operations),
+ page groups may arrive in any order; no version-1 downgrade.
+ Neither input is authenticated; complete same-manifest replay across
+ offline invocations cannot be prevented by this consumer.
 
-Capture: {schema: 'swapz-ordinary-capture', version: 1, scope, loss: 0,
+Capture: {schema: 'swapz-ordinary-capture', version: 2, scope, loss: 0,
  events: [...]}. Scope must equal manifest. Contiguous seq from 1; no
  interleaving, replacement, retry, dropped or extra events. Per-page event
  base: {seq, stage, logical, slot, store, generation, cookie, area_epoch,
@@ -51,6 +66,7 @@ Capture: {schema: 'swapz-ordinary-capture', version: 1, scope, loss: 0,
  All results retain AUTH=0, native qualification BLOCKED, observation UNKNOWN.
  No native producer, trust root, runtime action, or physical permission.
 """
+import hashlib
 import json
 import os
 import re
@@ -65,6 +81,8 @@ MAX_CAPTURE_BYTES = 1024 * 1024
 U64 = (1 << 64) - 1
 U32 = (1 << 32) - 1
 SCOPE_KEYS = {"source", "run_nonce", "workload_sha256", "area_epoch", "swap_type", "target"}
+PLAN_SCOPE_KEYS = SCOPE_KEYS - {"workload_sha256"}
+PLAN_KEYS = PLAN_SCOPE_KEYS | {"schema", "version", "max_pages", "max_operations", "pages"}
 IDENTITY_KEYS = {"logical", "slot", "store", "generation", "cookie"}
 AREA_KEYS = {"area_epoch", "swap_type", "target"}
 STAGES = (
@@ -127,8 +145,9 @@ def identity_valid(row):
 
 
 def envelope(value, schema, keys):
+    require(type(value) is dict, "envelope_shape")
+    require(value.get("schema") == schema and integer(value.get("version"), 2, 2), "schema_version")
     shape(value, keys | {"schema", "version", "scope"}, "envelope_shape")
-    require(value["schema"] == schema and integer(value["version"], 1, 1), "schema_version")
     scope_valid(value["scope"])
 
 
@@ -143,22 +162,60 @@ def fresh(value, seen):
     seen.add(value)
 
 
+def committed_pages(manifest):
+    """Validate the pre-run commitment before consulting the late witnesses."""
+    scope = manifest["scope"]
+    plan = manifest["plan"]
+    shape(plan, PLAN_KEYS, "plan_shape")
+    require(plan["schema"] == "swapz-ordinary-plan" and
+            integer(plan["version"], 2, 2), "plan_version")
+    exact_fields(plan, scope, PLAN_SCOPE_KEYS, "plan_scope")
+    pages = plan["pages"]
+    require(integer(plan["max_pages"], 1, MAX_PAGES) and
+            integer(plan["max_operations"], 2, MAX_OPERATIONS), "plan_bounds")
+    require(type(pages) is list and 1 <= len(pages) <= plan["max_pages"] and
+            2 * len(pages) <= plan["max_operations"], "page_bounds")
+    expected = {}
+    previous_logical = 0
+    for page in pages:
+        shape(page, {"logical", "expected_page"}, "manifest_page_shape")
+        require(integer(page["logical"], 1, U32) and
+                page["logical"] > previous_logical, "plan_logical_order")
+        require(hex_string(page["expected_page"], PAGE_BYTES), "expected_page_length")
+        previous_logical = page["logical"]
+        expected[previous_logical] = bytes.fromhex(page["expected_page"])
+    canonical = json.dumps(plan, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True, allow_nan=False).encode("utf-8")
+    require(hashlib.sha256(canonical).hexdigest() == scope["workload_sha256"],
+            "workload_commitment")
+    return expected
+
+
+def stored_witnesses(manifest, expected):
+    """Bind late identities to the already validated plan, never to capture data."""
+    witnesses = manifest["witnesses"]
+    require(type(witnesses) is list and len(witnesses) == len(expected), "witness_coverage")
+    identities = {}
+    slots, stores, cookies = set(), set(), set()
+    for logical, row in zip(expected, witnesses, strict=True):
+        shape(row, IDENTITY_KEYS | {"scope", "status"}, "witness_shape")
+        scope_valid(row["scope"])
+        exact_fields(row["scope"], manifest["scope"], SCOPE_KEYS, "witness_scope")
+        identity_valid(row)
+        require(row["logical"] == logical, "witness_coverage")
+        require(integer(row["status"], 0, 0), "witness_not_stored")
+        for key, seen in (("slot", slots), ("store", stores), ("cookie", cookies)):
+            fresh(row[key], seen)
+        identities[logical] = row
+    return identities
+
+
 def validate(manifest, capture):
     """Return structural correlation only. All invalid inputs raise Invalid."""
-    envelope(manifest, "swapz-ordinary-manifest", {"pages"})
-    pages = manifest["pages"]
-    require(type(pages) is list and 1 <= len(pages) <= MAX_PAGES and
-            2 * len(pages) <= MAX_OPERATIONS, "page_bounds")
-    expected = {}
-    slots, stores, cookies = set(), set(), set()
-    for page in pages:
-        shape(page, IDENTITY_KEYS | {"expected_page"}, "manifest_page_shape")
-        identity_valid(page)
-        require(page["logical"] not in expected, "duplicate_logical")
-        for key, seen in (("slot", slots), ("store", stores), ("cookie", cookies)):
-            fresh(page[key], seen)
-        require(hex_string(page["expected_page"], PAGE_BYTES), "expected_page_length")
-        expected[page["logical"]] = page
+    envelope(manifest, "swapz-ordinary-manifest", {"plan", "witnesses"})
+    expected = committed_pages(manifest)
+    identities = stored_witnesses(manifest, expected)
+    pages = manifest["plan"]["pages"]
     envelope(capture, "swapz-ordinary-capture", {"loss", "events"})
     scope = manifest["scope"]
     exact_fields(capture["scope"], scope, SCOPE_KEYS, "stale_scope")
@@ -191,8 +248,8 @@ def validate(manifest, capture):
                 logical = row["logical"]
                 require(logical in expected and logical not in seen_pages, "page_coverage")
                 seen_pages.add(logical)
-                identity = expected[logical]
-                reference = bytes.fromhex(identity["expected_page"])
+                identity = identities[logical]
+                reference = expected[logical]
             exact_fields(row, identity, IDENTITY_KEYS, "stale_page_identity")
             if "status" in extra:
                 require(integer(row["status"], 0, 0), "failed_stage")
