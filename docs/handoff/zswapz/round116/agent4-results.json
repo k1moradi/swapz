@@ -1,0 +1,25 @@
+{
+  "round": 116,
+  "agent": 4,
+  "frozen": "dd215d9467491dbe75cd7593bb146e814cabfad3",
+  "tree": "bbe592501bc10b334e0192d5f361f49a0947167c",
+  "product_subtree": "880d169f92383f438513d55e5fa2652bb3d9e0ae",
+  "source_parent": "9bd7f5a8b564a3ed029c660a0d9086968a5a5e66",
+  "source_blobs": {
+    "tests/runtime/native/codec/round111-eviction-codec-cost.c": "87c4919979523e4393423871a5c63c10452f85f2",
+    "tests/tools/round111-eviction-codec-cost-verify.py": "3922b965436acabb94ceffe7fd8a70d40af87dcf"
+  },
+  "workflow_blob": "837265f165682829286b5d77aa149479c12f5215",
+  "standards_parent": "09b02ae725a949317ddf114cbf9cb9d8e9e10317",
+  "standards_post": "b7061e8a852c785602361ba65f0489beba99d5e8",
+  "status": "HOSTED_PENDING",
+  "first_error": null,
+  "measurements": null,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import": false,
+  "physical": "NO_GO"
+}

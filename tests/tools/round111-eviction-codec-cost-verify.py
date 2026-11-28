@@ -32,6 +32,17 @@ CRC_PIN = "308f3b57774b42e20f295a13139655a10b25539d"
 CRC_TREE = "80538948801519c0c3c17440cc64edf77443a896"
 R114_REPORT = "docs/handoff/zswapz/round114/agent4-results.json"
 R114_REPORT_BLOB = "ca98c75e68a92ba456cd450aaaaab60b02995783"
+HOLDOUT_PIN = "dd215d9467491dbe75cd7593bb146e814cabfad3"
+HOLDOUT_TREE = "bbe592501bc10b334e0192d5f361f49a0947167c"
+R115_REPORT = "docs/handoff/zswapz/round115/agent4-results.json"
+R115_REPORT_BLOB = "01f58f08db2b5f880db056c584b9b0b25a6ab7c3"
+SELECTOR_PATH = "tests/tools/phase-a-preservation-policy-replay.py"
+SELECTOR_BLOB = "8faa25c2b6f97713a719d1b2747a7037477d5c0d"
+FAMILIES = ["constant_controls", "varied_repeat_width", "mixed_boundary_prefix", "short_repeated_delta_words",
+            "grouped_delta_words", "high_entropy", "state_gate_controls"]
+HOLDOUT_COLUMNS = ["logical_id", "original_bytes", "version", "dictionary", "stored", "compatible",
+                   "hypothetical_authority", "pressure", "read_likelihood", "queue_depth", "packing_budget",
+                   "selected", "ordinary_bytes", "policy_bytes", "page_crc", "original_crc", "ordinary_crc", "policy_crc"]
 CRC_LENGTHS = (0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 63, 64, 65,
                127, 128, 255, 256, 511, 512, 513, 1023, 1024, 2047, 2048,
                3567, 3568, 3569, 4095, 4096)
@@ -110,7 +121,7 @@ def summarize(case):
     require(sum(case["eligible_by_category"]) == count, "eligible count")
     require(count + case["zero"] + case["same"] + case["over_cap"] +
             case["unsupported_control"] == case["pages"], "partition count")
-    require(len(case["pairs"]) == (20 if count else 0), "exact paired batch count")
+    require(not case["pairs"], "reference timing must be omitted")
     require(all(len(pair) == 4 and min(pair) > 0 for pair in case["pairs"]), "invalid pair columns")
     require(all(sum(bins) == count for bins in case["size_bins"]), "payload histogram count")
     require(case["preserve_copy_bytes"] == case["payload_bytes"][1], "preserve copy count")
@@ -142,25 +153,69 @@ def summarize(case):
     require(all(padding >= 0 for arm in case["fixed_class_model_padding_bytes"] for padding in arm),
             "negative model padding")
     require(0 <= case["inverse_pages"] <= count, "inverse count")
-    require(len(case["micro_pairs"]) == (20 if count else 0), "missing micro batches")
-    if not count:
-        return case
-    for index, name in enumerate(("ordinary_write", "ordinary_read", "preserve_write", "preserve_read")):
-        case["timing_ns_per_page_batch_statistics"][name] = stats([pair[index] / count for pair in case["pairs"]])
+    require(not case["micro_pairs"], "reference micro timing must be omitted")
+    return case
+
+def summarize_holdout(case, selector):
+    family, codec = case["family"], case["codec"]
+    require(-1 <= family < len(FAMILIES) and codec in (1, 2) and case["byte_exact"], "holdout identity")
+    case["family_name"] = "all_heldout" if family == -1 else FAMILIES[family]
+    ids = list(range(224)) if family == -1 else list(range(family * 32, (family + 1) * 32))
+    rows = case["rows"]
+    require(case["pages"] == len(ids) and [row[0] for row in rows] == ids, "holdout coverage")
+    reasons = {}
+    regret = []
+    for row in rows:
+        require(len(row) == len(HOLDOUT_COLUMNS) and all(type(value) is int and value >= 0 for value in row),
+                "holdout row shape")
+        (logical, original, version, dictionary, stored, compatible, authority, pressure, read_likelihood,
+         queue, budget, selected, ordinary, policy, page_crc, original_crc, ordinary_crc, policy_crc) = row
+        require(1 <= original <= 8192 and 0 <= ordinary <= 4096 and 0 <= policy <= 4096 and
+                all(value in (0, 1) for value in (stored, compatible, authority, selected)) and
+                all(value <= 0xffffffff for value in (page_crc, original_crc, ordinary_crc, policy_crc)),
+                "holdout row bounds")
+        meta = dict(codec=codec, length=original, version=version, dictionary=dictionary,
+                    stored=bool(stored), compatible=bool(compatible), hypothetical_authority=bool(authority))
+        state = selector.state(pressure, read_likelihood, queue, budget)
+        expected, reason = selector.select(meta, state)
+        require(expected == bool(selected), "frozen selector decision mismatch")
+        require(policy == (original if selected else ordinary) and
+                policy_crc == (original_crc if selected else ordinary_crc), "policy payload mismatch")
+        reasons[reason] = reasons.get(reason, 0) + 1
+        regret.append(policy - ordinary)
+    selected = [row for row in rows if row[11]]
+    case["selected"] = len(selected)
+    case["attempted"] = len(selected)
+    case["oracle_fallback"] = 0
+    case["ordinary_fallback"] = len(rows) - len(selected)
+    case["decision_reasons"] = reasons
+    case["payload_bytes"] = [sum(row[col] for row in rows) for col in (12, 13)]
+    case["selected_payload_bytes"] = [sum(row[col] for row in selected) for col in (12, 13)]
+    case["byte_regret"] = sum(max(0, delta) for delta in regret)
+    case["worst_page_regret"] = max(regret)
+    case["inflated_pages"] = sum(delta > 0 for delta in regret)
+    case["boundary_coverage"] = {str(boundary): {
+        "exact": sum(row[1] == boundary for row in rows),
+        "below_within_8": sum(boundary - 8 <= row[1] < boundary for row in rows),
+        "above_within_8": sum(boundary < row[1] <= boundary + 8 for row in rows)}
+        for boundary in (128, 768, 3568)}
+    require(case["ordinary_actual_planner_bytes"] >= case["payload_bytes"][0], "holdout packing size")
+    require(case["fixed_class_model_bytes"] ==
+            [[selector.pack([row[col] for row in rows], extent) for extent in (4096, 8192, 16384)]
+             for col in (12, 13)], "holdout packing model mismatch")
+    require(len(case["pairs"]) == 20 and all(len(pair) == 4 and min(pair) > 0 for pair in case["pairs"]),
+            "holdout paired timings")
+    require(case["selector_repeats"] == 64 and len(case["selector_times"]) == 20 and
+            min(case["selector_times"]) > 0, "selector timings")
+    count = len(rows)
+    case["timing_ns_per_page"] = {name: stats([pair[index] / count for pair in case["pairs"]])
+        for index, name in enumerate(("ordinary_write", "ordinary_read", "policy_write", "policy_read"))}
+    case["paired_policy_minus_ordinary_ns_per_page"] = {}
     for index, name in enumerate(("write", "read")):
         values = [(pair[index + 2] - pair[index]) / count for pair in case["pairs"]]
-        case["paired_preserve_minus_ordinary_ns_per_page"][name] = {
-            **stats(values), "preserve_faster_pairs": sum(value < 0 for value in values)}
-    require(all(len(pair) == len(MICRO_NAMES) and min(pair[:-1]) > 0 and
-                (pair[-1] > 0 if case["inverse_pages"] else pair[-1] == 0)
-                for pair in case["micro_pairs"]), "invalid micro batch")
-    for index, name in enumerate(MICRO_NAMES):
-        denominator = case["inverse_pages"] if name == "inverse_only" else count
-        case["micro_ns_per_page_batch_statistics"][name] = (
-            stats([pair[index] / denominator for pair in case["micro_pairs"]]) if denominator else None)
-    for left, right, name in ((3, 4, "crc"), (5, 6, "payload_copy")):
-        case["micro_paired_preserve_minus_ordinary_ns_per_page"][name] = stats(
-            [(pair[right] - pair[left]) / count for pair in case["micro_pairs"]])
+        case["paired_policy_minus_ordinary_ns_per_page"][name] = {
+            **stats(values), "policy_faster_pairs": sum(value < 0 for value in values)}
+    case["selector_ns_per_call"] = stats([value / (count * 64) for value in case["selector_times"]])
     return case
 
 def main():
@@ -188,7 +243,13 @@ def main():
     require(run(["git", "hash-object", str(ROOT / R114_REPORT)], "R114 evidence pin") == R114_REPORT_BLOB,
             "R114 evidence drift")
     r114_cases = json.loads((ROOT / R114_REPORT).read_text())["measurements"]["results"]["gcc-optimized"]["cases"]
-    for revision in (PIN, RECOVERY_PIN, ATTRIBUTION_PIN, CRC_PIN, "HEAD"):
+    require(run(["git", "-C", str(ROOT), "rev-parse", HOLDOUT_PIN + "^{tree}"], "holdout freeze tree") == HOLDOUT_TREE,
+            "wrong holdout freeze tree")
+    for path, expected in ((R115_REPORT, R115_REPORT_BLOB), (SELECTOR_PATH, SELECTOR_BLOB)):
+        require(run(["git", "hash-object", str(ROOT / path)], "holdout input pin") == expected, "holdout input drift")
+    r115 = json.loads((ROOT / R115_REPORT).read_text())["measurements"]
+    selector = load("phase-a-preservation-policy-replay")
+    for revision in (PIN, RECOVERY_PIN, ATTRIBUTION_PIN, CRC_PIN, HOLDOUT_PIN, "HEAD"):
         require(run(["git", "-C", str(ROOT), "rev-parse", revision + ":src/kernel"], "product subtree") == PRODUCT_TREE,
                 "product subtree differs from freeze")
     require(not run(["git", "-C", str(ROOT), "status", "--porcelain"], "product clean"), "dirty checkout")
@@ -286,7 +347,7 @@ def main():
                     "sse42_macro": macro_enabled, "crc_instruction_count": len(instructions),
                     "crc_instruction_mnemonics": sorted(set(instructions)),
                     "codec_object_sha256": hashlib.sha256(crc_object.read_bytes()).hexdigest(),
-                    "common_object_sha256": common_hashes, "cases": []}
+                    "common_object_sha256": common_hashes, "cases": [], "holdout_cases": []}
             # AB for codec 1, BA for codec 2 (reverse initial order for Clang).
             # Separate binaries/processes, same host/CPU; not per-pair interleaving.
             for codec in (1, 2):
@@ -295,7 +356,7 @@ def main():
                     label = base_label + "-" + backend
                     execution_order.append([label, codec])
                     output = run([str(binaries[backend]), str(codec)], label + f"/codec-{codec}").splitlines()
-                    require(len(output) == 9, "missing CRC oracle or case records")
+                    require(len(output) == 17, "missing CRC oracle, reference or holdout records")
                     oracle = json.loads(output[0])
                     require(oracle["crc_known"] == 0xe3069283 and oracle["crc_empty"] == 0 and
                             [row[:2] for row in oracle["crc_vectors"]] ==
@@ -306,11 +367,15 @@ def main():
                     if crc_vectors is None:
                         crc_vectors = oracle
                     require(oracle == crc_vectors, "CRC oracle backend/compiler disagreement")
-                    cases = [summarize(json.loads(line)) for line in output[1:]]
+                    cases = [summarize(json.loads(line)) for line in output[1:9]]
                     require([(case["codec"], case["stratum"]) for case in cases] ==
                             [(codec, stratum) for stratum in range(-1, len(STRATA))],
                             "missing codec or stratum coverage")
                     results[label]["cases"].extend(cases)
+                    heldout = [summarize_holdout(json.loads(line), selector) for line in output[9:]]
+                    require([(case["codec"], case["family"]) for case in heldout] ==
+                            [(codec, family) for family in range(-1, len(FAMILIES))], "missing heldout cases")
+                    results[label]["holdout_cases"].extend(heldout)
         require(crc_vectors is not None, "no CRC oracle execution")
         # Cross-compiler, sanitized and optimized runs must agree on all non-timing evidence.
         stable_keys = ("pages", "eligible", "zero", "same", "over_cap", "unsupported_control",
@@ -343,33 +408,57 @@ def main():
                              if c["codec"] == reference["codec"] and 0 <= c["stratum"] < 6
                              for row in c["page_sizes"]))
             require(joined == case["page_sizes"], "strata differ from shared page sizes")
-        # Sanitized timings are explicitly not performance evidence.
-        backend_comparison = []
-        if hardware_supported:
-            for software, hardware in zip(results["gcc-optimized-software"]["cases"],
-                                          results["gcc-optimized-sse42"]["cases"]):
-                if not software["eligible"]:
-                    continue
-                # Differences of separate-run medians, not cross-backend paired samples.
-                comparison = {"codec": software["codec"], "stratum": software["stratum_name"]}
-                for key in ("timing_ns_per_page_batch_statistics",
-                            "paired_preserve_minus_ordinary_ns_per_page",
-                            "micro_ns_per_page_batch_statistics",
-                            "micro_paired_preserve_minus_ordinary_ns_per_page"):
-                    comparison[key] = {
-                        name: {"software": value["median"], "sse42": hardware[key][name]["median"]}
-                        for name, value in software[key].items() if value is not None}
-                backend_comparison.append(comparison)
+        # Reference R115 exact checksums and stable fields, not timings.
+        require(crc_vectors == r115["crc_oracle"], "R115 oracle drift")
+        for index, reference in enumerate(r115["results"]["gcc-optimized-software"]["cases"]):
+            require(all(reference[key] == results["gcc-optimized-software"]["cases"][index][key]
+                        for key in stable_keys), "R115 reference drift")
+        holdout_stable = ("codec", "family", "pages", "rows", "selected", "attempted", "oracle_fallback",
+                          "ordinary_fallback", "decision_reasons", "payload_bytes", "selected_payload_bytes",
+                          "byte_regret", "worst_page_regret", "inflated_pages", "boundary_coverage",
+                          "ordinary_actual_planner_bytes", "fixed_class_model_bytes", "byte_exact")
+        reference_holdout = results["gcc-optimized-software"]["holdout_cases"]
+        for result in results.values():
+            require(len(result["holdout_cases"]) == 16, "heldout case count")
+            for expected, actual in zip(reference_holdout, result["holdout_cases"]):
+                require(all(expected[key] == actual[key] for key in holdout_stable), "heldout lane disagreement")
+        for codec in (1, 2):
+            aggregate = next(c for c in reference_holdout if c["codec"] == codec and c["family"] == -1)
+            joined = [row for c in reference_holdout if c["codec"] == codec and c["family"] >= 0 for row in c["rows"]]
+            require(joined == aggregate["rows"], "heldout aggregate coverage")
+        # Constant control overlap is expected; require disjoint nonconstant
+        # page CRCs versus old corpus (CRC collision would conservatively fail).
+        for codec in (1, 2):
+            old_crcs = {row[1] for c in r115["results"]["gcc-optimized-software"]["cases"]
+                        if c["codec"] == codec and c["stratum"] >= 0 for row in c["page_crcs"]}
+            require(not any(row[14] in old_crcs for c in reference_holdout
+                            if c["codec"] == codec and c["family"] > 0 for row in c["rows"]),
+                    "nonconstant heldout overlaps reference")
+        # Predeclared screen on LZ4 (LZO is negative control, never selected).
+        # No aggregate or family inflation, positive full-policy write improvement,
+        # and no write regression in a family that actually selects.
+        screens = {}
         for backend in backends:
-            for case in results["gcc-optimized-" + backend]["cases"]:
-                if not case["eligible"]:
-                    continue
-                timing = case["timing_ns_per_page_batch_statistics"]
-                print(f"backend={backend} codec={case['codec']} stratum={case['stratum_name']} "
-                      f"write ordinary/preserve={timing['ordinary_write']['median']:.1f}/"
-                      f"{timing['preserve_write']['median']:.1f} "
-                      f"read ordinary/preserve={timing['ordinary_read']['median']:.1f}/"
-                      f"{timing['preserve_read']['median']:.1f} ns/page")
+            cases = results["gcc-optimized-" + backend]["holdout_cases"]
+            all_lz4 = next(c for c in cases if c["codec"] == 1 and c["family"] == -1)
+            families = [c for c in cases if c["codec"] == 1 and c["family"] >= 0]
+            checks = {
+                "integrity": True, "no_unsupported_selection": True,
+                "positive_full_policy_write_improvement": all_lz4["paired_policy_minus_ordinary_ns_per_page"]["write"]["median"] < 0,
+                "no_aggregate_payload_inflation": all_lz4["payload_bytes"][1] <= all_lz4["payload_bytes"][0],
+                "no_family_payload_inflation": all(c["payload_bytes"][1] <= c["payload_bytes"][0] for c in families),
+                "no_selected_family_write_regression": all(
+                    c["paired_policy_minus_ordinary_ns_per_page"]["write"]["median"] <= 0
+                    for c in families if c["selected"])}
+            screens[backend] = {"gates": checks, "verdict": "DIAGNOSTIC_SCREEN_PASS" if all(checks.values()) else "HOST_POLICY_NO_GO"}
+        # Sanitized timings are correctness only; reference timing omitted.
+        for backend in backends:
+            for case in results["gcc-optimized-" + backend]["holdout_cases"]:
+                delta = case["paired_policy_minus_ordinary_ns_per_page"]
+                print(f"backend={backend} codec={case['codec']} family={case['family_name']} "
+                      f"selected={case['selected']}/{case['pages']} payload={case['payload_bytes']} "
+                      f"write_delta={delta['write']['median']:.1f} read_delta={delta['read']['median']:.1f} "
+                      f"selector={case['selector_ns_per_call']['median']:.1f} ns")
         report = {"frozen": PIN, "tree": TREE, "source_commit": run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], "source HEAD"),
                   "recovery_frozen": RECOVERY_PIN, "recovery_tree": RECOVERY_TREE,
                   "attribution_frozen": ATTRIBUTION_PIN, "attribution_tree": ATTRIBUTION_TREE,
@@ -379,14 +468,17 @@ def main():
                   "affinity": "one allowed logical CPU, inherited by probe and all binaries",
                   "execution_order": execution_order, "crc_oracle": crc_vectors,
                   "page_crcs_columns": ["logical_id", "page_crc", "original_crc", "ordinary_crc", "preserved_or_fallback_crc"],
-                  "backend_comparison": backend_comparison,
-                  "backend_comparison_method": "separate binaries, alternating backend order by codec; differences of medians not cross-backend paired samples; no additive attribution or kernel dispatch equivalence",
+                  "holdout_frozen": HOLDOUT_PIN, "holdout_tree": HOLDOUT_TREE, "r115_reference_blob": R115_REPORT_BLOB,
+                  "selector_blob": SELECTOR_BLOB, "r115_non_timing_match": True, "reference_timing": "NOT_RUN except one correctness execution per path",
+                  "holdout_seed": "0x6d2b79f5", "holdout_families": FAMILIES, "holdout_columns": HOLDOUT_COLUMNS,
+                  "holdout_design": "224 pages per codec; independent nonconstant families; constant controls can overlap; modeled metadata/state, no oracle in selector; no actual authority; selected subset bytes only, full and family CPU measured",
+                  "screens": screens, "backend_comparison_method": "separate binaries, alternating backend order by codec; no cross-backend paired samples or kernel dispatch equivalence",
                   "product_subtree": PRODUCT_TREE,
                   "linux": LINUX, "linux_blobs": original_hashes, "product_blobs": PINS,
                   "machine": platform.machine(), "processor": platform.processor(),
                   "cpu_count": os.cpu_count(), "lz4_backend": "host liblz4, pinned Linux wrapper",
                   "predictor_backend": "scalar", "lzo_backend": "pinned Linux C conservative unaligned shim",
-                  "pair_order": "AB/BA alternating", "timing": "thread CPU ns, batch totals divided by eligible pages",
+                  "pair_order": "AB/BA alternating", "timing": "thread CPU ns, full policy batch totals divided by all pages; selector 64 repetitions",
                   "instrumentation": "ordinary verbatim production monotonic wall-clock calls and stats included; preserve has no such calls; both compute and verify CRC; original source generation, packing and final memcmp outside timed regions; not an isolated pure-codec delta",
                   "packing_model": "fixed class 4/8/16 KiB next-fit, max64, raw separate; not lower IO",
                   "category_order": STRATA, "page_sizes_columns": ["logical_id", "original_bytes", "ordinary_bytes", "eligible"],
@@ -399,13 +491,15 @@ def main():
         # Bounded structured evidence in the job log as well as the private artifact.
         # Only emit after all supported mandatory executions and equality gates passed.
         meta = {key: value for key, value in report.items() if key != "results"}
-        meta["compiler_lanes"] = {name: {key: value for key, value in lane.items() if key != "cases"}
+        meta["compiler_lanes"] = {name: {key: value for key, value in lane.items() if key not in ("cases", "holdout_cases")}
                                   for name, lane in results.items()}
-        print("ROUND115_CODEC_META " + json.dumps(meta, separators=(",", ":")), flush=True)
+        print("ROUND116_CODEC_META " + json.dumps(meta, separators=(",", ":")), flush=True)
         for name, lane in results.items():
             for case in lane["cases"]:
-                print("ROUND115_CODEC_CASE " + json.dumps({"lane": name, "case": case}, separators=(",", ":")), flush=True)
-        print("Legend: paired eligible generated pages; payload bytes exclude packing; ns/page is batch CPU.")
+                print("ROUND116_REFERENCE_CASE " + json.dumps({"lane": name, "case": case}, separators=(",", ":")), flush=True)
+            for case in lane["holdout_cases"]:
+                print("ROUND116_HOLDOUT_CASE " + json.dumps({"lane": name, "case": case}, separators=(",", ":")), flush=True)
+        print("Legend: full-policy paired all-page CPU; payload bytes exclude packing; reference correctness only.")
         print("Interpretation: compare write, read and payload independently; fixed-class packing is a model.")
         print("Evidence -> Goal implication -> Verdict: byte-exact host diagnostic -> quantify codec trade-offs -> diagnostic-only.")
 

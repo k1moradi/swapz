@@ -1,0 +1,5 @@
+# Round116 Agent4 — predeclared held-out diagnostic (pending)
+
+Freeze dd215d9467491dbe75cd7593bb146e814cabfad3, product subtree 880d169f92383f438513d55e5fa2652bb3d9e0ae, parent 9bd7f5a8b564a3ed029c660a0d9086968a5a5e66. Fixture 87c4919979523e4393423871a5c63c10452f85f2, verifier 3922b965436acabb94ceffe7fd8a70d40af87dcf; unchanged workflow 837265f165682829286b5d77aa149479c12f5215. Standards exact prefix 09b02ae725a949317ddf114cbf9cb9d8e9e10317 -> b7061e8a852c785602361ba65f0489beba99d5e8.
+
+Frozen selector unchanged, seed 0x6d2b79f5, seven fixed families and 224 pages per codec, no tuning. Actual full-policy write/read and standalone selector overhead, per-family regret and exact byte/CRC/packing checks; old R115 correctness only. Screen LZ4 per optimized backend: integrity, no unsupported selection, positive aggregate write improvement, no aggregate or family payload inflation, no selected-family write regression. LZO negative control. Actual hosted execution pending; no measurements claimed. AUTH0 Phase A BLOCKED all switches OFF, no native/physical execution. A1 acceptance only.

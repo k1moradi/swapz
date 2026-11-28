@@ -216,7 +216,7 @@ static uint64_t pack_model(unsigned int arm, unsigned int capacity)
 }
 /* Exercise the actual planner/builder/read on compatible ordinary records.
  * The opaque original namespace is refused by the ordinary builder. */
-static uint64_t production_pack(void)
+static uint64_t production_pack(bool reject_opaque)
 {
     struct swapz_compressed_page pages[SWAPZ_MAX_RECORDS];
     swapz_u8 classes[SWAPZ_MAX_RECORDS], takes[SWAPZ_MAX_RECORDS], extent_count;
@@ -264,11 +264,13 @@ static uint64_t production_pack(void)
         }
         CHECK(position == count);
     }
-    CHECK(swapz_ram_extent_begin(&builder, extent, PAGE, 1, descriptors, 1) == 0);
-    CHECK(swapz_ram_extent_append(&builder, 1, 1, records[1][selected[0]].bytes,
-                                  (swapz_u16)records[1][selected[0]].length,
-                                  SWAPZ_ENCODING_INVALID) == -EINVAL);
-    CHECK(builder.count == 0 && builder.payload_start == PAGE);
+    if (reject_opaque) {
+        CHECK(swapz_ram_extent_begin(&builder, extent, PAGE, 1, descriptors, 1) == 0);
+        CHECK(swapz_ram_extent_append(&builder, 1, 1, records[1][selected[0]].bytes,
+                                      (swapz_u16)records[1][selected[0]].length,
+                                      SWAPZ_ENCODING_INVALID) == -EINVAL);
+        CHECK(builder.count == 0 && builder.payload_start == PAGE);
+    }
     return total;
 }
 static void run_arm(enum original_codec codec, unsigned int arm, uint64_t *write, uint64_t *read)
@@ -490,11 +492,10 @@ static void report_case(enum original_codec codec, int stratum)
     }
     CHECK(total_pages > 0);
     uint64_t write[2], read[2];
+    /* R115 is a correctness reference only, not another timing experiment. */
     if (selected_count) {
-        for (unsigned int warmup = 0; warmup < 3; ++warmup) {
-            run_arm(codec, warmup % 2U, &write[warmup % 2U], &read[warmup % 2U]);
-            run_arm(codec, 1U - warmup % 2U, &write[1U - warmup % 2U], &read[1U - warmup % 2U]);
-        }
+        run_arm(codec, 0, &write[0], &read[0]);
+        run_arm(codec, 1, &write[1], &read[1]);
     }
     printf("{\"codec\":%d,\"stratum\":%d,\"pages\":%u,\"eligible\":%u,\"zero\":%u,\"same\":%u,"
            "\"over_cap\":%u,\"unsupported_control\":%u,\"category_counts\":[",
@@ -503,15 +504,6 @@ static void report_case(enum original_codec codec, int stratum)
     printf("],\"eligible_by_category\":[");
     for (unsigned int i = 0; i < CATEGORIES; ++i) printf("%s%u", i ? "," : "", eligible_counts[i]);
     printf("],\"pairs\":[");
-    if (selected_count) {
-        for (unsigned int pair = 0; pair < PAIRS; ++pair) {
-            unsigned int first = pair % 2U, second = 1U - first;
-            run_arm(codec, first, &write[first], &read[first]);
-            run_arm(codec, second, &write[second], &read[second]);
-            printf("%s[%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "]",
-                   pair ? "," : "", write[0], read[0], write[1], read[1]);
-        }
-    }
     for (unsigned int arm = 0; arm < 2; ++arm) {
         for (unsigned int index = 0; index < selected_count; ++index) {
             const struct record *record = &records[arm][selected[index]];
@@ -522,7 +514,7 @@ static void report_case(enum original_codec codec, int stratum)
             raw[arm] += record->raw;
         }
     }
-    uint64_t packed = selected_count ? production_pack() : 0;
+    uint64_t packed = selected_count ? production_pack(true) : 0;
     printf("],\"payload_bytes\":[%" PRIu64 ",%" PRIu64 "],"
            "\"ordinary_raw_pages\":%" PRIu64 ",\"preserve_copy_bytes\":%" PRIu64 ","
            "\"ordinary_raw_copy_bytes\":%" PRIu64 ",\"ordinary_actual_planner_bytes\":%" PRIu64 ","
@@ -566,21 +558,9 @@ static void report_case(enum original_codec codec, int stratum)
     }
     prepare_micro();
     printf("],\"inverse_pages\":%u,\"micro_pairs\":[", inverse_count);
-    if (selected_count) {
+    if (selected_count)
         for (unsigned int operation = 0; operation < MICRO_COUNT; ++operation)
             (void)micro_batch(codec, (enum micro_op)operation);
-        for (unsigned int pair = 0; pair < PAIRS; ++pair) {
-            uint64_t samples[MICRO_COUNT];
-            for (unsigned int position = 0; position < MICRO_COUNT; ++position) {
-                unsigned int operation = pair % 2U ? MICRO_COUNT - 1U - position : position;
-                samples[operation] = micro_batch(codec, (enum micro_op)operation);
-            }
-            printf("%s[", pair ? "," : "");
-            for (unsigned int operation = 0; operation < MICRO_COUNT; ++operation)
-                printf("%s%" PRIu64, operation ? "," : "", samples[operation]);
-            printf("]");
-        }
-    }
     puts("],\"byte_exact\":true}");
 }
 static void test_codec(enum original_codec codec)
@@ -618,6 +598,239 @@ static void test_codec(enum original_codec codec)
     for (int stratum = 0; stratum < CATEGORIES; ++stratum)
         report_case(codec, stratum);
 }
+
+/* Frozen R115 counterfactual selector: no content or outcome inputs.
+ * Valid generated source is modeled as STORED, compatible and hypothetically
+ * authorized, except explicit independent metadata/state controls. No real claim.
+ */
+enum { HOLD_FAMILIES = 7, HOLD_PER_FAMILY = 32, SELECT_REPEATS = 64 };
+_Static_assert(HOLD_FAMILIES * HOLD_PER_FAMILY == COUNT, "heldout count");
+struct policy_input {
+    unsigned int codec, length, version, dictionary;
+    bool stored, compatible, hypothetical_authority;
+    unsigned int pressure, read_likelihood, queue_depth, packing_budget;
+};
+static struct policy_input policy_inputs[COUNT];
+static bool policy_choices[COUNT], selector_outputs[COUNT];
+/* Keep the measured C translation as a real call in both full policy and
+ * standalone batches; Python independently checks every decision against R115. */
+static __attribute__((noinline)) bool select_policy(const struct policy_input *input)
+{
+    if (input->codec < 1U || input->codec > 2U || input->length < 1U ||
+        input->length > SWAPZ_MAX_COMPRESSED || input->version != 1U || input->dictionary != 0U ||
+        !input->stored || !input->compatible || !input->hypothetical_authority ||
+        input->pressure > 1000U || input->read_likelihood > 1000U ||
+        input->queue_depth > 64U || input->packing_budget > 64U * PAGE ||
+        input->queue_depth >= 48U || input->packing_budget < PAGE)
+        return false;
+    return input->codec == 1U && input->length >= 128U && input->length <= 768U &&
+        input->pressure >= 750U && input->read_likelihood <= 100U &&
+        input->queue_depth <= 16U;
+}
+
+static void generate_holdout(enum original_codec codec)
+{
+    /* New fixed seed and families, independent of old corpus and results.
+     * Constant controls necessarily share trivial byte patterns with training.
+     * Widths target boundary neighborhoods, not tuned to encoded outcomes. */
+    static const unsigned int widths[] = {
+        96, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+        111, 112, 127, 191, 257, 383, 511, 639, 735, 736, 737, 738,
+        739, 740, 741, 742, 743, 744, 745, 751
+    };
+    static const unsigned int mixed_lengths[] = {
+        93, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+        735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 751,
+        3528, 3536, 3540, 3544, 3548, 3552, 3556, 3560
+    };
+    uint32_t state = UINT32_C(0x6d2b79f5);
+    memset(records, 0, sizeof(records));
+    for (unsigned int logical = 0; logical < COUNT; ++logical) {
+        struct source *source = &corpus[logical];
+        unsigned int family = logical / HOLD_PER_FAMILY, member = logical % HOLD_PER_FAMILY;
+        for (unsigned int offset = 0; offset < PAGE; ++offset) {
+            u8 random_byte = (u8)next_random(&state);
+            switch (family) {
+            case 0: source->page[offset] = member < 16U ? 0 : (u8)(0xa0U + member); break;
+            case 1: source->page[offset] = offset < widths[member] ? random_byte :
+                        source->page[offset % widths[member]]; break;
+            case 2: source->page[offset] = offset < mixed_lengths[member] ? random_byte : (u8)(member + 17U); break;
+            case 3: {
+                /* Short original payload but delta-friendly repeated arithmetic words. */
+                uint64_t word = UINT64_C(0x9e3779b900000000) +
+                    (uint64_t)member * 65536U + (uint64_t)((offset / 8U) % (32U + member)) * 3U;
+                source->page[offset] = (u8)(word >> ((offset % 8U) * 8U));
+                break;
+            }
+            case 4: {
+                /* Groups of similar words; distinct from R114 long linear ramp. */
+                uint64_t word = UINT64_C(0x1122334400000000) +
+                    (uint64_t)member * 4096U + (uint64_t)((offset / 8U) / (4U + member % 8U));
+                source->page[offset] = (u8)(word >> ((offset % 8U) * 8U));
+                break;
+            }
+            case 5: source->page[offset] = random_byte; break;
+            case 6: {
+                unsigned int width = 192U + member * 13U;
+                source->page[offset] = offset < width ? random_byte : source->page[offset % width];
+                break;
+            }
+            default: CHECK(false);
+            }
+        }
+        unsigned int length = CAP;
+        int result = codec == ORIGINAL_LZ4 ?
+            __lz4_compress_crypto(source->page, PAGE, source->compressed, &length, lz4_memory) :
+            __lzo_compress(source->page, PAGE, source->compressed, &length, lzo_memory);
+        CHECK(result == 0 && length > 0 && length <= CAP);
+        source->length = length;
+        /* No ordinary compression or decode for eligibility. Constant pages
+         * model a known same-filled representation, not a compressed STORED slot. */
+        struct policy_input input = {
+            (unsigned int)codec, length, 1, 0, family != 0U, true, true, 850, 50, 8, 16384
+        };
+        if (family == 6U) {
+            switch (member % 16U) {
+            case 0: input.version = 2; break;
+            case 1: input.dictionary = 1; break;
+            case 2: input.stored = false; break;
+            case 3: input.compatible = false; break;
+            case 4: input.hypothetical_authority = false; break;
+            case 5: input.pressure = 749; break;
+            case 6: input.read_likelihood = 101; break;
+            case 7: input.queue_depth = 17; break;
+            case 8: input.packing_budget = 4095; break;
+            case 9: input.queue_depth = 48; break;
+            case 10: input.pressure = 750; input.read_likelihood = 100; input.queue_depth = 16;
+                     input.packing_budget = PAGE; break;
+            case 11: input.pressure = 1001; break;
+            default: break;
+            }
+        }
+        policy_inputs[logical] = input;
+    }
+}
+
+static void run_policy(enum original_codec codec, unsigned int arm, uint64_t *write, uint64_t *read)
+{
+    memset(&ordinary_stats, 0, sizeof(ordinary_stats));
+    ordinary_lz4_wall_ns = 0;
+    uint64_t start = clock_ns(CLOCK_THREAD_CPUTIME_ID);
+    for (unsigned int index = 0; index < selected_count; ++index) {
+        unsigned int logical = selected[index];
+        const struct source *source = &corpus[logical];
+        bool preserve = arm == 1U && select_policy(&policy_inputs[logical]);
+        if (arm == 1U) policy_choices[logical] = preserve;
+        if (preserve) {
+            preserve_write(codec, source, &records[arm][logical]);
+        } else {
+            /* One ordinary path, no eligibility oracle and no repeated decode. */
+            original_decode(codec, source->compressed, source->length, plain);
+            ordinary_write(plain, &records[arm][logical]);
+        }
+    }
+    *write = clock_ns(CLOCK_THREAD_CPUTIME_ID) - start;
+    start = clock_ns(CLOCK_THREAD_CPUTIME_ID);
+    for (unsigned int index = 0; index < selected_count; ++index) {
+        unsigned int logical = selected[index];
+        const struct record *record = &records[arm][logical];
+        if (record->original_codec)
+            preserve_read(codec, record, readback[logical]);
+        else
+            ordinary_read(record, readback[logical]);
+    }
+    *read = clock_ns(CLOCK_THREAD_CPUTIME_ID) - start;
+    for (unsigned int index = 0; index < selected_count; ++index) {
+        unsigned int logical = selected[index];
+        const struct source *source = &corpus[logical];
+        const struct record *record = &records[arm][logical];
+        CHECK(memcmp(readback[logical], source->page, PAGE) == 0);
+        if (arm == 1U && policy_choices[logical]) {
+            CHECK(record->original_codec == codec && record->length == source->length);
+            CHECK(memcmp(record->bytes, source->compressed, source->length) == 0);
+        } else {
+            CHECK(record->original_codec == 0);
+        }
+    }
+}
+
+static uint64_t selector_batch(void)
+{
+    uint64_t start = clock_ns(CLOCK_THREAD_CPUTIME_ID);
+    for (unsigned int repeat = 0; repeat < SELECT_REPEATS; ++repeat) {
+        for (unsigned int index = 0; index < selected_count; ++index) {
+            unsigned int logical = selected[index];
+            selector_outputs[logical] = select_policy(&policy_inputs[logical]);
+        }
+        /* All repetitions observable, including negative decisions. */
+        __asm__ volatile("" : : "r"(selector_outputs) : "memory");
+    }
+    uint64_t elapsed = clock_ns(CLOCK_THREAD_CPUTIME_ID) - start;
+    for (unsigned int index = 0; index < selected_count; ++index) {
+        unsigned int logical = selected[index];
+        CHECK(selector_outputs[logical] == policy_choices[logical]);
+    }
+    return elapsed;
+}
+
+static void report_holdout(enum original_codec codec, int family)
+{
+    selected_count = 0;
+    for (unsigned int logical = 0; logical < COUNT; ++logical)
+        if (family < 0 || logical / HOLD_PER_FAMILY == (unsigned int)family)
+            selected[selected_count++] = logical;
+    uint64_t write[2], read[2], selector_times[PAIRS];
+    for (unsigned int warmup = 0; warmup < 3U; ++warmup) {
+        unsigned int first = warmup % 2U;
+        run_policy(codec, first, &write[first], &read[first]);
+        run_policy(codec, 1U - first, &write[1U - first], &read[1U - first]);
+    }
+    printf("{\"holdout\":true,\"codec\":%d,\"family\":%d,\"pages\":%u,\"pairs\":[",
+           (int)codec, family, selected_count);
+    for (unsigned int pair = 0; pair < PAIRS; ++pair) {
+        unsigned int first = pair % 2U;
+        run_policy(codec, first, &write[first], &read[first]);
+        run_policy(codec, 1U - first, &write[1U - first], &read[1U - first]);
+        printf("%s[%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "]",
+               pair ? "," : "", write[0], read[0], write[1], read[1]);
+    }
+    (void)selector_batch();
+    for (unsigned int pair = 0; pair < PAIRS; ++pair)
+        selector_times[pair] = selector_batch();
+    printf("],\"selector_times\":[");
+    for (unsigned int pair = 0; pair < PAIRS; ++pair)
+        printf("%s%" PRIu64, pair ? "," : "", selector_times[pair]);
+    printf("],\"selector_repeats\":%u,\"rows\":[", (unsigned int)SELECT_REPEATS);
+    for (unsigned int index = 0; index < selected_count; ++index) {
+        unsigned int logical = selected[index];
+        const struct source *source = &corpus[logical];
+        const struct policy_input *input = &policy_inputs[logical];
+        const struct record *ordinary_record = &records[0][logical], *policy_record = &records[1][logical];
+        uint32_t page_crc = checked_crc(source->page, PAGE);
+        uint32_t original_crc = checked_crc(source->compressed, source->length);
+        uint32_t ordinary_crc = checked_crc(ordinary_record->bytes, ordinary_record->length);
+        uint32_t policy_crc = checked_crc(policy_record->bytes, policy_record->length);
+        CHECK(ordinary_crc == ordinary_record->crc && policy_crc == policy_record->crc);
+        if (policy_choices[logical]) CHECK(policy_crc == original_crc);
+        else {
+            CHECK(ordinary_record->length == policy_record->length && ordinary_crc == policy_crc);
+            CHECK(memcmp(ordinary_record->bytes, policy_record->bytes, ordinary_record->length) == 0);
+        }
+        printf("%s[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 "]",
+               index ? "," : "", logical, input->length, input->version, input->dictionary,
+               input->stored ? 1U : 0U, input->compatible ? 1U : 0U, input->hypothetical_authority ? 1U : 0U,
+               input->pressure, input->read_likelihood, input->queue_depth, input->packing_budget,
+               policy_choices[logical] ? 1U : 0U, ordinary_record->length, policy_record->length,
+               page_crc, original_crc, ordinary_crc, policy_crc);
+    }
+    uint64_t actual = production_pack(false);
+    printf("],\"ordinary_actual_planner_bytes\":%" PRIu64 ",\"fixed_class_model_bytes\":[", actual);
+    for (unsigned int arm = 0; arm < 2U; ++arm)
+        printf("%s[%" PRIu64 ",%" PRIu64 ",%" PRIu64 "]", arm ? "," : "",
+               pack_model(arm, PAGE), pack_model(arm, 2U * PAGE), pack_model(arm, 4U * PAGE));
+    puts("],\"byte_exact\":true}");
+}
+
 int main(int argc, char **argv)
 {
     CHECK(argc == 2 && (strcmp(argv[1], "1") == 0 || strcmp(argv[1], "2") == 0));
@@ -628,7 +841,12 @@ int main(int argc, char **argv)
     /* Default scalar implementation; no kernel SIMD transition claims. */
     generate();
     /* Split codec executions so the two binaries can alternate order. */
-    test_codec(strcmp(argv[1], "1") == 0 ? ORIGINAL_LZ4 : ORIGINAL_LZO1X);
+    enum original_codec codec = strcmp(argv[1], "1") == 0 ? ORIGINAL_LZ4 : ORIGINAL_LZO1X;
+    test_codec(codec);
+    generate_holdout(codec);
+    report_holdout(codec, -1);
+    for (int family = 0; family < HOLD_FAMILIES; ++family)
+        report_holdout(codec, family);
     free(lzo_memory); free(lz4_memory);
     return 0;
 }
