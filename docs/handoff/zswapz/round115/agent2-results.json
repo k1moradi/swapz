@@ -1,0 +1,1356 @@
+{
+  "round": 115,
+  "agent": 2,
+  "conclusion": "PASS_ROOTLESS_MODEL_ONLY",
+  "routing_verdict": "NO_GO",
+  "publication": "IMMUTABLE_CANDIDATE_A1_INTEGRATION_PENDING",
+  "frozen_source": "308f3b57774b42e20f295a13139655a10b25539d",
+  "frozen_tree": "80538948801519c0c3c17440cc64edf77443a896",
+  "task_commit": "1b528e7cb45e39ffb5b7537091d0b073901e9321",
+  "source_candidate": "54cf54eb18b09e661ef01f3bf63f4f7247d6967c",
+  "source_parent": "1b528e7cb45e39ffb5b7537091d0b073901e9321",
+  "source_tree": "46288eb48ed796d3aeb4e02c04bfe52d5084264b",
+  "tested_blobs": {
+    "tests/tools/phase-a-preservation-policy-replay.py": "8faa25c2b6f97713a719d1b2747a7037477d5c0d",
+    "tests/runtime/native/phase-a-preservation-policy-replay-test.py": "c9297f2ad57d71609b43ee92916944b846e96d4b"
+  },
+  "standards": {
+    "parent_blob": "e22b44ca9089c929c1e33cfb2740043d875d9741",
+    "candidate_blob": "b09e7a862475cc5d345d4758c664ab66916d3a87",
+    "exact_parent_prefix": true,
+    "added_lines": 4,
+    "deleted_lines": 0
+  },
+  "input": {
+    "path": "docs/handoff/zswapz/round114/agent4-results.json",
+    "source_git_blob": "ca98c75e68a92ba456cd450aaaaab60b02995783",
+    "source_bytes": 189295,
+    "source_git_hash_recomputed_in_connector": true,
+    "source_job": 140868873612,
+    "local_kind": "exact_optimized_projection",
+    "projection_git_blob": "911bb1be7f5d13991a88d6021c76440bce1d2767",
+    "projection_sha256": "d3f673cffa3b918e94930aa5de5ae1d7c5b7d4951023257503fccbe0564d4209",
+    "projection_bytes": 21305,
+    "projection_hash_independently_computed_in_connector_and_matched_locally": true,
+    "optimized_cases": 16,
+    "raw_inclusive_pairs": 200,
+    "page_size_rows_including_aggregate": 832,
+    "unique_pages_per_codec": 224,
+    "codec_alternatives": 2,
+    "full_report_locally_executed": false,
+    "full_report_projector_unit_tested": true,
+    "resource_helper_blob": "9f2529912a2cb47f4b20bb733903c25d65d97dda"
+  },
+  "environment": {
+    "python": "3.13.5",
+    "user": "nobody",
+    "uid": 65534,
+    "native_checkout": false
+  },
+  "tests": [
+    {
+      "command": "runuser -u nobody -- python3 -B tests/runtime/native/phase-a-preservation-policy-replay-test.py",
+      "status": "PASS",
+      "exit": 0,
+      "methods": 8,
+      "skips": 0,
+      "seconds": 1.89
+    },
+    {
+      "command": "runuser -u nobody -- python3 -B tests/tools/phase-a-preservation-policy-replay.py frozen-projection.json",
+      "status": "PASS",
+      "exit": 0,
+      "stdout_sha256": "f1fcbea52b634cced2ca22355d2efba12a4faf3f90996e8ceca3bf7031af9a0b"
+    }
+  ],
+  "first_error": {
+    "command": "git ls-remote https://github.com/k1moradi/swapz.git HEAD",
+    "exit": 128,
+    "reason": "Could not resolve host: github.com",
+    "recovered_for_relevant_rootless_data": true
+  },
+  "first_semantic_test_failure": null,
+  "ci": {
+    "status": "NOT_RUN_NOT_ASSIGNED",
+    "run_id": null,
+    "job_ids": []
+  },
+  "policy": {
+    "default": "ordinary",
+    "hypothetical_codec": 1,
+    "min_length": 128,
+    "max_length": 768,
+    "pressure_min_permille": 750,
+    "read_likelihood_max_permille": 100,
+    "queue_max": 16,
+    "eligibility_queue_refuse_at": 48,
+    "packing_budget_min_bytes": 4096,
+    "grid": [
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      2560,
+      3568
+    ],
+    "generalization": "NONE_EXPLORATORY_ONLY",
+    "selector_overhead": "NOT_MEASURED",
+    "backing_types": [
+      "anonymous",
+      "file_backed_shmem"
+    ],
+    "matched_backing_results_identical": true,
+    "states": {
+      "cold": [
+        850,
+        50,
+        8,
+        16384
+      ],
+      "hot": [
+        850,
+        800,
+        8,
+        16384
+      ],
+      "low_pressure": [
+        300,
+        50,
+        8,
+        16384
+      ],
+      "busy": [
+        850,
+        50,
+        32,
+        16384
+      ],
+      "congested": [
+        850,
+        50,
+        48,
+        16384
+      ],
+      "tight_budget": [
+        850,
+        50,
+        8,
+        4095
+      ]
+    },
+    "state_columns": [
+      "pressure_permille",
+      "read_likelihood_permille",
+      "queue_depth",
+      "packing_budget_bytes"
+    ],
+    "schedule_windows": [
+      "cold",
+      "hot",
+      "cold",
+      "busy",
+      "congested",
+      "tight_budget",
+      "low_pressure"
+    ],
+    "window_pages": 32,
+    "packing_classes": [
+      4096,
+      8192,
+      16384
+    ],
+    "max_records_per_extent": 64
+  },
+  "metric_columns": [
+    "selected",
+    "attempted",
+    "fallback",
+    "fallback_bytes",
+    "payload_bytes",
+    "selected_payload_delta",
+    "selected_ordinary_bytes",
+    "selected_payload_inflation_ppm",
+    "false_selections",
+    "byte_regret",
+    "worst_stratum",
+    "fixed_class_bytes"
+  ],
+  "results": {
+    "1": {
+      "scenarios": {
+        "cold": {
+          "conservative": [
+            37,
+            37,
+            187,
+            264420,
+            284923,
+            0,
+            20503,
+            0,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            127,
+            127,
+            97,
+            136000,
+            349137,
+            64214,
+            148923,
+            431189,
+            32,
+            64214,
+            64214,
+            [
+              417792,
+              389120,
+              380928
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "hot": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            127,
+            127,
+            97,
+            136000,
+            349137,
+            64214,
+            148923,
+            431189,
+            32,
+            64214,
+            64214,
+            [
+              417792,
+              389120,
+              380928
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "low_pressure": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            127,
+            127,
+            97,
+            136000,
+            349137,
+            64214,
+            148923,
+            431189,
+            32,
+            64214,
+            64214,
+            [
+              417792,
+              389120,
+              380928
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "busy": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            127,
+            127,
+            97,
+            136000,
+            349137,
+            64214,
+            148923,
+            431189,
+            32,
+            64214,
+            64214,
+            [
+              417792,
+              389120,
+              380928
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "congested": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "tight_budget": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        }
+      },
+      "grid": {
+        "512": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "768": [
+          37,
+          37,
+          187,
+          264420,
+          284923,
+          0,
+          20503,
+          0,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "1024": [
+          42,
+          42,
+          182,
+          259901,
+          284923,
+          0,
+          25022,
+          0,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "1536": [
+          53,
+          53,
+          171,
+          245726,
+          284923,
+          0,
+          39197,
+          0,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "2048": [
+          63,
+          63,
+          161,
+          227808,
+          284923,
+          0,
+          57115,
+          0,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "2560": [
+          106,
+          106,
+          118,
+          200756,
+          349137,
+          64214,
+          84167,
+          762935,
+          32,
+          64214,
+          64214,
+          [
+            417792,
+            389120,
+            380928
+          ]
+        ],
+        "3568": [
+          127,
+          127,
+          97,
+          136000,
+          349137,
+          64214,
+          148923,
+          431189,
+          32,
+          64214,
+          64214,
+          [
+            417792,
+            389120,
+            380928
+          ]
+        ]
+      },
+      "scheduled": {
+        "conservative": [
+          5,
+          5,
+          219,
+          281604,
+          284923,
+          0,
+          3319,
+          0,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "eligible_always": [
+          95,
+          95,
+          129,
+          190059,
+          327114,
+          42191,
+          94864,
+          444752,
+          21,
+          42191,
+          42191,
+          [
+            413696,
+            372736,
+            348160
+          ]
+        ],
+        "ordinary": [
+          0,
+          0,
+          0,
+          0,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ]
+      },
+      "eligible_always_cold_regret_by_stratum": {
+        "zero": 0,
+        "same": 0,
+        "random": 0,
+        "repeated": 0,
+        "structured": 64214,
+        "mixed": 0,
+        "pattern512": 0
+      },
+      "whole_case_cpu": {
+        "mixed": [
+          31,
+          -45208,
+          118,
+          -45388.875,
+          -44997.7
+        ],
+        "pattern512": [
+          32,
+          -22037.5,
+          57,
+          -22010.05,
+          -21916.4
+        ],
+        "r112_shared": [
+          95,
+          34728,
+          360105.5,
+          52949.15,
+          319333.1
+        ],
+        "random": null,
+        "repeated": [
+          32,
+          -28189.5,
+          74.5,
+          -28343,
+          -29204.3
+        ],
+        "same": null,
+        "structured": [
+          32,
+          105930,
+          359233,
+          124054,
+          395215.8
+        ],
+        "zero": null
+      }
+    },
+    "2": {
+      "scenarios": {
+        "cold": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            123,
+            123,
+            101,
+            149969,
+            343833,
+            58910,
+            134954,
+            436519,
+            123,
+            58910,
+            48375,
+            [
+              401408,
+              389120,
+              364544
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "hot": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            123,
+            123,
+            101,
+            149969,
+            343833,
+            58910,
+            134954,
+            436519,
+            123,
+            58910,
+            48375,
+            [
+              401408,
+              389120,
+              364544
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "low_pressure": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            123,
+            123,
+            101,
+            149969,
+            343833,
+            58910,
+            134954,
+            436519,
+            123,
+            58910,
+            48375,
+            [
+              401408,
+              389120,
+              364544
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "busy": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            123,
+            123,
+            101,
+            149969,
+            343833,
+            58910,
+            134954,
+            436519,
+            123,
+            58910,
+            48375,
+            [
+              401408,
+              389120,
+              364544
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "congested": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        },
+        "tight_budget": {
+          "conservative": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "eligible_always": [
+            0,
+            0,
+            224,
+            284923,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ],
+          "ordinary": [
+            0,
+            0,
+            0,
+            0,
+            284923,
+            0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            [
+              352256,
+              323584,
+              299008
+            ]
+          ]
+        }
+      },
+      "grid": {
+        "512": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "768": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "1024": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "1536": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "2048": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "2560": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "3568": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ]
+      },
+      "scheduled": {
+        "conservative": [
+          0,
+          0,
+          224,
+          284923,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ],
+        "eligible_always": [
+          95,
+          95,
+          129,
+          190059,
+          323602,
+          38679,
+          94864,
+          407731,
+          95,
+          38679,
+          31796,
+          [
+            401408,
+            372736,
+            331776
+          ]
+        ],
+        "ordinary": [
+          0,
+          0,
+          0,
+          0,
+          284923,
+          0,
+          0,
+          null,
+          0,
+          0,
+          0,
+          [
+            352256,
+            323584,
+            299008
+          ]
+        ]
+      },
+      "eligible_always_cold_regret_by_stratum": {
+        "zero": 0,
+        "same": 0,
+        "random": 0,
+        "repeated": 5875,
+        "structured": 48375,
+        "mixed": 3508,
+        "pattern512": 1152
+      },
+      "whole_case_cpu": {
+        "mixed": [
+          27,
+          -10265.5,
+          -285,
+          -10277.375,
+          -13297.9
+        ],
+        "pattern512": [
+          32,
+          -16970,
+          3338,
+          -16851.85,
+          -14130
+        ],
+        "r112_shared": [
+          91,
+          -4018,
+          347781,
+          13814.8,
+          279751.9
+        ],
+        "random": null,
+        "repeated": [
+          32,
+          -2925.5,
+          20146.5,
+          -2104.25,
+          12578.7
+        ],
+        "same": null,
+        "structured": [
+          32,
+          15365,
+          329559,
+          31813.325,
+          279614.3
+        ],
+        "zero": null
+      }
+    }
+  },
+  "whole_case_cpu_columns": [
+    "eligible_pages",
+    "paired_write_batch_delta_ns",
+    "paired_read_batch_delta_ns",
+    "cold_weighted_batch_delta_ns",
+    "hot_weighted_batch_delta_ns"
+  ],
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "native_qualification": "BLOCKED",
+  "observation": "UNKNOWN",
+  "compressed_handoff": false,
+  "forced_raw": false,
+  "import_enabled": false,
+  "physical": "NO_GO",
+  "actual_route": "ORDINARY",
+  "actual_preserve_permission": false,
+  "actual_native_capture": false,
+  "actual_physical_io": false,
+  "limitations": [
+    "Local execution used exact independently hash-verified optimized projection, not complete 189295-byte raw report; full source Git blob recomputed via connector, projector unit tested. No timing extrapolation from unrelated omitted lanes.",
+    "Eligibility and authority metadata synthesized for replay, never actual. Diagnostic eligibility only evaluates attempted selection or defines comparator; no decoder/byte scans or outcome labels enter selector.",
+    "Ordinary is actual default; no runtime caller or permission. Eligible-always baseline honors synthetic safety gates but bypasses conservative performance checks.",
+    "No calibration/held-out split; exploratory fixed grid, no generalization. Cold/hot read likelihood externally chosen; no physical residency inferred.",
+    "External states are fixed per window, not dynamic queue occupancy, feedback, hysteresis or allocation; fixed-class packing is next-fit model, not lower IO, latency or GC. Fallback counters include all ordinary choices in hypothetical nonordinary modes, not real retries.",
+    "CPU sensitivity uses median of paired whole-case write plus read-likelihood times read delta, assumes one write batch and weighted read batch; no partial-subset timing or additive CRC attribution. Selector overhead not measured.",
+    "No main ref movement by A2; A1 integrates exact candidate blobs and append."
+  ],
+  "acceptance": "Agent1 only"
+}
